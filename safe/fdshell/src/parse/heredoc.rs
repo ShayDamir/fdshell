@@ -9,6 +9,7 @@ use super::Token;
 use crate::error::parse::ParseError;
 use crate::redirect::RedirectDef;
 use crate::scan::heredoc;
+use crate::scan::heredoc::{Operator, Span};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
@@ -43,35 +44,42 @@ pub(crate) fn layout(
     eof::warn_eof(&spans, &ops);
     ops.iter()
         .zip(spans)
-        .map(|(op, span)| {
-            let raw = line
-                .get(span.region.0..span.region.1)
-                .ok_or(ParseError::Never)?;
-            // Bash reads body lines whole, so an end-of-file body gets the
-            // newline its last line lacks (`close_last_line`); a found span
-            // keeps its bytes byte-exact.
-            let bytes = if span.found {
-                op.body_bytes(raw)
-            } else {
-                op.body_bytes(&eof::close_last_line(raw.to_vec()))
-            };
-            let body =
-                ShortCStr::from_vec(bytes).change_context(ParseError::InvalidChar { ch: 0 })?;
-            // An expandable body is a quoted context whose `\<newline>` pairs
-            // are line continuations: they are gone before the substitution
-            // (POSIX #4.2, `strip::strip_continuations`). A quoted body is
-            // verbatim bytes and keeps its backslashes.
-            let body = if op.quoted {
-                body
-            } else {
-                strip::strip_continuations(&body)?
-            };
-            Ok(HeredocBody {
-                body,
-                expand: !op.quoted,
-            })
-        })
+        .map(|(op, span)| body_for(op, &span, line))
         .collect()
+}
+
+/// One operator's body, read from its own span of `line`: the shape of the span
+/// decides the bytes (a found span keeps them byte-exact, an end-of-file one gets
+/// the newline its last line lacks), the quote flag decides what happens to them
+/// next. `layout` and `parse::block_tail::heredoc` share it, so the reading cannot
+/// drift between the whole-line and the slice granularities (LESSONS).
+pub(crate) fn body_for(
+    op: &Operator,
+    span: &Span,
+    line: &[u8],
+) -> Result<HeredocBody, Report<ParseError>> {
+    let raw = line
+        .get(span.region.0..span.region.1)
+        .ok_or(ParseError::Never)?;
+    let bytes = if span.found {
+        op.body_bytes(raw)
+    } else {
+        op.body_bytes(&eof::close_last_line(raw.to_vec()))
+    };
+    let body = ShortCStr::from_vec(bytes).change_context(ParseError::InvalidChar { ch: 0 })?;
+    // An expandable body is a quoted context whose `\<newline>` pairs are line
+    // continuations: they are gone before the substitution (POSIX #4.2,
+    // `strip::strip_continuations`). A quoted body is verbatim bytes and keeps
+    // its backslashes.
+    let body = if op.quoted {
+        body
+    } else {
+        strip::strip_continuations(&body)?
+    };
+    Ok(HeredocBody {
+        body,
+        expand: !op.quoted,
+    })
 }
 
 /// Turn the operator at `i` into a redirect from its pre-extracted body: the

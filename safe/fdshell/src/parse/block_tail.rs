@@ -1,5 +1,6 @@
 //! The keyword block's **tail**: the redirections written after its closing
-//! keyword (`while :; do :; done > f`), and the **word** written there — bash
+//! keyword (`while :; do :; done > f`) — path, here-doc ([`heredoc`], task #408)
+//! and here-string — and the **word** written there — bash
 //! demands a separator after a closing keyword, so a word is its syntax error
 //! ([`word`], task #405). The closer's own separator (a `;`/newline, not the
 //! keyword) is the block span's end, so a trailing redirection rides in
@@ -7,16 +8,18 @@
 //! the tail is parsed **at** the closer, by this one module, exactly as
 //! [`crate::parse::group_block`] does it for `{ …; }`.
 
+pub(crate) mod heredoc;
 pub(crate) mod word;
 
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::classify::parse_redirect;
+use crate::parse::here_string::parse_here_string;
 use crate::redirect::RedirectDef;
-use crate::scan::heredoc::span_operator;
 use alloc::vec;
 use alloc::vec::Vec;
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
+use sys::ScriptText;
 
 /// The bytes a closing keyword glues to and stays a closer: the redirection
 /// operator bytes (`done>f`, `esac>>out`). The byte-level closer boundary in
@@ -48,26 +51,35 @@ pub(crate) fn closer_index(tokens: &[Token], kw: &[u8]) -> Option<usize> {
 /// `Scope::open` needs the list stable per target fd, and last-wins per fd is
 /// what bash gives (`done > f > g` leaves `f` empty, `g` holds the output).
 ///
-/// The walk **stops** at the first token that is not a redirection, and at a
-/// `<<`-shaped token (a bare `<<`/`<<<`; the io-number form `done 3<<T` stops
-/// one step later, in `parse_redirect`, which never reads a `<<` as a path
-/// redirect) — the here-doc/here-string on the closer is #408's and keeps exactly
-/// the behavior its pins record. What the stop does **not** cover is a word: bash
-/// requires a separator after a closing keyword, so the token the walk stops at
-/// goes to [`word::judge`], and only the shapes [`word`] names stay accepted.
+/// The path-redirect arm is [`parse_redirect`]'s, the here-doc arm is
+/// [`heredoc`]'s and the here-string arm is [`parse_here_string`]'s — each is
+/// gated on its own raw-span shape rule, so the walk simply takes them **in
+/// source order** and continues past them (task #408: a here-doc/here-string
+/// written behind the closer belongs to the whole block, and the block's `text`
+/// is what claims its body region from). What the walk does **not** take is a
+/// word: bash requires a separator after a closing keyword, so a token none of
+/// the arms reads goes to [`word::judge`], and only the shapes [`word`] names
+/// stay accepted.
 pub(crate) fn redirects(
     kw: &[u8],
     at_closer: &[Token],
-    line: &[u8],
+    text: &ScriptText,
 ) -> Result<Vec<RedirectDef>, Report<ParseError>> {
+    let line = text.as_bytes().change_context(ParseError::Never)?;
     let tail = split_close(kw, at_closer);
     let mut redirects = Vec::new();
     let mut i = 0;
     while i < tail.len() {
         let tok = tail.get(i).ok_or(ParseError::Never)?;
-        let (t, start, end, _fq, _mask, _spans) = tok;
-        if t.starts_with(b"<<") || span_operator(line, *start, *end).is_some() {
-            break;
+        if let Some((def, extra)) = heredoc::def_at(text, &tail, i)? {
+            redirects.push(def);
+            i += extra + 1;
+            continue;
+        }
+        if let Some((def, extra)) = parse_here_string(line, &tail, i)? {
+            redirects.push(def);
+            i += extra + 1;
+            continue;
         }
         let Some((def, extra)) = parse_redirect(&tail, i)? else {
             word::judge(kw, tok, line)?;
