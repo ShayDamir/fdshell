@@ -1,14 +1,19 @@
 //! The keyword block's **tail**: the redirections written after its closing
-//! keyword (`while :; do :; done > f`). The closer's own separator (a `;`/newline,
-//! not the keyword) is the block span's end, so a trailing redirection rides in
+//! keyword (`while :; do :; done > f`), and the **word** written there — bash
+//! demands a separator after a closing keyword, so a word is its syntax error
+//! ([`word`], task #405). The closer's own separator (a `;`/newline, not the
+//! keyword) is the block span's end, so a trailing redirection rides in
 //! the block's own text and every builder's `up_to_closing` truncation drops it:
 //! the tail is parsed **at** the closer, by this one module, exactly as
 //! [`crate::parse::group_block`] does it for `{ …; }`.
+
+pub(crate) mod word;
 
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::classify::parse_redirect;
 use crate::redirect::RedirectDef;
+use crate::scan::heredoc::span_operator;
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::Report;
@@ -46,22 +51,26 @@ pub(crate) fn closer_index(tokens: &[Token], kw: &[u8]) -> Option<usize> {
 /// The walk **stops** at the first token that is not a redirection, and at a
 /// `<<`-shaped token (a bare `<<`/`<<<`; the io-number form `done 3<<T` stops
 /// one step later, in `parse_redirect`, which never reads a `<<` as a path
-/// redirect): a plain word behind the closer is task #405's and a
-/// here-doc/here-string on the closer is #408's, so both keep exactly the
-/// behavior their pins record.
+/// redirect) — the here-doc/here-string on the closer is #408's and keeps exactly
+/// the behavior its pins record. What the stop does **not** cover is a word: bash
+/// requires a separator after a closing keyword, so the token the walk stops at
+/// goes to [`word::judge`], and only the shapes [`word`] names stay accepted.
 pub(crate) fn redirects(
     kw: &[u8],
     at_closer: &[Token],
+    line: &[u8],
 ) -> Result<Vec<RedirectDef>, Report<ParseError>> {
     let tail = split_close(kw, at_closer);
     let mut redirects = Vec::new();
     let mut i = 0;
     while i < tail.len() {
-        let (t, _start, _end, _fq, _mask, _spans) = tail.get(i).ok_or(ParseError::Never)?;
-        if t.starts_with(b"<<") {
+        let tok = tail.get(i).ok_or(ParseError::Never)?;
+        let (t, start, end, _fq, _mask, _spans) = tok;
+        if t.starts_with(b"<<") || span_operator(line, *start, *end).is_some() {
             break;
         }
         let Some((def, extra)) = parse_redirect(&tail, i)? else {
+            word::judge(kw, tok, line)?;
             break;
         };
         redirects.push(def);

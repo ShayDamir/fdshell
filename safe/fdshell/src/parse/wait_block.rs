@@ -13,7 +13,7 @@ use crate::capture::Capture;
 use crate::error::parse::ParseError;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
-use error_stack::{Report, ensure};
+use error_stack::{Report, ResultExt, ensure};
 use sys::{ScriptText, ShortCStr};
 
 /// An event-case `wait` block: one poll round over fd variables.
@@ -65,8 +65,9 @@ pub(crate) fn tokens_to_wait(
     // single-line spelling the here-doc bodies sit past it as word data.
     let done_idx =
         crate::parse::block_tail::closer_index(tokens, b"done").ok_or(ParseError::ExpectedDone)?;
+    let line = text.as_bytes().change_context(ParseError::Never)?;
     let redirects =
-        crate::parse::block_tail::redirects(b"done", tokens.get(done_idx..).unwrap_or(&[]))?;
+        crate::parse::block_tail::redirects(b"done", tokens.get(done_idx..).unwrap_or(&[]), line)?;
     let mut arms = Vec::new();
     let mut pos = 1;
     loop {

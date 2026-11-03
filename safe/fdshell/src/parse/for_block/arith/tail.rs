@@ -60,7 +60,7 @@ pub(super) fn tail_body(
     let expected_done = ParseError::ExpectedDone;
     let closed = up_to_closing(tail, line, Closer::Done, List::Plain, expected_done)?;
     let done_idx = closed.len() - 1;
-    let redirects = redirects(b"done", tail.get(done_idx..).unwrap_or(&[]))?;
+    let redirects = redirects(b"done", tail.get(done_idx..).unwrap_or(&[]), line)?;
     ensure!(
         closed.last().is_some_and(|tok| is_closer(tok, b"done")),
         ParseError::ExpectedDone

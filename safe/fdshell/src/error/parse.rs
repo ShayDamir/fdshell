@@ -156,6 +156,9 @@ pub(crate) enum ParseError {
         opener: sys::ShortCStr,
         closer: sys::ShortCStr,
     },
+    /// '{closer}' must be followed by a separator (';', a newline, '&', '|') —
+    /// unexpected word
+    BlockTrailingWord { closer: sys::ShortCStr },
 }
 
 impl core::error::Error for ParseError {}
