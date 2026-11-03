@@ -5,6 +5,7 @@ use crate::mask::MaskBit;
 use crate::mask::MaskBit::Unquoted;
 use crate::mask::tests::runs;
 use crate::parse::token::tokenize_statement;
+use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use sys::{Origin, Position, ScriptText, ShortCStr};
@@ -27,6 +28,24 @@ fn word_of(line: &[u8]) -> (ShortCStr, Vec<MaskBit>) {
 
 fn sc(text: &[u8]) -> ShortCStr {
     ShortCStr::from_vec(text.to_vec()).unwrap()
+}
+
+/// The message of the parse error `tokens_to_case` reports for `line` — empty
+/// when the block parses.
+fn err_message(line: &[u8]) -> String {
+    let text = stext(line);
+    let tokens = tokenize_statement(line).unwrap();
+    match tokens_to_case(&tokens, &text) {
+        Ok(_) => String::new(),
+        Err(report) => report.current_context().to_string(),
+    }
+}
+
+/// The clause count of a block that parses, `None` when it does not.
+fn clause_count(line: &[u8]) -> Option<usize> {
+    let text = stext(line);
+    let tokens = tokenize_statement(line).ok()?;
+    tokens_to_case(&tokens, &text).map(|b| b.clauses.len()).ok()
 }
 
 /// The `case` word is substituted with its own mask (task #269): a quoted
@@ -58,16 +77,81 @@ fn word_mask_of_a_joined_word() {
     assert_eq!(mask, runs(&[(false, 2), (true, 3), (false, 2)]));
 }
 
-/// The word region is `;`-trimmed, and an empty region keeps an empty mask —
-/// `case in …` has no word at all.
+/// The word region is `;`-trimmed, and a word that **is** empty keeps an empty
+/// mask — an empty quote pair contributes no byte. The unquoted spellings that
+/// used to sit here (`case in …`, `case ; ; in …`) have no word at all and are
+/// errors now (task #415, pinned by [`the_empty_word_is_the_word_error]).
 #[test]
-fn word_mask_of_an_empty_word_is_empty() {
-    let (case_word, mask) = word_of(b"case in *) echo m;; esac");
+fn word_mask_of_a_quoted_empty_word_is_empty() {
+    let (case_word, mask) = word_of(b"case \"\" in *) echo m;; esac");
     assert_eq!(case_word, sc(b""));
     assert!(mask.is_empty());
-    let (case_word, mask) = word_of(b"case ; ; in *) echo m;; esac");
-    assert_eq!(case_word, sc(b""));
-    assert!(mask.is_empty());
+    // A quoted `";"` is a word, so its byte is in the joined text — the
+    // separator trim never touches it (task #336).
+    let (case_word, mask) = word_of(b"case \";\" in *) echo m;; esac");
+    assert_eq!(case_word, sc(b";"));
+    assert_eq!(mask, runs(&[(true, 1)]));
+}
+
+/// Every spelling of an empty `case` word is a parse error (task #415): POSIX
+/// #2.9.1's `case_clause` production requires a `word` between `case` and `in`,
+/// so bash 5.3.9 rejects each of these with rc 2 (measured) and fdshell answers
+/// with its own message at rc 1. A `;`, the newline that tokenizes as one, and a
+/// comment-only word all trim to nothing (task #299's rule: the test is on the
+/// trimmed slice). The quoted spellings hold a **token**, so they stay words and
+/// stay green — bash accepts them at rc 0.
+#[test]
+fn the_empty_word_is_the_word_error() {
+    for line in [
+        b"case; in esac".as_slice(),
+        b"case ; in esac",
+        b"case ; ; in *) echo m;; esac",
+        b"case in esac",
+        b"case in *) echo m;; esac",
+        b"case\nin esac",
+        b"case\nin a) echo A;; esac",
+        b"case # c\nin esac",
+    ] {
+        assert_eq!(err_message(line), "case: empty word", "{line:?}");
+    }
+    for line in [
+        b"case \"\" in esac".as_slice(),
+        b"case \";\" in esac",
+        b"case \"\" in *) echo m;; esac",
+        b"case x in esac",
+    ] {
+        assert_eq!(err_message(line), "", "{line:?}");
+    }
+}
+
+/// A real `;` **byte** in the empty clause list is the grammar violation, while
+/// the newline that tokenizes as the same `;` **token** is not (task #415):
+/// POSIX #2.9.1's production there is a `newline_list`, and bash 5.3.9 rejects
+/// the `;` spellings with rc 2 (measured) while `case x in esac` and its newline
+/// spelling run at rc 0. Only the **empty** list is guarded — a `;` in front of
+/// a clause keeps fdshell's documented leniency (task #300, pinned
+/// end-to-end in `tests/case.rs`).
+#[test]
+fn a_semicolon_byte_in_an_empty_clause_list_is_the_clause_error() {
+    for line in [
+        b"case x in; esac".as_slice(),
+        b"case x in ; esac",
+        b"case x in;; esac",
+        b"case x in ;;; esac",
+        b"case x in\n; esac",
+        b"case x in ;\nesac",
+        b"case x in # c\n; esac",
+    ] {
+        assert_eq!(
+            err_message(line),
+            "case: ';' before an empty clause list",
+            "{line:?}"
+        );
+    }
+    // The two rows that hold the byte test from the other side: an empty slot
+    // with no token at all, and one carried only by newline tokens.
+    assert_eq!(clause_count(b"case x in esac"), Some(0));
+    assert_eq!(clause_count(b"case x in\nesac"), Some(0));
 }
 
 /// The `in` search is quote-gated (task #247): a quoted `in` is word data, so
@@ -76,11 +160,6 @@ fn word_mask_of_an_empty_word_is_empty() {
 /// closer-shaped **pattern** stay as they were (task #273).
 #[test]
 fn in_word_is_a_keyword_only_when_unquoted() {
-    let clause_count = |line: &[u8]| {
-        let text = stext(line);
-        let tokens = tokenize_statement(line).ok()?;
-        tokens_to_case(&tokens, &text).map(|b| b.clauses.len()).ok()
-    };
     let missing_in = |line: &[u8]| {
         let text = stext(line);
         let tokens = tokenize_statement(line).unwrap();

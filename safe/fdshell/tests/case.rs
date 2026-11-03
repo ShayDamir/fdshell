@@ -206,6 +206,136 @@ fn case_pattern_mask_and_expansion_match_bash() {
     assert_eq!((out.as_str(), code), ("m\n", 0));
 }
 
+// --- the empty `case` word and the empty clause list (task #415) -------------
+//
+// POSIX #2.9.1's `case_clause` production requires a `word` between `case` and
+// `in`, and the slot it puts after `in` is a `newline_list`. bash 5.3.9 rejects
+// an empty word in every spelling, and a real `;` **byte** in an empty clause
+// list — all at rc 2 (measured 2026-11-03); fdshell answers with its own messages
+// at its house rc 1, never rc 2. The unit pins sit beside the two guards in
+// `parse/case_block/tests.rs`.
+//
+// The task #300 leniencies are **not** tightened here: a leading `;` in front of
+// a **clause** (`case x in a) ; esac`, `case abc in ; (a*) …`,
+// `case x in a) ;; ; esac`) keeps its measured rc 0, pinned next to its owners
+// further down this file; the clause-list guard covers only the slot that holds
+// no clause at all.
+
+#[test]
+fn an_empty_case_word_is_a_parse_error() {
+    // bash rc 2 for every row: `;`, the newline that tokenizes as one, and a
+    // comment-only word all trim to nothing, so the slot holds no word.
+    for script in [
+        "case; in esac",
+        "case ; in esac",
+        "case ; ; in *) echo m;; esac",
+        "case in esac",
+        "case in *) echo m;; esac",
+        "case\nin esac",
+        "case\nin a) echo A;; esac",
+        "case # c\nin esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: {err}");
+        assert!(err.contains("case: empty word"), "{script}: {err}");
+    }
+    // bash rc 0: a quoted empty pair and a quoted `";"` are **words**, so the
+    // slot is not empty — the rows that keep the trim's span gate honest.
+    for (script, want) in [
+        (r#"case "" in esac"#, ""),
+        (r#"case "" in *) echo m;; esac"#, "m\n"),
+        (r#"case ";" in esac"#, ""),
+        ("case x in a) echo A;; esac", ""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
+    }
+}
+
+/// A real `;` **byte** in the empty clause list is the grammar violation while
+/// the newline that the tokenizer spells as the same `;` **token** is not
+/// (task #415, POSIX's slot is a `newline_list`; bash rc 2 vs rc 0, measured).
+/// The last two rows read the byte test from the other side. The rows behind it
+/// keep the verdicts their owners pinned — the word slot's own verdicts
+/// (`case: empty pattern`, `case: missing ')'`) stay in charge of every slot the
+/// clause walk consumes, and task #300's leniencies stay at rc 0.
+#[test]
+fn a_semicolon_byte_in_an_empty_clause_list_is_a_parse_error() {
+    for script in [
+        "case x in; esac",
+        "case x in ; esac",
+        "case x in;; esac",
+        "case x in ;;; esac",
+        "case x in\n; esac",
+        "case x in ;\nesac",
+        "case x in # c\n; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: {err}");
+        assert!(
+            err.contains("';' before an empty clause list"),
+            "{script}: {err}"
+        );
+    }
+    // bash rc 0: no token at all, and newline-only tokens — both stay green.
+    for script in ["case x in esac", "case x in\nesac", "case x in\n\nesac"] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");
+    }
+    for (script, want) in [
+        // bash rc 0 in both shells (task #300).
+        ("case x in a) ;; esac", ""),
+        ("case x in a) esac", ""),
+        // bash rc 2, fdshell's accepted leniency — pinned as measured (#300).
+        ("case x in a) ; esac", ""),
+        ("case abc in ; (a*) echo m;; *) echo n;; esac", "m\n"),
+        ("case x in a) ;; ; esac", ""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
+    }
+    for (script, needle) in [
+        ("case x in ) esac", "case: empty pattern"),
+        ("case x in \"\" ; esac", "case: missing ')'"),
+        (r#"case x in ";" esac"#, "missing its closing 'esac'"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: {err}");
+        assert!(err.contains(needle), "{script}: {err}");
+    }
+}
+
+/// Two pre-existing divergences the tables above touch and deliberately do not
+/// fix: a **single-quoted** word in the `case` word or pattern slot (owner task
+/// **#519**) and a **tab** in front of the `esac` of an empty clause list (owner
+/// task **#520**). bash 5.3.9 takes every row at rc 0; fdshell reports its
+/// missing-`esac` message at rc 1 (measured 2026-11-03). The double-quote and the
+/// space spellings are rc 0 in both shells.
+#[test]
+fn the_single_quote_and_tab_divergences_stay_as_measured() {
+    for script in [
+        "case 'x' in esac",
+        "case x in 'y') esac",
+        "case 'x' in a) esac",
+        "case x in\tesac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: {err}");
+        assert!(
+            err.contains("missing its closing 'esac'"),
+            "bash rc 0, {script}: {err}"
+        );
+    }
+    for script in [
+        r#"case "x" in esac"#,
+        r#"case x in "y") esac"#,
+        "case x in  esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");
+    }
+}
+
 // --- the `case` pattern's own quote mask (task #280) ------------------------
 //
 // `CaseClause::patterns` is a `Pattern` (text + mask) per `|`-separated
