@@ -9,10 +9,11 @@
 //! a closer closes *its own* block, a closer of another kind written in a body
 //! is word data.
 //!
-//! The rows are `keyword_delta`'s, verbatim: the [`keyword_is_quoted`] gate (the
-//! span rule `crate::keywords::quoted::quoted_word` behind it, for a word that is
-//! nothing but its keyword), the `time [-p]` prefix strip, the **one
-//! word-break set** ([`crate::bytes::word_break`], task #396) shared with the
+//! The rows are `keyword_delta`'s, verbatim: the [`keyword_is_quoted`] gate (it
+//! measures the keyword's own bytes — [`keyword_len`] says how long they are — where
+//! [`crate::keywords::quoted`] locates them in the line), the `time [-p]` prefix
+//! strip, the **one word-break set**
+//! ([`crate::bytes::word_break`], task #396) shared with the
 //! tokenizer's keyword split, the [`wait_opens_block`] disambiguation of the
 //! event-`wait` block from the POSIX builtin, and the group's `{`/`}` predicates
 //! from [`crate::segment::group::{opens, closes}`]. The glued `done>f` closer
@@ -61,6 +62,17 @@ fn boundary(word: &[u8], len: usize) -> bool {
     word.get(len).is_none_or(|&b| word_break(b))
 }
 
+/// The length of the keyword at the word's start — the run a row matches literally
+/// (`done` in `done>f"f"`), i.e. the bytes up to the byte that breaks the word, from
+/// the **one word-break set** ([`crate::bytes::word_break`]). For a word that is
+/// nothing but its keyword the run is the whole word, and the gate measures the whole
+/// word's own bytes (task #413).
+fn keyword_len(word: &[u8]) -> usize {
+    word.iter()
+        .position(|&b| word_break(b))
+        .unwrap_or(word.len())
+}
+
 /// The block keyword a scored word is, `None` for a word that is no keyword:
 /// a quoted word ([`keyword_is_quoted`] — bash reads a quoted keyword as data), a
 /// prefix like `ifconfig`/`donec`, the POSIX builtin `wait`, and every
@@ -72,7 +84,7 @@ fn boundary(word: &[u8], len: usize) -> bool {
 /// keyword of its own: the keyword behind it is scored on the rest of the word,
 /// which keeps such a statement one segment for the `time` parse hook.
 pub(crate) fn keyword_kind(word: &[u8], line: &[u8], word_end: usize) -> Option<Keyword> {
-    if keyword_is_quoted(word, line, word_end) {
+    if keyword_is_quoted(word, line, word_end, keyword_len(word)) {
         return None;
     }
     if let Some(p) = time_prefix_len(word) {
