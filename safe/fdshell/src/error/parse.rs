@@ -83,6 +83,8 @@ pub(crate) enum ParseError {
     ExpectedCommandAfterPipe,
     /// expected command after '{op}'
     ExpectedCommandAfterOp { op: sys::ShortCStr },
+    /// expected command before '{op}'
+    ExpectedCommandBeforeOp { op: sys::ShortCStr },
     /// expected condition
     ExpectedCondition,
     /// expected 'do'

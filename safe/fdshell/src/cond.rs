@@ -41,6 +41,16 @@ pub(crate) fn run_cond_list(
             Report::new(ParseError::ExpectedCommandAfterOp { op }).change_context(CmdError::Parse)
         );
     }
+    // The same grammar sentence read from the other side: an operator that **opens**
+    // a physical line has no command in front of it (task #406). The order above is
+    // load-bearing — a text whose operator violates both is pinned on the right-side
+    // message (`echo a || &&`), so the two rules must not trade that report.
+    let opens_a_line = text.start.column == 1;
+    if let Some(op) = parts::empty_left_side(line, opens_a_line) {
+        return Err(
+            Report::new(ParseError::ExpectedCommandBeforeOp { op }).change_context(CmdError::Parse)
+        );
+    }
     let mut state = ScanState::new();
     let mut start = 0;
     let mut body_idx = 0;
