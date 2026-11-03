@@ -55,6 +55,17 @@ impl Pairing {
         !self.stack.is_empty()
     }
 
+    /// The number of open blocks — the **depth** a walk carries. `0` only at the
+    /// top level; a caller that seeded the block it is inside (seed depth `1`)
+    /// asks "am I back where I started?" rather than "is anything open", because
+    /// its own block's seed must stay on the stack for the answer to mean
+    /// "this word is at the level the caller walks" (`parse/semi/closing/walk.rs`,
+    /// task #418). `Pairing` owns the stack, so the depth is read here and no
+    /// caller re-derives it.
+    pub(crate) fn depth(&self) -> usize {
+        self.stack.len()
+    }
+
     /// Pair one **scored** keyword word with the open blocks: push an opener's
     /// kind, pop only a closer that matches the innermost block. The delta to
     /// add — `0` when the closer mismatches, because the word is then word data.

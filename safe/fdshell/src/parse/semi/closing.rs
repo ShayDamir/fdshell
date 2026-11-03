@@ -1,18 +1,18 @@
 //! The closing-keyword search of `parse/semi.rs`, gated by the shared
 //! command-position rule (task #236) and the `case`/`for` word-list rule (task
-//! #273, [`List`]); the word rules it reads live in [`word`].
+//! #273, [`List`]); the word rules it reads live in [`word`], and the walk they
+//! feed in [`walk`] — shared with the `case` clause walk (task #418), whose only
+//! difference is its stop predicate.
 
+mod walk;
 mod word;
 
+pub(crate) use walk::walk_until;
 pub(crate) use word::{List, glue_at};
-use word::{next_word, scores_at};
 
 use super::Token;
 use crate::error::parse::ParseError;
-use crate::keywords::{
-    Closer, Keyword, Pairing, Place, after, keyword_kind, pair_payload, scores, separator_data,
-    word_place,
-};
+use crate::keywords::{Closer, Keyword, keyword_kind};
 use error_stack::{Report, bail};
 
 /// The index of the block's closing keyword: the token at which the block's
@@ -27,9 +27,11 @@ use error_stack::{Report, bail};
 /// ends a `while` body, `case x in done) …` never ends a `case`).
 ///
 /// The scan carries bash's command-position rule over the token list
-/// ([`after`]/[`scores`], task #236): a block keyword written as an argument
+/// ([`crate::keywords::after`]/[`crate::keywords::scores`], task #236): a block
+/// keyword written as an argument
 /// (`echo done` in a `do` body) never closes the block — the `;` before a
-/// real closer is what restarts the flag, and [`separator_data`] keeps a quoted
+/// real closer is what restarts the flag, and [`crate::keywords::separator_data`]
+/// keeps a quoted
 /// `";"` from being that restart (task #336): bash reads
 /// `while :; do echo a ";" done` with `done` an **argument**, so the block stays
 /// open and the byte-level scan's unclosed-block report is the verdict both
@@ -71,55 +73,12 @@ pub(crate) fn list_closing_keyword_index(
     closing_index(tokens, line, open, list)
 }
 
+/// The walk of [`walk`], stopped where this search stops: the moment the
+/// pairing seeded with `open` empties (the walk's seed depth is then 1, so the
+/// predicate is `depth == 0`), reading from token 1 — the block's own opener
+/// word is never a candidate closer.
 fn closing_index(tokens: &[Token], line: &[u8], open: Closer, list: List) -> Option<usize> {
-    let mut pairing = Pairing::new();
-    pairing.open(open);
-    let mut place = Place::Command;
-    for (i, tok) in tokens.iter().enumerate().skip(1) {
-        let (t, _start, end, _fq, _mask, _spans) = tok;
-        // Defensive: the tokens were built from `line`, so their bytes are
-        // always valid; an error token means a future tokenizer that hands
-        // this scan a token it cannot read, and the scan skips it.
-        let Some(word) = t.as_bytes().ok() else {
-            continue;
-        };
-        // The tokenizer splits a glued `&&`/`||` into two operator tokens; the
-        // first is the pair's head, the second its tail — the same glue the
-        // byte-level scan computes from the line's bytes (task #236's S2).
-        let glue = glue_at(tokens, i, word);
-        let scored = scores_at(word, line, *end, place, list, next_word(tokens, i));
-        // The gate reads the pairing **before** this word is applied: the
-        // closer's kind must match the block it closes, not the one the word
-        // itself leaves open behind it (task #309).
-        // A separator-shaped **word** leaves the place an ordinary word leaves
-        // ([`word_place`]: an argument, a `for` list stays a list), never the
-        // command restart the separator earns (task #336).
-        place = if separator_data(tok) {
-            word_place(place)
-        } else {
-            after(word, line, *end, place, glue, pairing.top())
-        };
-        // A glued cond pair *inside* a token (`a||if` is one token) hides its
-        // payload from the token walk: score the payload at the place the pair
-        // sets, the same payload rule the byte scans apply via [`Glue`] (task
-        // #236's S2: `do echo a||if :; …; fi` nests the `if`, so its `fi`
-        // closes *the if* and the walk keeps the enclosing block's closer).
-        if let Some(payload) = pair_payload(word)
-            && scores(payload, line, *end, place)
-        {
-            pairing.apply(payload, line, *end);
-            if !pairing.is_open() {
-                return Some(i);
-            }
-        }
-        if scored {
-            pairing.apply(word, line, *end);
-            if !pairing.is_open() {
-                return Some(i);
-            }
-        }
-    }
-    None
+    walk_until(tokens, line, Some(open), list, 1, &|_, depth, _| depth == 0)
 }
 
 /// The block's tokens up to and including its closing keyword; `err` when the
