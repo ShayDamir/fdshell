@@ -6320,9 +6320,11 @@ between the two). The shapes that stay stops: the separator and word-break set
 read through `bytes::word_break` (#316/#396 — so `done (x)` stays accepted, and so
 is the `<<` glued inside the closer's word `done<<T`, which the byte scan never
 counts and the here-doc arm therefore declines: bash feeds the body, that row
-keeps its measured value), the tokenizer's pipe token, the `&>` family
-(#409), and a word-start `#` comment (#296 — the tokenizer swallows its text
-today, so that arm is the pinned boundary, not a reachable one). A closer
+keeps its measured value), the tokenizer's pipe token, and a word-start `#` comment
+(#296 — the tokenizer swallows its text
+today, so that arm is the pinned boundary, not a reachable one). The `&>` family
+left that stop list when task #409 made it an arm of the walk (see the rule below:
+the closer position splits the family's arms). A closer
 **glued** to a word (`done#c`) is no closer at all and answers as the unclosed
 block; that row keeps its measured value. And a body that never runs never
 reports, so `while false; do if :; then :; fi x; done` runs the statement after
@@ -6343,7 +6345,62 @@ the `wait` round, the loop-status rule),
 `tests/loops.rs::a_word_after_the_closing_keyword_is_a_parse_error`,
 `tests/block_closers.rs::a_closer_shaped_word_directly_behind_a_closer_reports` (a
 word that looks like a keyword — a stray closer, a stray `}` — stays word data),
+`parse/block_tail/bg/tests.rs` and `parse/group_block/tail/tests.rs::the_family_at_the_closer_names_its_extra_to`
+(the `&>` family's arms — the rule below),
+`tests/block_redirect.rs::the_combined_redirect_family_on_a_closer` and
+`tests/group.rs::the_combined_redirect_family_on_the_group_closer` (task #409,
+measured against bash 5.3.9 on 2026-11-03; the `%var`, pidvar and rc-1-vs-2 rows
+name their owners),
 and the group twin `parse/group_block/tail.rs` with `GroupTrailingWord`.
+
+## The closer position splits the `&>` family: its redirect arms land, its pidvar arm reports
+
+Task #409 taught the two closer tails (`parse/block_tail.rs` with
+`parse/block_tail/bg.rs`, `parse/group_block/tail.rs`) the `&>` family, and the rule
+is **position-split**, not operator-split: the redirect arms — bare `&>` / `&>>`
+taking the next token, the attached spellings, the mask-gated `%var` target — belong
+to the whole compound command and land at a closer exactly as they do on a simple
+command, while the **pidvar** arms (`&>&name`, `&>|&name`) stay a simple-command
+position: bash rejects the family's pidvar spelling behind a closer (rc 2), so the
+house answer is fdshell's rc-1 parse error — the same
+`UnexpectedChar { ch: b'&' }` the group's tail already gave every `&` shape — and not
+a backgrounded block. The `&` and `&&` shapes at the same position stay their owners'
+(#352 for the async list, #188/#192 for the group). The `%var` target is not a gap
+either: it is POSIX_COMPATIBILITY's documented fd-variable divergence of the whole
+family, pinned with its owner at the closer and not "fixed" there.
+
+**One parser, three readers, and a dispatch order that is not load-bearing.** All
+three tail walkers — `parse/command/collect_tail.rs`, `parse/block_tail.rs` and
+`parse/group_block/tail.rs` — call the one `parse/bg_redirect`, in one order
+(here-doc/here-string → `&>` → path-redirect → their own word/report arms). The order
+is provably non-contending: `parse_redirect` declines a `&`-prefixed token (its prefix
+is not all digits) and the `&>` arm fires only on a `&>`-prefixed one, so reordering
+the two is an equivalence — say so in the doc, and do not buy a test for it. The same
+reasoning keeps `block_tail/word.rs::stops()` the byte-level list it was: the arm
+decides the pidvar refusal itself, so no `&`-family carve-out enters the stop list
+(a guard that only re-states its caller is the mutant source this repo refuses).
+
+**The mutation traps are the two counters.** The pidvar discriminator must be pinned
+on both sides (`done &> f` taken, `done &>&p` reported), and the operand consumption —
+the `extra` the family reports for a bare operator — is only visible through a tail
+that reads a second def after it (`done &> f 2> g` vs `done 2> g &> f`), because a
+combined def is indistinguishable from a plain `>` def unless the assertion names
+`extra_to`. So the family's unit rows (`parse/block_tail/bg/tests.rs`,
+`parse/group_block/tail/tests.rs::the_family_at_the_closer_names_its_extra_to`) spell
+their own shape helper: the existing three-tuple `shape()` cannot see the field the
+family exists for. Integration tests contribute no coverage, so those unit rows are
+the arm's coverage, and the integration matrices
+(`tests/block_redirect.rs::the_combined_redirect_family_on_a_closer`,
+`tests/group.rs::the_combined_redirect_family_on_the_group_closer`) are the behavioral
+proof: a body writing to **both** streams files `a\ne\n` in one file, in bash's order.
+
+Pins: the two unit files above (one row per arm spelling, glued closer, `%var`,
+pidvar, `&>|f`, no operand, both orders), the two integration matrices above, the
+simple-command rows in `tests/redirect.rs` that keep the pidvar extension working,
+and `tests/times.rs::times_children_total_time_increases_after_wait` — its script
+used `done &>&j`, so the pidvar moved to the documented simple-command spelling
+(`builtin true &>&j; waitpid &j`) and the per-profile CPU ranges in its doc are the
+measurements of the new spelling.
 
 ## An operator that opens a physical line reports; the join needs a command on the other side
 

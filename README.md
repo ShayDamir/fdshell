@@ -431,12 +431,18 @@ file `f>g`, fdshell never splitting a word at an operator byte, as above. A plai
 '}'` is one for `{ …; }`: bash demands a separator after a closing keyword, so
 `done x`, `fi x#y` and `esac "c"` report it at fdshell's rc 1 (bash: rc 2) and
 nothing of the block runs. The tail reads its operators **in source order** — path,
-here-doc and here-string — so `done <<T` feeds the body stream to the whole block
+here-doc, here-string and the `&>` family — so `done <<T` feeds the body stream to the whole block
 and `done <<<hi` feeds it its word, exactly as bash does (the `read`/`cat` commands
 in the body are the ones that read it), and the io-number forms `done 3<<T` /
-`done 3<<<hi` land on that descriptor. What the tail still deliberately does **not**
-read is the `&>` family there (`done &> f`, task
-#409): it keeps the behavior its own pins record. A `<<` **glued inside** the
+`done 3<<<hi` land on that descriptor. The `&>` family is read there too (task
+#409): `done &> f`, `done &>> f` and their glued spellings land on the whole block
+as one combined open shared by fd 1 and fd 2, so a body that writes to both streams
+files them in one target, in bash's order. Two of the family's arms keep their own
+answers at this position: the `%var` target stays the fd-variable reading documented
+in POSIX_COMPATIBILITY (">%var and `&>%var` redirect to the descriptor"), where bash
+reads the file name `%v`; and the pidvar spelling — `done &>&job`, `done &>|&job` —
+is a **simple-command** position, so at a closer it is a parse error (bash: rc 2,
+fdshell: rc 1). A `<<` **glued inside** the
 closer's word (`done<<T`) stays word data, as above: the byte scan counts no
 operator there, so nothing is claimed and the body lines run as commands — bash
 feeds them to the block, and that row keeps its measured value.
@@ -1053,7 +1059,11 @@ esac
 A redirection written after a block's closing keyword belongs to the **whole**
 block: `for x in a b; do echo $x; done > f` files the loop's output in `f`, the
 glued `done>f` included, and the block's own fd changes are undone when it ends
-(see "Redirection" above).
+(see "Redirection" above). The `&>` family is part of that tail (task #409):
+`done &> f` and `done &>> f` write the block's **two** streams through the one open
+the operator stands for, and its pidvar spelling (`done &>&job`) is a parse error at
+a closer — the pidvar is a simple-command position (POSIX_COMPATIBILITY "`&` names
+background tasks").
 
 A block's **condition** must be a non-empty list: `if ; then echo x; fi`,
 `elif ; then`, `while ; do :; done`, `until ; do :; done` and their `&` and

@@ -50,7 +50,10 @@ word. fdshell additionally reads `&name` as a task variable:
 
 - `cmd &>&name` starts `cmd` in the background and stores the task (a pidfd
   plus its capture context) under `&name`; `&>|&name` overwrites an existing
-  task.
+  task. This is a **simple-command** position: written behind a keyword block's
+  closing keyword or a `{ …; }` brace (`done &>&job`, `} &>&job`), bash rejects the
+  line (rc 2) and fdshell reports its rc-1 parse error, so no task is recorded and
+  nothing runs (task #409).
 - Quoting the whole word quotes the operator: `cmd '&>&name'` is a plain
   argument in both shells (`echo hi '&>&name'` prints `hi &>&name` and launches
   no task, rc 0). The **unquoted** form is fdshell's extension — bash rejects
