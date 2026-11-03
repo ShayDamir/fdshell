@@ -13,6 +13,15 @@ pub(crate) fn report_unbalanced_quote(line: &[u8], pos: usize) -> Report<ParseEr
     })
 }
 
+/// Create a `Report<ParseError>` for a `)` token at `pos` that a `case` arm's
+/// command list cannot take (task #419 — the position ride from the arm walk).
+pub(crate) fn report_case_arm_close_paren(line: &[u8], pos: usize) -> Report<ParseError> {
+    Report::new(ParseError::CaseArmUnexpectedCloseParen).attach_opaque(ParsePosition {
+        pos,
+        input: Some(line.to_vec()),
+    })
+}
+
 /// Create a `Report<ParseError>` for unexpected EOF starting at `pos`.
 pub(crate) fn report_unexpected_eof(line: &[u8], pos: usize) -> Report<ParseError> {
     Report::new(ParseError::UnexpectedEof).attach_opaque(ParsePosition {

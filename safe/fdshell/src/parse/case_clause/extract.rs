@@ -1,6 +1,6 @@
 use super::Token;
 use super::stray;
-use crate::error::parse::ParseError;
+use crate::error::parse::{ParseError, report_case_arm_close_paren};
 use crate::keywords::Closer;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{List, amp_semi, trim_body, walk_until};
@@ -34,7 +34,10 @@ use sys::ScriptText;
 ///
 /// The arm region (up to the `;;` window that ends it) is also where a missing
 /// clause separator shows up: [`stray`] decides the shape, and this site owns
-/// the verdict (task #300).
+/// the verdict (task #300). The verdict splits in two: the clause pattern paren
+/// keeps `CaseMissingSemiSemi`, and a paren the arm's command list cannot take
+/// (task #419) rides to the new variant **with** its `ParsePosition` — the
+/// mechanism `report_unbalanced_quote` uses, since the walk holds the span.
 pub(crate) fn body(
     tokens: &[Token],
     text: &ScriptText,
@@ -53,9 +56,20 @@ pub(crate) fn body(
     )
     .map(|i| body_start + i);
     // The bound is the window's index **in the region**, so the next clause's
-    // own pattern parens (`a) echo hi;; b) ;; esac`) are never in scope.
-    if stray::opens_next_pattern(body_slice, end.map(|e| e - body_start), line) {
-        bail!(ParseError::CaseMissingSemiSemi);
+    // own pattern parens (`a) echo hi;; b) ;; esac`) are never in scope. The
+    // seed is the `((` production word the pattern walk consumed, one closer
+    // spent (task #419, [`stray::arith_seed`]).
+    match stray::verdict(
+        body_slice,
+        end.map(|e| e - body_start),
+        line,
+        stray::arith_seed(tokens, body_start),
+    ) {
+        Some((stray::Stray::ClausePattern, _)) => bail!(ParseError::CaseMissingSemiSemi),
+        Some((stray::Stray::CloseParen, pos)) => {
+            return Err(report_case_arm_close_paren(line, pos));
+        }
+        None => {}
     }
     match end {
         Some(end) => {

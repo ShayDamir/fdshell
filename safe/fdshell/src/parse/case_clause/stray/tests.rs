@@ -1,23 +1,25 @@
 #![allow(clippy::unwrap_used)]
 
-use super::{opens_groups, opens_next_pattern};
+use super::{Stray, opens_groups, verdict};
 use crate::mask::MaskBit;
 use crate::parse::token::tokenize_statement;
 use alloc::vec;
 
-/// [`opens_next_pattern`] over the tokens of the statement `line`, with `limit`
-/// as the index of the `;;` window that ends the arm region (`None`: the run up
-/// to `esac`). This is the token list the parse layer scans (`case_clause::
-/// extract::body`), heredoc bodies blanked and byte offsets preserved, and `line`
-/// is the statement's own text, so the span gates [`super::span_word`] and
-/// [`super::separator_data`] read the spans the tokens were built from.
-fn opens(line: &[u8], limit: Option<usize>) -> bool {
-    opens_next_pattern(&tokenize_statement(line).unwrap(), limit, line)
+/// [`verdict`] over the tokens of the statement `line`, with `limit` as the
+/// index of the `;;` window that ends the arm region (`None`: the run up to
+/// `esac`), naming the verdict per row. This is the token list the parse layer
+/// scans (`case_clause::extract::body`), heredoc bodies blanked and byte offsets
+/// preserved, and `line` is the statement's own text, so the span gates
+/// [`super::span_word`] and [`super::separator_data`] read the spans the tokens
+/// were built from. The seed is the pattern walk's (task #419); these regions
+/// are arms, so it stays 0 and the `((` word sits inside the region.
+fn verdict_of(line: &[u8], limit: Option<usize>) -> Option<Stray> {
+    verdict(&tokenize_statement(line).unwrap(), limit, line, 0).map(|(stray, _)| stray)
 }
 
 /// [`opens_groups`] on a word and a mask written **directly**: the mask the
-/// tokenizer produces for the real shapes is pinned through [`opens`] above, and
-/// these are the counter's own contract, byte by byte.
+/// tokenizer produces for the real shapes is pinned through [`verdict_of`]
+/// above, and these are the counter's own contract, byte by byte.
 fn groups(word: &sys::ShortCStr, mask: &[MaskBit]) -> usize {
     opens_groups(word.as_bytes().unwrap(), mask)
 }
@@ -70,37 +72,45 @@ fn an_escape_pair_is_read_through_the_mask() {
 /// rc 2; fdshell answers `case: missing ';;' between clauses` at rc 1.
 #[test]
 fn a_paren_behind_a_command_position_word_opens_the_next_pattern() {
-    assert!(opens(b"b)", None));
+    assert_eq!(verdict_of(b"b)", None), Some(Stray::ClausePattern));
     // The `;` restarts command position, so the same shape behind a `;` bails
     // (`a) echo hi; b) ;; esac`).
-    assert!(opens(b"echo a;b)", None));
+    assert_eq!(verdict_of(b"echo a;b)", None), Some(Stray::ClausePattern));
     // An assignment word is a command word here (`a) x=1) ;; esac`, bash rc 2).
-    assert!(opens(b"x=1)", None));
+    assert_eq!(verdict_of(b"x=1)", None), Some(Stray::ClausePattern));
 }
 
-/// A paren behind an **argument** is arm text, not a pattern paren: this is the
-/// family task #419 owns (bash rc 2, accepted here), kept open so task #316's
-/// subshell-shaped arm `a) (echo sub) ;;` keeps parsing.
+/// A paren behind an **argument** is a paren the arm's command list cannot take
+/// (bash rc 2) — the family task #419 closed: the place gate leaves an
+/// argument-position word with no openers, so the paren sits at depth 0 and the
+/// argument arm of the classification takes it. Only the arm that opened its own
+/// group stays clean, and that one is task #316's shape (bash rc 0).
 #[test]
-fn a_paren_behind_an_argument_stays_arm_text() {
-    assert!(!opens(b"echo hi)", None));
-    assert!(!opens(b"(echo sub)", None));
-    assert!(!opens(b"echo a[b)", None));
-    assert!(!opens(b"echo (b)", None));
+fn a_paren_behind_an_argument_is_a_stray_close_paren() {
+    assert_eq!(verdict_of(b"echo hi)", None), Some(Stray::CloseParen));
+    // The arm opened this group, so its `)` closes it: bash rc 0.
+    assert_eq!(verdict_of(b"(echo sub)", None), None);
+    assert_eq!(verdict_of(b"echo a[b)", None), Some(Stray::CloseParen));
+    assert_eq!(verdict_of(b"echo (b)", None), Some(Stray::CloseParen));
 }
 
 /// Arithmetic is data: the tokenizer emits every unquoted `)` as its own token,
-/// so `((1))` is the tokens `((1`, `)`, `)` — the second `)` follows an operator
-/// — and the `((` region swallows the bare `)` tokens an arith `for` clause
-/// writes behind its `;` (`case x in x) for ((i=0;i<2;i++)); do …; done;; esac`
-/// is bash rc 0).
+/// so `((1))` is the tokens `((1`, `)`, `)` — the word's bytes arm **two**
+/// closers and both are data, the region's own rule owning them — and the `((`
+/// region swallows the bare `)` tokens an arith `for` clause writes behind its
+/// `;` (`case x in x) for ((i=0;i<2;i++)); do …; done;; esac` is bash rc 0).
 #[test]
 fn the_arithmetic_region_and_its_operators_are_data() {
-    assert!(!opens(b"((1))", None));
-    assert!(!opens(b"for ((i=0;i<2;i++))", None));
-    // The region ends at its own `)`: the clause paren written right behind a
-    // complete arithmetic command bails (`a) ((1)); b) ;; esac`, bash rc 2).
-    assert!(opens(b"((1)); b)", None));
+    assert_eq!(verdict_of(b"((1))", None), None);
+    assert_eq!(verdict_of(b"for ((i=0;i<2;i++))", None), None);
+    // The region ends at its own two closers: the clause paren written right
+    // behind a complete arithmetic command bails (`a) ((1)); b) ;; esac`,
+    // bash rc 2).
+    assert_eq!(
+        verdict_of(b"((1)); b)", None),
+        Some(Stray::ClausePattern),
+        "bash rc 2"
+    );
 }
 
 /// The parens of groups the **arm itself opened** are arm text, never the next
@@ -113,27 +123,27 @@ fn the_arithmetic_region_and_its_operators_are_data() {
 fn a_paren_closing_a_group_the_arm_opened_is_not_a_pattern_paren() {
     // A definer's parameter list, at the arm's start and behind a `;` that
     // restarts command position.
-    assert!(!opens(b"f() { :; }", None));
-    assert!(!opens(b"echo hi;f() { :; }; f", None));
+    assert_eq!(verdict_of(b"f() { :; }", None), None);
+    assert_eq!(verdict_of(b"echo hi;f() { :; }; f", None), None);
     // A definer inside the arm's own block bodies (the `;` behind `then`/`do`/
     // `}` is command position, so only this gate keeps these parsing).
-    assert!(!opens(b"if true; then f() { :; }; fi", None));
-    assert!(!opens(b"while false; do f() { :; }; done", None));
-    assert!(!opens(b"for i in 1; do f() { :; }; done", None));
-    assert!(!opens(b"{ f() { :; }; }", None));
+    assert_eq!(verdict_of(b"if true; then f() { :; }; fi", None), None);
+    assert_eq!(verdict_of(b"while false; do f() { :; }; done", None), None);
+    assert_eq!(verdict_of(b"for i in 1; do f() { :; }; done", None), None);
+    assert_eq!(verdict_of(b"{ f() { :; }; }", None), None);
     // A subshell group the arm opened: single word, pipeline stage, the `g() ( : )`
     // definer whose body is a subshell, and a subshell behind `&&`.
-    assert!(!opens(b"(cat)", None));
-    assert!(!opens(b"echo hi|(cat)", None));
-    assert!(!opens(b"g() ( : )", None));
+    assert_eq!(verdict_of(b"(cat)", None), None);
+    assert_eq!(verdict_of(b"echo hi|(cat)", None), None);
+    assert_eq!(verdict_of(b"g() ( : )", None), None);
     // The same group with its closer behind a **command-position** word (`:` is
     // the subshell's command): the arm's own nesting protects it, so a rule that
     // only reads the neighbouring word is not enough.
-    assert!(!opens(b"( : )", None));
-    assert!(!opens(b"(true) && echo y", None));
+    assert_eq!(verdict_of(b"( : )", None), None);
+    assert_eq!(verdict_of(b"(true) && echo y", None), None);
     // A definer glued to its subshell body has no space between the `)` and the
     // `(`, so the subshell's `)` follows the bare `(` word.
-    assert!(!opens(b"g() (:)", None));
+    assert_eq!(verdict_of(b"g() (:)", None), None);
 }
 
 /// An **array-literal assignment** carries its group's `(` **mid-word**: the
@@ -145,26 +155,34 @@ fn a_paren_closing_a_group_the_arm_opened_is_not_a_pattern_paren() {
 /// parse gate is this rule's.
 #[test]
 fn an_array_literal_opens_a_group_the_arm_owns() {
-    assert!(!opens(b"m=(1)", None));
-    assert!(!opens(b"arr=(\"$@\")", None));
-    assert!(!opens(b"x=(1) y=2", None));
-    assert!(!opens(b"m=(1 2)", None));
-    assert!(!opens(b"m=()", None));
-    assert!(!opens(b"m=($(echo a))", None));
+    assert_eq!(verdict_of(b"m=(1)", None), None);
+    assert_eq!(verdict_of(b"arr=(\"$@\")", None), None);
+    assert_eq!(verdict_of(b"x=(1) y=2", None), None);
+    assert_eq!(verdict_of(b"m=(1 2)", None), None);
+    assert_eq!(verdict_of(b"m=()", None), None);
+    assert_eq!(verdict_of(b"m=($(echo a))", None), None);
     // The same assignment written inside the arm's own block bodies.
-    assert!(!opens(b"if true; then m=(1); fi", None));
-    assert!(!opens(b"{ m=(1); }", None));
-    assert!(!opens(b"while false; do m=(1); done", None));
+    assert_eq!(verdict_of(b"if true; then m=(1); fi", None), None);
+    assert_eq!(verdict_of(b"{ m=(1); }", None), None);
+    assert_eq!(verdict_of(b"while false; do m=(1); done", None), None);
     // The array's `)` closes the group, so the clause paren written behind it is
     // seen (`case x in a) m=(1); b) ;; esac` is bash rc 2).
-    assert!(opens(b"m=(1); b)", None));
+    assert_eq!(
+        verdict_of(b"m=(1); b)", None),
+        Some(Stray::ClausePattern),
+        "bash rc 2"
+    );
     // `((` stays arithmetic's own, mid-word included: `m=$((1))` is one word whose
     // parens close inside it, so the arm's depth must not rise — a scan that
     // counted them would swallow the clause paren after it (`case x in a)
     // m=$((1)); b) ;; esac` is bash rc 2, and the bare arith assignment is rc 0).
-    assert!(!opens(b"m=$((1))", None));
-    assert!(!opens(b"m=$((m+1))", None));
-    assert!(opens(b"m=$((1)); b)", None));
+    assert_eq!(verdict_of(b"m=$((1))", None), None);
+    assert_eq!(verdict_of(b"m=$((m+1))", None), None);
+    assert_eq!(
+        verdict_of(b"m=$((1)); b)", None),
+        Some(Stray::ClausePattern),
+        "bash rc 2"
+    );
 }
 
 /// The depth returns to 0 when the arm's group closes, so a clause paren behind
@@ -173,9 +191,21 @@ fn an_array_literal_opens_a_group_the_arm_owns() {
 /// are bash rc 2, like every other missing `;;`).
 #[test]
 fn a_clause_paren_behind_a_word_after_a_closed_group_still_bails() {
-    assert!(opens(b"f() { :; }; b)", None));
-    assert!(opens(b"(true); b)", None));
-    assert!(opens(b"g() ( : ); b)", None));
+    assert_eq!(
+        verdict_of(b"f() { :; }; b)", None),
+        Some(Stray::ClausePattern),
+        "bash rc 2"
+    );
+    assert_eq!(
+        verdict_of(b"(true); b)", None),
+        Some(Stray::ClausePattern),
+        "bash rc 2"
+    );
+    assert_eq!(
+        verdict_of(b"g() ( : ); b)", None),
+        Some(Stray::ClausePattern),
+        "bash rc 2"
+    );
 }
 
 /// The keyword gate: a quoted `")"` is a word whose **text** is `)`, and an
@@ -183,17 +213,24 @@ fn a_clause_paren_behind_a_word_after_a_closed_group_still_bails() {
 /// (`case x in a) echo ")" ;; esac` and `a) echo \);; esac` are bash rc 0).
 #[test]
 fn a_quoted_or_escaped_paren_is_word_text() {
-    assert!(!opens(b"echo \")\"", None));
-    assert!(!opens(b"echo \\)", None));
-    // A quoted `(` opens no group, so a clause paren behind it is still seen
-    // through the word (`echo "x(" b) ;;` is the accepted #419 shape: the
-    // predecessor sits in argument position).
-    assert!(!opens(b"echo \"x(\" b)", None));
+    assert_eq!(verdict_of(b"echo \")\"", None), None);
+    assert_eq!(verdict_of(b"echo \\)", None), None);
+    // A quoted `(` opens no group, so the `)` written behind the word lands at
+    // depth 0 behind an argument — task #419 closed this (bash rc 2).
+    assert_eq!(
+        verdict_of(b"echo \"x(\" b)", None),
+        Some(Stray::CloseParen),
+        "bash rc 2"
+    );
     // A quoted `(` at the arm's own start is word text too, so the `)` written
     // behind that word is a depth-0 candidate: `case x in a) "(x") ;; esac` is
     // bash rc 2, and a scan that counted the quoted paren as an opener would let
     // its `)` close that group and swallow the pattern paren.
-    assert!(opens(b"\"(x\")", None));
+    assert_eq!(
+        verdict_of(b"\"(x\")", None),
+        Some(Stray::ClausePattern),
+        "bash rc 2"
+    );
     // A **quoted** backslash is word text, not an escape pair, and the tokenizer
     // hands it over as a **pair** of quoted bytes: `'\'(x)` and `"\\"(x)` are both
     // the word `\\(x` (mask: quoted, quoted, unquoted, unquoted) plus its `)`
@@ -202,8 +239,8 @@ fn a_quoted_or_escaped_paren_is_word_text() {
     // bash rejects the shape (rc 2) and fdshell parses it as the subshell-shaped
     // arm of #316/#419. The pin is the counted group, and it is what the
     // equivalence of the escape arm's mask test rests on.
-    assert!(!opens(b"'\\'(x)", None));
-    assert!(!opens(b"\"\\\\\"(x)", None));
+    assert_eq!(verdict_of(b"'\\'(x)", None), None);
+    assert_eq!(verdict_of(b"\"\\\\\"(x)", None), None);
 }
 
 /// An **escape pair** is one literal word byte, and the token's mask marks both
@@ -213,11 +250,20 @@ fn a_quoted_or_escaped_paren_is_word_text() {
 /// reading the word's last byte alone reads `x\(` as an open `(` and swallows it.
 #[test]
 fn an_escaped_paren_opens_no_group() {
-    assert!(opens(b"x\\()", None));
-    // Behind an argument the paren is not a pattern paren for the other gate, and
-    // nothing may claim it opened a group either (`a) echo x\() ;; esac` is the
-    // accepted #419 shape, bash rc 2).
-    assert!(!opens(b"echo x\\()", None));
+    assert_eq!(
+        verdict_of(b"x\\()", None),
+        Some(Stray::ClausePattern),
+        "bash rc 2"
+    );
+    // Behind an argument the paren is not a *pattern* paren — the place gate
+    // leaves the escape pair with no opener and the argument arm of the
+    // classification takes the paren (`a) echo x\() ;; esac` is bash rc 2, and
+    // task #419 closed it).
+    assert_eq!(
+        verdict_of(b"echo x\\()", None),
+        Some(Stray::CloseParen),
+        "bash rc 2"
+    );
 }
 
 /// The bound is the `;;` **window**, so the next clause's own pattern parens are
@@ -226,72 +272,46 @@ fn an_escaped_paren_opens_no_group() {
 #[test]
 fn the_limit_is_the_semi_semi_window() {
     // `echo hi;;b)`: the window sits at index 2.
-    assert!(!opens(b"echo hi;;b)", Some(2)));
-    assert!(!opens(b"echo hi;;b)", Some(4)));
+    assert_eq!(verdict_of(b"echo hi;;b)", Some(2)), None);
+    assert_eq!(verdict_of(b"echo hi;;b)", Some(4)), None);
     // Past the window (the mutation of the bound) the clause's paren is seen.
-    assert!(opens(b"echo hi;;b)", Some(6)));
-    assert!(opens(b"echo hi;;b)", None));
+    assert_eq!(
+        verdict_of(b"echo hi;;b)", Some(6)),
+        Some(Stray::ClausePattern)
+    );
+    assert_eq!(verdict_of(b"echo hi;;b)", None), Some(Stray::ClausePattern));
 }
 
-/// A region that *starts* at the paren has no word before it, and an arm whose
-/// paren sits in a word-list place (a nested `case` arm, behind `in`) is
-/// untouched: `case a in a) case b in b) echo y;; esac;; esac` is bash rc 0 and
-/// task #418's window walk lands it — the nested clause's first pattern `)` is
-/// behind `in`, so this rule never sees it as a clause paren (the pair of pins
+/// A region that *starts* at the paren has no word before it — the `i > 0`
+/// guard belongs to task #300's clause-pattern arm only, so the no-predecessor
+/// arm of the classification takes it (`case x in a) ) ;; esac` is bash rc 2,
+/// task #419 closed it) — and an arm whose paren sits in a word-list place (a
+/// nested `case` arm, behind `in`) is untouched: `case a in a) case b in b)
+/// echo y;; esac;; esac` is bash rc 0 and task #418's window walk lands it — the
+/// nested clause's first pattern `)` is behind `in`, so this rule never sees it
+/// as a clause paren (the pair of pins
 /// [`the_window_test_reads_the_region_it_now_spans`] and the integration
 /// `a_nested_block_in_an_arm_keeps_its_semi_semi`).
 #[test]
-fn a_paren_with_no_word_before_it_is_not_a_pattern_paren() {
+fn a_paren_with_no_word_before_it_is_a_stray_close_paren() {
     let tokens = tokenize_statement(b"a)").unwrap();
     let region = tokens.get(1..).unwrap();
-    assert!(!opens_next_pattern(region, None, b"a)"));
-    assert!(!opens(b"case b in b)", None));
-}
-
-/// The bound of the walk is the `;;` **window**, and task #418 made the window
-/// the arm's own level — so the region the walk reads now spans a nested block.
-/// Up to that window a nested pattern paren is still not a clause paren (the
-/// word behind `in` is a word-list word), and the region's last window decides
-/// where the walk stops; past it, the nested clause's `)` in command position is
-/// seen. The second row is the nested clause list with a **second** clause: its
-/// pattern sits in command position (the nested `;;` restarted it), so this rule
-/// answers `case: missing ';;' between clauses` where bash rc 0 runs both
-/// clauses — the divergence the plan's pin list calls parity, pinned as measured
-/// in `tests/case.rs::a_nested_block_in_an_arm_keeps_its_semi_semi`.
-#[test]
-fn the_window_test_reads_the_region_it_now_spans() {
-    // One nested clause: nothing in the region is a pattern paren.
-    let line = b"case a in a) case b in b) echo y;; esac;; esac";
-    let tokens = tokenize_statement(line).unwrap();
-    let region = tokens.get(5..).unwrap();
-    // The window is the outer `;;` pair: region index 10 (the nested `case`'s
-    // own window, at region index 7, belongs to the nested clause).
-    assert!(!opens_next_pattern(region, Some(10), line));
-    assert!(
-        !opens_next_pattern(region, Some(7), line),
-        "up to the nested clause's own window"
+    assert_eq!(
+        verdict(region, None, b"a)", 0),
+        Some((Stray::CloseParen, 1))
     );
-
-    // The two-clause nested list: the walk to the outer window crosses the
-    // nested second clause's pattern paren, and its word sits in command
-    // position — the rule fires.
-    let line = b"case a in a) case b in x) echo n;; *) echo inner;; esac;; esac";
-    let tokens = tokenize_statement(line).unwrap();
-    let region = tokens.get(5..).unwrap();
-    assert!(opens_next_pattern(region, Some(16), line));
-    assert!(
-        !opens_next_pattern(region, Some(7), line),
-        "the nested clause's own window bounds a walk that never reaches the `*)`"
-    );
+    assert_eq!(verdict_of(b"case b in b)", None), None);
 }
 
 /// The operator tokens the scan reads as predecessors: a `)` behind the `;;`
-/// pair, behind a pipeline `|`, or behind a `&` is never a pattern paren.
+/// pair, behind a pipeline `|`, or behind a `&` is never a *pattern* paren — it
+/// is a paren the command list cannot take (task #419 closed the row; bash rc 2
+/// on all three, e.g. `case x in a) echo hi;; ) ;; esac`).
 #[test]
-fn a_paren_behind_an_operator_token_is_not_a_pattern_paren() {
-    assert!(!opens(b";;)", None));
-    assert!(!opens(b"|)", None));
-    assert!(!opens(b"&)", None));
+fn a_paren_behind_an_operator_token_is_a_stray_close_paren() {
+    assert_eq!(verdict_of(b";;)", None), Some(Stray::CloseParen));
+    assert_eq!(verdict_of(b"|)", None), Some(Stray::CloseParen));
+    assert_eq!(verdict_of(b"&)", None), Some(Stray::CloseParen));
 }
 
 /// A heredoc **body** is blanked by `tokenize_statement`, so it is never in the
@@ -300,34 +320,73 @@ fn a_paren_behind_an_operator_token_is_not_a_pattern_paren() {
 /// newline `esac` prints `x)` verbatim in bash, rc 0).
 #[test]
 fn a_heredoc_body_written_in_an_arm_is_not_in_the_region() {
-    assert!(!opens(b"case x in x) cat <<T\nx)\n)\nT\nesac", None));
+    assert_eq!(
+        verdict_of(b"case x in x) cat <<T\nx)\n)\nT\nesac", None),
+        None
+    );
 }
 
 /// A **quoted** separator word is word data, so it never restarts command
 /// position for the paren written behind it (task #336, [`separator_data`]): the
-/// `)` follows an argument and stays arm text — the accepted #419 family. The
-/// unquoted twins are the rows of [`a_paren_behind_a_command_position_word_opens_the_next_pattern`].
+/// `)` follows an argument and the argument arm of the verdict takes it — the
+/// family task #419 closed (bash rc 2). The unquoted twins are the rows of
+/// [`a_paren_behind_a_command_position_word_opens_the_next_pattern`].
 #[test]
 fn a_quoted_semicolon_never_restarts_command_position() {
     // The real `;` restarts command position, so the `)` behind the next word is
     // the clause pattern of a missing `;;`.
-    assert!(opens(b"echo a;b)", None));
+    assert_eq!(
+        verdict_of(b"echo a;b)", None),
+        Some(Stray::ClausePattern),
+        "bash rc 2"
+    );
     // The quoted and escaped words are the command's **arguments**: the paren
-    // follows data.
-    assert!(!opens(b"echo a \";\" b)", None));
-    assert!(!opens(b"echo a ';' b)", None));
-    assert!(!opens(b"echo a \\; b)", None));
-    assert!(
-        opens(b"echo a \";\" b); c)", None),
-        "the quoted word keeps the first `)` out of the rule, and the real `;` of \
-         the next statement restarts command position for `c`"
+    // follows data, and the argument arm answers with the new verdict.
+    assert_eq!(
+        verdict_of(b"echo a \";\" b)", None),
+        Some(Stray::CloseParen),
+        "bash rc 2"
+    );
+    assert_eq!(
+        verdict_of(b"echo a ';' b)", None),
+        Some(Stray::CloseParen),
+        "bash rc 2"
+    );
+    assert_eq!(
+        verdict_of(b"echo a \\; b)", None),
+        Some(Stray::CloseParen),
+        "bash rc 2"
+    );
+    assert_eq!(
+        verdict_of(b"echo a \";\" b); c)", None),
+        Some(Stray::CloseParen),
+        "the quoted word keeps the first `)` as word data (task #336), so the walk's \
+         first judged paren is that one: its predecessor sits in argument position \
+         and task #419's arm answers — the real `;` and `c` are never reached"
     );
     // The same rule inside the arm's own block bodies, where the `;` of the
     // block's clauses is command position.
-    assert!(!opens(b"if true; then echo a \";\" b) fi", None));
-    assert!(opens(b"if true; then echo a; b) fi", None));
+    assert_eq!(
+        verdict_of(b"if true; then echo a \";\" b) fi", None),
+        Some(Stray::CloseParen),
+        "bash rc 2"
+    );
+    assert_eq!(
+        verdict_of(b"if true; then echo a; b) fi", None),
+        Some(Stray::ClausePattern),
+        "bash rc 2"
+    );
     // A quoted separator as the arm's **first** word is the command word, not a
-    // restart; the paren behind its argument is arm text (#419's family).
-    assert!(!opens(b"\";\" b)", None));
-    assert!(opens(b"; b)", None), "the real `;` leaves command position");
+    // restart; the paren behind its argument is an argument's paren (task #419
+    // closed it, bash rc 2).
+    assert_eq!(
+        verdict_of(b"\";\" b)", None),
+        Some(Stray::CloseParen),
+        "bash rc 2"
+    );
+    assert_eq!(
+        verdict_of(b"; b)", None),
+        Some(Stray::ClausePattern),
+        "the real `;` leaves command position"
+    );
 }

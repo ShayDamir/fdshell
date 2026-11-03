@@ -30,6 +30,8 @@ pub(crate) enum ParseError {
     CaseEmptyWord,
     /// case: ';' before an empty clause list
     CaseEmptyClauseList,
+    /// case arm: unexpected ')' — a command list cannot take a paren
+    CaseArmUnexpectedCloseParen,
     /// internal invariant violated
     Never,
     /// not a valid octal number
@@ -170,4 +172,4 @@ pub(crate) enum ParseError {
 impl core::error::Error for ParseError {}
 
 pub(crate) use position::report_unexpected_eof;
-pub(crate) use position::{ParsePosition, report_unbalanced_quote};
+pub(crate) use position::{ParsePosition, report_case_arm_close_paren, report_unbalanced_quote};
