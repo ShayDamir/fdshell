@@ -1,9 +1,13 @@
-//! The group's **tail**: the redirections written after the closing brace.
-//! Extracted from `parse/group_block.rs` for the line budget (task #354); the
+//! The group's **tail**: the redirections written after the closing brace —
+//! the path family and, since task #409, the `&>` family (`{ …; } &> f`,
+//! `{ …; }&>>f`), taken by the same parsers the keyword block's tail and the
+//! simple-command collector use. Extracted from `parse/group_block.rs` for the
+//! line budget (task #354); the
 //! closer logic (`split_close`) stays with the closer rule.
 
 use super::Token;
 use crate::error::parse::ParseError;
+use crate::parse::bg_redirect::parse_bg_redirect;
 use crate::parse::classify::parse_redirect;
 use crate::parse::pipe_token_span;
 use crate::redirect::RedirectDef;
@@ -37,9 +41,12 @@ pub(super) fn command_tail(tail: &[Token], regions: &[(usize, usize)], append: b
 
 /// The redirections written after `}`, in source order. A here-doc/here-string
 /// operator is checked first (it starts with `<`, which the read redirect would
-/// otherwise swallow); a pipeline, background, here-doc, or here-string form on
-/// the group is a parse error (each is a separate task), and so is a trailing
-/// plain word. The here-doc test is the shared raw-span shape rule, so the
+/// otherwise swallow); then the `&>` family's redirect arms, then the path
+/// family. A pipeline, a **bare** `&`/`&&`, a here-doc, a here-string or a
+/// trailing plain word on the group is a parse error (each is a separate task),
+/// and so is the `&>` family's pidvar half (`&>&name`), which bash rejects behind
+/// a closer exactly as it rejects the bare `&` here — the pidvar is a
+/// simple-command position. The here-doc test is the shared raw-span shape rule, so the
 /// io-number form `{ …; } 3<<T` keeps the here-doc message instead of degrading
 /// to a trailing word.
 pub(super) fn redirects(
@@ -52,6 +59,22 @@ pub(super) fn redirects(
         let (t, start, end, _fq, _mask, _spans) = tail.get(i).ok_or(ParseError::Never)?;
         if t.starts_with(b"<<") || span_operator(line, *start, *end).is_some() {
             bail!(ParseError::GroupHereDocNotSupported);
+        }
+        // The `&>` family's redirect arms (`&> f`, `&>>f`, the `%var` target) are
+        // [`parse_bg_redirect`]'s — the one parser `parse/command/collect_tail.rs`
+        // and `parse/block_tail.rs` drive, so the family's dispatch order
+        // (here-doc → `&>` → path) is one rule with three readers, and it is
+        // provably non-contending: [`parse_redirect`] declines a `&`-prefixed
+        // token. The family's **pidvar** half (`&>&name`, `&>|&name`) stays a
+        // simple-command position: bash rejects it behind a `}` (rc 2), so it keeps
+        // this file's message for every `&` shape.
+        if let Some((bg, extra)) = parse_bg_redirect(tail, i)? {
+            if bg.pidvar.is_some() {
+                bail!(ParseError::UnexpectedChar { ch: b'&' });
+            }
+            redirects.extend(bg.redirects);
+            i += extra + 1;
+            continue;
         }
         if let Some((def, extra)) = parse_redirect(tail, i)? {
             redirects.push(def);

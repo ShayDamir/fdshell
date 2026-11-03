@@ -1,13 +1,16 @@
 //! The **word** written after a keyword block's closing keyword: bash demands a
 //! separator there, so the word is its syntax error and this module reports it at
 //! the house rc 1 (task #405, the keyword-block twin of `group_block::tail`'s
-//! `GroupTrailingWord`, measured against bash 5.3.9). The three operators the walk
-//! takes itself — path, here-doc ([`super::heredoc`]) and here-string — never reach this
-//! judge. The shapes it **stops** at stay their owners': the separator and
-//! word-break shapes of the #316/#396 family (which is also what stops a `<<`
-//! glued *inside* the closer's word — the pinned house rule "a `<<` glued inside a
-//! word stays word data": the byte scan counts no operator there, so the here-doc
-//! arm declines it and the walk stops without a report), the comment word of task
+//! `GroupTrailingWord`, measured against bash 5.3.9). The four operators the walk
+//! takes itself — path, here-doc ([`super::heredoc`]), here-string and the `&>`
+//! family ([`super::bg`], task #409) — never reach this judge; the `&>` arm decides
+//! its own pidvar refusal (`done &>&job`), so the byte-level [`stops`] list below is
+//! unchanged and simply stops seeing `&>`-prefixed tokens. The shapes it **stops**
+//! at stay their owners': the separator and word-break shapes of the #316/#396
+//! family (which is also what stops a `<<` glued *inside* the closer's word — the
+//! pinned house rule "a `<<` glued inside a word stays word data": the byte scan
+//! counts no operator there, so the here-doc arm declines it and the walk stops
+//! without a report), the comment word of task
 //! #296, and the heredoc structure an append leaves behind the closer.
 
 use crate::bytes::word_break;

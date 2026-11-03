@@ -55,6 +55,27 @@ fn shape(redirects: &[RedirectDef]) -> Vec<(i32, RedirectDirection, Vec<u8>)> {
         .collect()
 }
 
+/// `(fd, extra_to, direction, target)` — the shape helper plus the field the
+/// `&>` family exists for (task #409), so a combined def cannot pass for a plain
+/// `>` one. Path and fd-variable targets only; see `the_family_at_the_closer_names_its_extra_to`.
+fn family_shape(redirects: &[RedirectDef]) -> Vec<(i32, Option<i32>, RedirectDirection, Vec<u8>)> {
+    redirects
+        .iter()
+        .map(|r| {
+            let target = match &r.source {
+                RedirectSource::Path { path, .. } => path.as_bytes().unwrap_or(&[]).to_vec(),
+                RedirectSource::Var(path) => {
+                    let mut t = b"var:".to_vec();
+                    t.extend(path.as_bytes().unwrap_or(&[]));
+                    t
+                }
+                other => panic!("not a path/var source: {other:?}"),
+            };
+            (r.export_to, r.extra_to, r.direction, target)
+        })
+        .collect()
+}
+
 /// The group's own trailing redirections, in source order.
 #[test]
 fn redirects_after_brace() {
@@ -157,9 +178,12 @@ fn redirect_syntax_error_propagates_through_the_group_tail() {
 /// pipe-token predicate, moved here by #346): only the one-`|`-byte span is the
 /// tokenizer's pipe token, so a quoted `"|"` / `'|'` and an escaped `\|` are
 /// trailing **words**, the same error a plain word after `}` gives, where the
-/// real `|` is the pipeline operator the group cannot take. The `&` row is the
-/// deliberately ungated neighbour: its test is a prefix test, so `&&`/`&>` keep
-/// their pinned errors.
+/// real `|` is the pipeline operator the group cannot take. The `&` rows are the
+/// deliberately ungated neighbours: their tests are prefix tests, so the bare `&`
+/// and `&&` keep their pinned errors. The `&>` family left that pair when task
+/// #409 taught the tail its redirect arms — only its pidvar half still answers
+/// here, in this same wording (see
+/// `the_family_at_the_closer_names_its_extra_to`).
 #[test]
 fn a_quoted_pipe_word_is_a_trailing_word() {
     assert_eq!(tail_err(b"{ echo a; } | cat"), "unexpected pipe");
@@ -197,4 +221,70 @@ fn a_quoted_pipe_word_is_a_trailing_word() {
         tail_err(b"{ echo a; } &"),
         "unexpected character in this context"
     );
+}
+
+/// The `&>` family at the group's closer (task **#409**). Every row names
+/// `extra_to`, because that field is what makes a combined def: the `shape()` above
+/// cannot see it, so a `&>` def would pass for a plain `>` def (LESSONS "The `&>`
+/// family is one operator, so one open, so one description shared by fd 1 and fd
+/// 2"). The bare `&`/`&&` rows stay the pinned parse errors (owners #188/#192), and
+/// the family's **pidvar** half is refused here too, in the same wording: the pidvar
+/// is a simple-command position. Values measured 2026-11-03 against bash 5.3.9 in
+/// `tests/group.rs::the_combined_redirect_family_on_the_group_closer`.
+#[test]
+fn the_family_at_the_closer_names_its_extra_to() {
+    assert_eq!(
+        family_shape(&tail_redirects(b"{ echo a; } &> f")),
+        vec![(1, Some(2), RedirectDirection::Write, b"f".to_vec())]
+    );
+    assert_eq!(
+        family_shape(&tail_redirects(b"{ echo a; } &>> f")),
+        vec![(1, Some(2), RedirectDirection::Append, b"f".to_vec())]
+    );
+    // The glued closer `}&>f` splits at the brace, like the `}>out3` row above.
+    assert_eq!(
+        family_shape(&tail_redirects(b"{ echo a; }&>f")),
+        vec![(1, Some(2), RedirectDirection::Write, b"f".to_vec())]
+    );
+    assert_eq!(
+        family_shape(&tail_redirects(b"{ echo a; }&>>f")),
+        vec![(1, Some(2), RedirectDirection::Append, b"f".to_vec())]
+    );
+    // The operand consumption in both orders (POSIX #2.5: the writes apply in the
+    // order they were written, and each file still opens).
+    assert_eq!(
+        family_shape(&tail_redirects(b"{ echo a; } &> f 2> g")),
+        vec![
+            (1, Some(2), RedirectDirection::Write, b"f".to_vec()),
+            (2, None, RedirectDirection::Write, b"g".to_vec())
+        ]
+    );
+    assert_eq!(
+        family_shape(&tail_redirects(b"{ echo a; } 2> g &> f")),
+        vec![
+            (2, None, RedirectDirection::Write, b"g".to_vec()),
+            (1, Some(2), RedirectDirection::Write, b"f".to_vec())
+        ]
+    );
+    // The `%var` target stays the fd-variable source: bash reads the file name `%v`,
+    // and that divergence is the family's, documented in POSIX_COMPATIBILITY
+    // (">`%var` and `&>%var` redirect to the descriptor").
+    assert_eq!(
+        family_shape(&tail_redirects(b"{ echo a; } &>%v")),
+        vec![(1, Some(2), RedirectDirection::Write, b"var:v".to_vec())]
+    );
+    // The refusals at this position: the pidvar arms keep the message this file
+    // already gives every `&` shape, and the family's own `|` and no-operand arms
+    // keep the redirect error (bash: rc 2 for all of them).
+    assert_eq!(
+        tail_err(b"{ echo a; } &>&p"),
+        "unexpected character in this context"
+    );
+    assert_eq!(
+        tail_err(b"{ echo a; } &>|&p"),
+        "unexpected character in this context"
+    );
+    assert_eq!(tail_err(b"{ echo a; } &>|f"), "invalid redirect syntax");
+    assert_eq!(tail_err(b"{ echo a; } &>"), "invalid redirect syntax");
+    assert_eq!(tail_err(b"{ echo a; } &>>"), "invalid redirect syntax");
 }

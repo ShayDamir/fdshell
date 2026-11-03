@@ -293,7 +293,7 @@ fn the_glued_tail_word_is_the_spaced_word() {
 /// The **exact** shifted span list, so the equality above cannot be satisfied by
 /// a shared off-by-one. A zero-byte quote pair is recorded at the index it opens
 /// at in the **word's own** text (task #321), so glued it sits `kw.len()` bytes
-/// into the closer word and [`shift_spans`] moves it back by exactly that; the
+/// into the closer word and [`close::shift_spans`] moves it back by exactly that; the
 /// operator byte is stepped past once more by the redirect parser, which is
 /// shared by both spellings.
 #[test]
@@ -338,8 +338,9 @@ fn the_glued_tail_word_shifts_its_spans_by_the_keyword() {
     );
 }
 
-/// The leniency boundary: the walk takes its own three arms (path, here-doc,
-/// here-string — the rows above), and **stops** without judging the shapes
+/// The leniency boundary: the walk takes its own four arms (path, here-doc,
+/// here-string — the rows above — and the `&>` family), and **stops** without
+/// judging the shapes
 /// [`word`] names; a block with no tail has no redirections at all. An ordinary
 /// word is the report (task #405), so a redirect collected before it is gone —
 /// the parse dies, and the test reads the message.
@@ -347,8 +348,14 @@ fn the_glued_tail_word_shifts_its_spans_by_the_keyword() {
 fn the_walk_stops_at_the_exemption_shapes_and_reports_a_word() {
     assert!(shape(&tail(b"while :; do :; done")).is_empty());
     // The exemption arms, one row each, so none of them is dead code.
-    // The `&>` family on a closer is #409's, and the bare `&` separator with it.
-    assert!(shape(&tail(b"while :; do :; done &> f")).is_empty());
+    // The bare `&` separator stays the #352 owner's. The `&>` family is an arm
+    // since #409 — the row is here so the boundary it used to be on stays visible,
+    // and it is the family's basic spelling; `bg::tests` pins the def with
+    // `extra_to` named (this file's `shape()` cannot see that field).
+    assert_eq!(
+        shape(&tail(b"while :; do :; done &> f")),
+        vec![(1, RedirectDirection::Write, b"f".to_vec())]
+    );
     assert!(shape(&tail(b"while :; do :; done &")).is_empty());
     // A comment word at a word start is task #296's; the tokenizer's own comment
     // rule is what keeps its text out of the walk today, so this row is the

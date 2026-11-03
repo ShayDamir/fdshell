@@ -1,13 +1,21 @@
 //! The keyword block's **tail**: the redirections written after its closing
-//! keyword (`while :; do :; done > f`) — path, here-doc ([`heredoc`], task #408)
-//! and here-string — and the **word** written there — bash
+//! keyword (`while :; do :; done > f`) — path, here-doc ([`heredoc`], task #408),
+//! here-string and the `&>` family ([`bg`], task #409) — and the **word** written
+//! there — bash
 //! demands a separator after a closing keyword, so a word is its syntax error
 //! ([`word`], task #405). The closer's own separator (a `;`/newline, not the
 //! keyword) is the block span's end, so a trailing redirection rides in
 //! the block's own text and every builder's `up_to_closing` truncation drops it:
 //! the tail is parsed **at** the closer, by this one module, exactly as
 //! [`crate::parse::group_block`] does it for `{ …; }`.
+//!
+//! The `&>` arm takes the family's redirect arms (`&> f`, `&>>f`, the `%var`
+//! target) and **refuses its pidvar arm** (`done &>&job`): at a closer bash
+//! rejects the line, so the walk reports its `&` there instead of backgrounding
+//! the block.
 
+pub(crate) mod bg;
+pub(crate) mod close;
 pub(crate) mod heredoc;
 pub(crate) mod word;
 
@@ -16,8 +24,8 @@ use crate::error::parse::ParseError;
 use crate::parse::classify::parse_redirect;
 use crate::parse::here_string::parse_here_string;
 use crate::redirect::RedirectDef;
-use alloc::vec;
 use alloc::vec::Vec;
+use close::split_close;
 use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 
@@ -52,11 +60,18 @@ pub(crate) fn closer_index(tokens: &[Token], kw: &[u8]) -> Option<usize> {
 /// what bash gives (`done > f > g` leaves `f` empty, `g` holds the output).
 ///
 /// The path-redirect arm is [`parse_redirect`]'s, the here-doc arm is
-/// [`heredoc`]'s and the here-string arm is [`parse_here_string`]'s — each is
+/// [`heredoc`]'s, the here-string arm is [`parse_here_string`]'s and the `&>`
+/// arm is [`bg`]'s — each is
 /// gated on its own raw-span shape rule, so the walk simply takes them **in
 /// source order** and continues past them (task #408: a here-doc/here-string
 /// written behind the closer belongs to the whole block, and the block's `text`
-/// is what claims its body region from). What the walk does **not** take is a
+/// is what claims its body region from; task #409: the `&>` family belongs to
+/// the whole block the same way). The order is not arbitrary and is not
+/// load-bearing either: [`parse_redirect`] declines a `&`-prefixed token (its
+/// prefix is not all digits) and [`bg`] fires only on a `&>`-prefixed one, so the
+/// two never contend — the same order
+/// `parse/command/collect_tail.rs` and `parse/group_block/tail.rs` keep, one rule
+/// with three readers. What the walk does **not** take is a
 /// word: bash requires a separator after a closing keyword, so a token none of
 /// the arms reads goes to [`word::judge`], and only the shapes [`word`] names
 /// stay accepted.
@@ -81,6 +96,11 @@ pub(crate) fn redirects(
             i += extra + 1;
             continue;
         }
+        if let Some((defs, extra)) = bg::defs_at(&tail, i)? {
+            redirects.extend(defs);
+            i += extra + 1;
+            continue;
+        }
         let Some((def, extra)) = parse_redirect(&tail, i)? else {
             word::judge(kw, tok, line)?;
             break;
@@ -89,44 +109,6 @@ pub(crate) fn redirects(
         i += extra + 1;
     }
     Ok(redirects)
-}
-
-/// The tail tokens, with a glued closer split off: `done>f` contributes the
-/// `>f` token, aligned with its raw range, mask and quote spans — the rule
-/// `group_block::split_close` applies to the group's `}`.
-fn split_close(kw: &[u8], at_closer: &[Token]) -> Vec<Token> {
-    let rest_tokens = at_closer.get(1..).unwrap_or(&[]).to_vec();
-    let Some((t, start, end, fq, mask, spans)) = at_closer.first().cloned() else {
-        return rest_tokens;
-    };
-    let Some(rest) = t
-        .get(kw.len()..)
-        .filter(|r| r.starts_with(b"<") || r.starts_with(b">"))
-    else {
-        return rest_tokens;
-    };
-    let off = kw.len();
-    let mut tail = vec![(
-        rest,
-        start + off,
-        end,
-        fq,
-        mask.get(off..).unwrap_or(&[]).to_vec(),
-        shift_spans(&spans, off),
-    )];
-    tail.extend_from_slice(&rest_tokens);
-    tail
-}
-
-/// The quote-span indices of the slice of a word that starts at offset `off`:
-/// every span at or past `off` shifts by it (`envassign::value_spans`'
-/// alignment, without its `=`-byte step).
-fn shift_spans(spans: &[usize], off: usize) -> Vec<usize> {
-    spans
-        .iter()
-        .filter(|&&i| i >= off)
-        .map(|&i| i - off)
-        .collect()
 }
 
 #[cfg(test)]
