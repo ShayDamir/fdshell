@@ -6,6 +6,7 @@ use crate::error::parse::ParseError;
 use crate::mask::MaskBit::Unquoted;
 use crate::mask::tests::runs;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use alloc::format;
 use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -4763,27 +4764,44 @@ fn the_tail_reads_the_whole_redirect_family() {
 }
 
 /// The leniency boundary, in every builder: the bare closer takes no
-/// redirection, a plain word behind it is task #405's (the block runs, the word
-/// stays as it is today), and a here-doc/here-string operator on the closer is
-/// #408's.
+/// redirection, and a here-doc/here-string operator on the closer is #408's. A
+/// plain word behind it is task #405's and reaches the report — pinned in
+/// [`a_word_behind_a_closer_is_the_report_in_every_builder`].
 #[test]
-fn a_word_and_a_heredoc_operator_behind_a_closer_stay_their_owners() {
+fn the_bare_closer_and_the_here_doc_shapes_behind_a_closer_stay_their_owners() {
     for line in [
         b"while :; do :; done".as_slice(),
         b"if :; then :; fi".as_slice(),
         b"for x in a; do :; done".as_slice(),
         b"for ((i=0;i<1;i++)); do :; done".as_slice(),
         b"case x in x) :;; esac".as_slice(),
-        b"while :; do :; done x".as_slice(),
-        b"if :; then :; fi x".as_slice(),
-        b"case x in x) :;; esac x".as_slice(),
         b"while :; do cat <<T; done".as_slice(),
         b"while :; do :; done <<T".as_slice(),
         b"if :; then :; fi <<<hi".as_slice(),
         b"for x in a; do :; done 3<<T".as_slice(),
-        b"case x in x) :;; esac \">\" f".as_slice(),
     ] {
         assert!(block_redirects(line).is_empty(), "{line:?}");
+    }
+}
+
+/// Task #405: a word behind the closing keyword is the report, in every builder,
+/// naming its closer (bash: rc 2; the house parse-error convention is rc 1) — the
+/// keyword-block twin of the group's `group: unexpected word after '}'`.
+#[test]
+fn a_word_behind_a_closer_is_the_report_in_every_builder() {
+    for (line, closer) in [
+        (b"while :; do :; done x".as_slice(), "done"),
+        (b"if :; then :; fi x".as_slice(), "fi"),
+        (b"case x in x) :;; esac x".as_slice(), "esac"),
+        (b"case x in x) :;; esac \">\" f".as_slice(), "esac"),
+    ] {
+        assert_eq!(
+            parse(line).err().unwrap().current_context().to_string(),
+            format!(
+                "'{closer}' must be followed by a separator (';', a newline, '&', '|') — unexpected word"
+            ),
+            "{line:?}"
+        );
     }
 }
 

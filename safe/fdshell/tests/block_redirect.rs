@@ -538,22 +538,63 @@ fn closer_shaped_words_stay_word_data() {
     );
 }
 
-/// The pinned divergences, each with its owner. A plain word behind the closer
-/// is accepted (bash: rc 2), owned by **#405**; a here-doc / here-string
+/// The pinned divergences, each with its owner. A plain word behind the closer is
+/// the **house parse error at rc 1** (bash: rc 2) — task **#405** landed it, the
+/// block runs nothing, and the wording is the keyword-block twin of the group's
+/// `group: unexpected word after '}'`; a here-doc / here-string
 /// operator on the closer is dropped (bash feeds the body to the block),
 /// owned by **#408**; the `&>` family on a closer is dropped (bash combines),
 /// owned by **#409**; a bare `>` with no operand is fdshell's rc-1 redirect
 /// syntax error (bash: rc 2) — the house parse-error convention.
+/// Every value below is measured on this build against bash 5.3.9.
 #[test]
 fn the_pinned_divergences_behind_a_closer() {
+    // #405: the word behind the closer is the report, and nothing of the block
+    // runs (bash stops on the whole line, so a statement that already ran is the
+    // only output the house convention allows).
     let dir = Scratch::new();
     let o = run(&dir, "while :; do echo a; break; done x");
-    assert_eq!((out(&o), rc(&o)), ("a\n", Some(0)), "stderr={}", err(&o));
+    assert_eq!((out(&o), rc(&o)), ("", Some(1)), "stderr={}", err(&o));
+    assert!(
+        err(&o).contains("'done' must be followed by a separator"),
+        "stderr={}",
+        err(&o)
+    );
     assert!(!dir.join("x").exists(), "#405: the word is not a target");
 
     let dir = Scratch::new();
     let o = run(&dir, "if true; then echo t; fi x#y && echo y");
-    assert_eq!((out(&o), rc(&o)), ("t\ny\n", Some(0)), "stderr={}", err(&o));
+    assert_eq!((out(&o), rc(&o)), ("", Some(1)), "stderr={}", err(&o));
+    assert!(
+        err(&o).contains("'fi' must be followed by a separator"),
+        "stderr={}",
+        err(&o)
+    );
+
+    // The same rule on the closer of a block that is itself a body statement —
+    // the inner builder answers it. Bash: rc 2, nothing runs.
+    let dir = Scratch::new();
+    let o = run(
+        &dir,
+        "while :; do if :; then :; fi x; break; done; echo end",
+    );
+    assert_eq!((out(&o), rc(&o)), ("", Some(1)), "stderr={}", err(&o));
+    assert!(
+        err(&o).contains("'fi' must be followed by a separator"),
+        "stderr={}",
+        err(&o)
+    );
+    // A body that never runs never reports (the shared lazy-parse rule), so the
+    // identical shape with `while false` stays bash's one divergence: fdshell runs
+    // `echo end` at rc 0, bash prints nothing at rc 2.
+    let dir = Scratch::new();
+    let o = run(&dir, "while false; do if :; then :; fi x; done; echo end");
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("end\n", Some(0)),
+        "bash rc 2; an unrun body never parses, so it never reports: stderr={}",
+        err(&o)
+    );
 
     // #408: bash feeds the here-doc body to the block; fdshell prints nothing.
     let dir = Scratch::new();

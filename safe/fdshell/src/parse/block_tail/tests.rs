@@ -18,7 +18,7 @@ fn run(b: &[u8], kw: &[u8]) -> Result<Vec<RedirectDef>, Report<ParseError>> {
     let at = (0..tokens.len())
         .rfind(|&i| tokens.get(i).is_some_and(|t| is_closer(t, kw)))
         .unwrap();
-    redirects(kw, tokens.get(at..).unwrap_or(&[]))
+    redirects(kw, tokens.get(at..).unwrap_or(&[]), b)
 }
 
 fn tail(b: &[u8]) -> Vec<RedirectDef> {
@@ -30,7 +30,11 @@ fn tail_kw(b: &[u8], kw: &[u8]) -> Vec<RedirectDef> {
 }
 
 fn tail_err(b: &[u8]) -> String {
-    match run(b, b"done") {
+    tail_err_kw(b, b"done")
+}
+
+fn tail_err_kw(b: &[u8], kw: &[u8]) -> String {
+    match run(b, kw) {
         Ok(_) => panic!("expected a parse error for {b:?}"),
         Err(e) => e.current_context().to_string(),
     }
@@ -311,25 +315,87 @@ fn the_glued_tail_word_shifts_its_spans_by_the_keyword() {
     );
 }
 
-/// The leniency boundary: the walk **stops** at a plain word (task #405's) and
-/// at a `<<`-shaped operator (task #408's), so both keep the behavior their
-/// pins record, and a block with no tail has no redirections at all.
+/// The leniency boundary: the walk **stops** at a `<<`-shaped operator (task
+/// #408's owner) and at the shapes [`word`] names, and a block with no tail has no
+/// redirections at all; an ordinary word is the report (task #405), so a redirect
+/// collected before it is gone — the parse dies, and the test reads the message.
 #[test]
-fn the_walk_stops_at_a_word_and_at_a_heredoc_operator() {
+fn the_walk_stops_at_the_exemption_shapes_and_reports_a_word() {
     assert!(shape(&tail(b"while :; do :; done")).is_empty());
-    assert!(shape(&tail(b"while :; do :; done x")).is_empty());
-    assert!(shape(&tail(b"while :; do :; done \"c\"")).is_empty());
+    // The exemption arms, one row each, so none of them is dead code.
     assert!(shape(&tail(b"while :; do :; done <<T")).is_empty());
     assert!(shape(&tail(b"while :; do :; done <<<hi")).is_empty());
     // The io-number form of the same operator is the here-doc shape too.
     assert!(shape(&tail(b"while :; do :; done 3<<T")).is_empty());
-    // A quoted operator is word data, so no redirect: the tail stops at it.
-    assert!(shape(&tail(b"while :; do :; done \">\" f")).is_empty());
-    // A redirect is collected up to the first stop, in order.
+    // The `&>` family on a closer is #409's, and the bare `&` separator with it.
+    assert!(shape(&tail(b"while :; do :; done &> f")).is_empty());
+    assert!(shape(&tail(b"while :; do :; done &")).is_empty());
+    // A comment word at a word start is task #296's; the tokenizer's own comment
+    // rule is what keeps its text out of the walk today, so this row is the
+    // boundary pin the LESSONS entry names, not a reachable arm.
+    assert!(shape(&tail(b"while :; do :; done # c")).is_empty());
+    // A separator/word-break shape is the #316/#396 family (bash rc 2 there).
+    assert!(shape(&tail(b"while :; do :; done (x)")).is_empty());
     assert_eq!(
-        shape(&tail(b"while :; do :; done > f x")),
-        vec![(1, RedirectDirection::Write, b"f".to_vec())]
+        tail_err(b"while :; do :; done x"),
+        word_err(b"done"),
+        "the word is the report"
     );
+    assert_eq!(tail_err(b"while :; do :; done \"c\""), word_err(b"done"));
+    // A quoted operator is word data, so it is the report, not a redirect.
+    assert_eq!(tail_err(b"while :; do :; done \">\" f"), word_err(b"done"));
+    // A redirect is collected up to the first word, and the word kills it.
+    assert_eq!(tail_err(b"while :; do :; done > f x"), word_err(b"done"));
+}
+
+/// The report, one row per builder closer (task #405): every word shape — bare,
+/// quoted, a substitution, an assignment, glued behind an operator — is the
+/// message naming its closer. Bash answers each with rc 2; rc 1 is the house
+/// parse-error convention, the same pair `group_block::tail` gives for `}`.
+#[test]
+fn a_word_after_the_closer_is_the_report_in_every_builder() {
+    for (kw, line) in [
+        (b"done".as_slice(), b"while :; do :; done x".as_slice()),
+        (b"fi".as_slice(), b"if :; then :; fi x".as_slice()),
+        (b"esac".as_slice(), b"case x in x) :;; esac x".as_slice()),
+        (
+            b"done".as_slice(),
+            b"for x in a; do :; done \"c\"".as_slice(),
+        ),
+        (
+            b"done".as_slice(),
+            b"for ((i=0;i<1;i++)); do :; done $(true)".as_slice(),
+        ),
+        (b"fi".as_slice(), b"if :; then :; fi x=y".as_slice()),
+        (b"esac".as_slice(), b"case x in x) :;; esac x#y".as_slice()),
+        (b"done".as_slice(), b"while :; do :; done>f x".as_slice()),
+        (b"fi".as_slice(), b"if :; then :; fi>\"f\" x".as_slice()),
+    ] {
+        assert_eq!(tail_err_kw(line, kw), word_err(kw), "{line:?}");
+    }
+}
+
+/// The `wait` block is fdshell-only (bash has no `wait` block twin), so the rule
+/// landing there is a decision of this task, recorded in the plan: the shared
+/// module judges its closer's tail exactly as it judges the others.
+#[test]
+fn the_wait_block_closer_judges_its_word_too() {
+    assert!(shape(&tail_kw(b"wait\n readable %rd) echo hi ;;\ndone", b"done")).is_empty());
+    assert_eq!(
+        tail_err_kw(
+            b"wait\n readable %rd) echo hi ;;\ndone x",
+            b"done".as_slice()
+        ),
+        word_err(b"done")
+    );
+}
+
+/// The measured message, spelled once so every row above pins the wording.
+fn word_err(closer: &[u8]) -> String {
+    format!(
+        "'{}' must be followed by a separator (';', a newline, '&', '|') — unexpected word",
+        core::str::from_utf8(closer).unwrap()
+    )
 }
 
 /// A redirect operator with no operand is the house parse error (bash: rc 2),

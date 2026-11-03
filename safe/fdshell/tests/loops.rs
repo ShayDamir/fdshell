@@ -2124,6 +2124,50 @@ fn for_list_words_including_keyword_shaped_ones_are_plain_words() {
     );
 }
 
+/// Task #405: bash requires a **separator** after a keyword block's closing
+/// keyword, so a word written there is its syntax error (rc 2) and nothing of the
+/// script runs; fdshell reports its own message at the house rc 1 — the
+/// keyword-block twin of the group's `group: unexpected word after '}'`, and the
+/// rule `parse/block_tail/word.rs` implements for every builder. One row per
+/// builder (`while`, `until`, the word-list `for`, the arithmetic `for`), plus the
+/// word shapes: bare, quoted both ways, a substitution, an assignment, and a word
+/// glued behind a redirection operator. Both columns measured 2026-11-03 against
+/// bash 5.3.9 and this build; the `case` and `if` twins are in
+/// `tests/block_redirect.rs` and `tests/cond_blocks.rs`.
+#[test]
+fn a_word_after_the_closing_keyword_is_a_parse_error() {
+    for script in [
+        "while :; do echo a; break; done x",
+        "until :; do echo a; break; done x",
+        "for i in a; do echo f; break; done x",
+        "for ((i=0;i<1;i++)); do echo g; break; done x",
+        "while :; do echo a; break; done \"c\"",
+        "while :; do echo a; break; done 'c'",
+        "while :; do echo a; break; done $(true)",
+        "while :; do echo a; break; done x=y",
+        "while :; do echo a; break; done >f x",
+        "while :; do echo a; break; done \">\" f",
+    ] {
+        let (out, err, rc) = run_bounded(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            ("", 1),
+            "{script}: stderr={err}, bash rc 2"
+        );
+        assert!(
+            err.contains("must be followed by a separator"),
+            "{script}: stderr={err}"
+        );
+    }
+    // The exemption side of the same walk, so the boundary stays visible: a
+    // separator/word-break shape behind the closer is the #316/#396 family's and
+    // stays accepted (bash rc 2 there, pinned as measured), and so are the
+    // here-doc operators (#408) and the `&>` family (#409) — see
+    // `parse/block_tail/tests.rs` for the unit rows.
+    let (out, err, rc) = run_bounded("while false; do echo a; done (x)");
+    assert_eq!((out.as_str(), rc), ("", 0), "stderr={err}, bash rc 2");
+}
+
 /// The same shapes keep their **own messages** where bash stops at rc 2 (the
 /// rc-1-vs-2 family README pins, task #294's unclosed-construct bullet): the
 /// `esac` that closes a `for` is not a closer, so the block reports

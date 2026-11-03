@@ -1305,8 +1305,10 @@ fn a_loop_body_that_never_returns_is_bash_parity() {
 /// no such command), so the *cause* of the divergence is the acceptance of that
 /// stray closer, not the pairing: the same acceptance
 /// `tests/block_closers.rs::the_rc_1_family_stays_a_parse_error` pins at rc 1
-/// for the shapes that do terminate. Filed as task **#436** (the acceptance
-/// family, whose rule task **#405** owns). Capped children: rc 124 is the
+/// for the shapes that do terminate. Filed as task **#436** (its own acceptance
+/// family — the closer-tail rule of task **#405**, now landed for a word written
+/// *directly* behind a closer, does not reach these rows: the stray closer there
+/// sits behind a `;`). Capped children: rc 124 is the
 /// measured outcome, and a row that starts terminating is a change to disclose.
 #[test]
 fn a_loop_body_that_never_returns_where_bash_refuses_the_line() {
@@ -1730,32 +1732,54 @@ fn a_comment_tail_next_to_a_block_stays_inert() {
     }
 }
 
-/// The comment edges bash rejects and fdshell does not (yet) are pinned with
+/// The comment edges bash rejects and fdshell answers differently are pinned with
 /// their **current** result, so this fix is measured as not touching them; the
 /// owner task is named per row (the rc-1-vs-2 family, README "Accepted
 /// divergences"). Task **#404** is no longer one of them — a `#` line inside a
 /// `{ …; }` body reached parity (bash's brace grammar reads the comment's newline as
 /// the body's terminator, the keyword closers do not) and is pinned in
-/// `tests/group.rs::a_comment_line_inside_the_body_terminates_the_group`.
+/// `tests/group.rs::a_comment_line_inside_the_body_terminates_the_group`. Task
+/// **#405** is no longer one of them either, except its glued row: a word after the
+/// closing keyword reaches the house rc-1 convention now (`parse/block_tail/word.rs`),
+/// while the glued `done#c` closer still never closes and answers as the unclosed
+/// block.
 #[test]
 fn a_comment_at_a_block_edge_keeps_the_filed_divergences() {
-    // #405: a word written after the closing keyword. The glued closer `done#c`
-    // never closes, so fdshell reports the unclosed block (bash: rc 2).
+    // #405 (the glued half, still a divergence): the glued closer `done#c` never
+    // closes, so fdshell reports the unclosed block (bash: rc 2).
     let (out, err, rc) = run_bounded("while :; do echo a; break; done#c && echo y");
     assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
     assert!(
         err.contains("'while' is missing its closing 'done'"),
         "stderr={err}"
     );
-    // #405: a quoted word behind the closer is accepted and the block runs. The
-    // comment's `&& echo y` is hidden by task #296, so only the block's own text
-    // is left; the residual divergence is the acceptance of the word.
+    // #405 landed: a quoted word behind the closer is the report at the house
+    // rc 1 (bash: rc 2), and nothing of the block runs. The comment's `&& echo y`
+    // is hidden by task #296, so the word alone is what the walk sees.
     let (out, err, rc) = run_bounded("while :; do echo a; break; done \"c\" # && echo y");
-    assert_eq!((out.as_str(), rc), ("a\n", 0), "stderr={err}");
-    // #405: a word glued with `#` behind `fi` is an argument, and the `&&` runs
-    // the tail (bash: rc 2 at the word).
+    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
+    assert!(
+        err.contains("'done' must be followed by a separator"),
+        "stderr={err}"
+    );
+    // #405 landed: a word glued with `#` behind `fi` is an argument — a word is
+    // word data even when the `#` sits inside it — so the report fires before the
+    // `&&` runs anything (bash: rc 2 at the word).
     let (out, err, rc) = run_bounded("if :; then echo t; fi x#y && echo y");
-    assert_eq!((out.as_str(), rc), ("t\ny\n", 0), "stderr={err}");
+    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
+    assert!(
+        err.contains("'fi' must be followed by a separator"),
+        "stderr={err}"
+    );
+    // The house shape of a report that reaches one scan pass: a statement that
+    // already ran stays run, so `a` prints before the report (bash parses the whole
+    // input and prints nothing, rc 2).
+    let (out, err, rc) = run_bounded("echo a; while :; do break; done x");
+    assert_eq!((out.as_str(), rc), ("a\n", 1), "stderr={err}");
+    assert!(
+        err.contains("'done' must be followed by a separator"),
+        "stderr={err}"
+    );
     // #406: a `&&` at the start of a physical line is an operator where bash
     // stops with rc 2.
     let (out, err, rc) = run_bounded("echo a # c\n&& echo y");
