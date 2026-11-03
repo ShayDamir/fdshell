@@ -24,3 +24,6 @@ pub mod symlinkat;
 pub mod timerfd;
 pub mod unlinkat;
 pub mod utimensat;
+
+#[cfg(test)]
+extern crate std;

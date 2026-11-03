@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
 use alloc::ffi::CString;
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use core::ffi::CStr;
@@ -138,32 +137,52 @@ fn count_must_not_overflow() {
 //
 // These create the files on the real filesystem via the openat2 / write /
 // lseek syscalls: the tests exercise regular files, so the fds come from
-// openat2 rather than memfd. The two files are cleaned up at the end of each
-// test, leaving no trace behind.
+// openat2 rather than memfd. Each test works in its own scratch dir under the
+// temp dir, so a failing test's teardown still runs on unwind: the dir's
+// `Drop` owns every file in it (LESSONS, task #255).
 // ---------------------------------------------------------------------------
 
 use alloc::format;
 use core::sync::atomic::{AtomicUsize, Ordering};
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 
 use sys::fcntl::{O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, SEEK_SET};
-use sys::fileat::unlinkat;
 
 use super::{copy_file_range_exec, remaining};
-use sys::AtFd;
 use sys::LocalFd;
 
-// A monotonic counter, combined with the PID in `unique`, so parallel tests
-// never share a file.
+// A monotonic counter, combined with the PID in `scratch`, so parallel tests
+// never share a directory.
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
-/// A process-unique path: `cfra_<pid>_<tag>_<counter>`.
-///
-/// nextest runs each unit test in its own process, so a bare counter would
-/// reset per process (two tests would share `cfra_src_0`); the PID separates
-/// processes and the counter separates tests within one process.
-fn unique(tag: &str) -> String {
-    let pid = sys::env::getpid().as_raw();
-    format!("cfra_{pid}_{tag}_{}", NEXT.fetch_add(1, Ordering::Relaxed))
+/// A per-test scratch dir (pid + counter) under the temp dir, removed on drop.
+/// pid + counter is unique among *live* processes only, so the dir must die
+/// with its test process: pids are recycled, and a dir that outlives its
+/// process is a later run's inherited dir with that run's files in it
+/// (LESSONS, task #255). Removal is `.ok()`-tolerant: teardown never panics.
+struct Scratch(PathBuf);
+
+impl Deref for Scratch {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+/// The scratch dir of this test; bind it by name, since a `let _ = …` binding
+/// drops at once and deletes the dir mid-test (LESSONS, task #255).
+fn scratch() -> Scratch {
+    let c = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fdshell-cfra-{}-{}", std::process::id(), c));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
 
 /// A fresh config naming `%in`/`%out`, with an explicit optional count.
@@ -175,16 +194,16 @@ fn cfg(count: Option<u64>) -> CopyFileRangeConfig {
     }
 }
 
-/// Open `path` (relative to the crate root) with `flags`; `O_CREAT` files get
-/// the caller's mode via `open(2)` (0o666 here, so they stay readable).
-fn open(path: &str, flags: i32) -> LocalFd {
-    let p = CString::new(path).unwrap();
+/// Open `path` (a path inside the scratch dir) with `flags`; `O_CREAT` files
+/// get the caller's mode via `open(2)` (0o666 here, so they stay readable).
+fn open(path: &Path, flags: i32) -> LocalFd {
+    let p = CString::new(path.to_str().unwrap().as_bytes()).unwrap();
     sys::openat2::open(p.as_c_str(), flags).unwrap()
 }
 
 /// Create (or truncate) `path` to contain `bytes`, then return it opened
 /// read-only at offset 0.
-fn source(path: &str, bytes: &[u8]) -> LocalFd {
+fn source(path: &Path, bytes: &[u8]) -> LocalFd {
     let w = open(path, O_WRONLY | O_CREAT | O_TRUNC);
     w.write_all(bytes).unwrap();
     drop(w);
@@ -192,101 +211,77 @@ fn source(path: &str, bytes: &[u8]) -> LocalFd {
 }
 
 /// Create (or truncate) an empty `path`, opened for writing at offset 0.
-fn dest(path: &str) -> LocalFd {
+fn dest(path: &Path) -> LocalFd {
     open(path, O_WRONLY | O_CREAT | O_TRUNC)
-}
-
-/// Remove `path` if present; cleanup is best-effort, so failures are ignored.
-fn cleanup(path: &str) {
-    let p = CString::new(path).unwrap();
-    let _ = unlinkat(AtFd::cwd(), p.as_c_str(), 0);
 }
 
 /// An explicit `COUNT` equal to the source size copies every byte.
 #[test]
 fn copies_all_with_explicit_count() {
-    let src = unique("cfra_src");
-    let dst = unique("cfra_dst");
-    let in_fd = source(&src, b"hello world");
-    let out_fd = dest(&dst);
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"hello world");
+    let out_fd = dest(&scratch.join("dst"));
     let n = copy_file_range_exec(&cfg(Some(11)), &in_fd, &out_fd).unwrap();
     assert_eq!(n, 11);
-    cleanup(&src);
-    cleanup(&dst);
 }
 
 /// Without a `COUNT`, all of the source is copied to EOF.
 #[test]
 fn copies_all_to_eof() {
-    let src = unique("cfra_src");
-    let dst = unique("cfra_dst");
-    let in_fd = source(&src, b"hello world");
-    let out_fd = dest(&dst);
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"hello world");
+    let out_fd = dest(&scratch.join("dst"));
     let n = copy_file_range_exec(&cfg(None), &in_fd, &out_fd).unwrap();
     assert_eq!(n, 11);
-    cleanup(&src);
-    cleanup(&dst);
 }
 
 /// A `COUNT` smaller than the source copies only that many bytes.
 #[test]
 fn copies_partial() {
-    let src = unique("cfra_src");
-    let dst = unique("cfra_dst");
-    let in_fd = source(&src, b"hello world");
-    let out_fd = dest(&dst);
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"hello world");
+    let out_fd = dest(&scratch.join("dst"));
     let n = copy_file_range_exec(&cfg(Some(5)), &in_fd, &out_fd).unwrap();
     assert_eq!(n, 5);
-    cleanup(&src);
-    cleanup(&dst);
 }
 
 /// An explicit `COUNT` of 0 copies nothing and reports 0.
 #[test]
 fn explicit_zero_count_copies_nothing() {
-    let src = unique("cfra_src");
-    let dst = unique("cfra_dst");
-    let in_fd = source(&src, b"hello world");
-    let out_fd = dest(&dst);
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"hello world");
+    let out_fd = dest(&scratch.join("dst"));
     let n = copy_file_range_exec(&cfg(Some(0)), &in_fd, &out_fd).unwrap();
     assert_eq!(n, 0);
-    cleanup(&src);
-    cleanup(&dst);
 }
 
 /// An empty source with no `COUNT` copies nothing and reports 0.
 #[test]
 fn empty_source_copies_nothing() {
-    let src = unique("cfra_src");
-    let dst = unique("cfra_dst");
-    let in_fd = source(&src, b"");
-    let out_fd = dest(&dst);
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"");
+    let out_fd = dest(&scratch.join("dst"));
     let n = copy_file_range_exec(&cfg(None), &in_fd, &out_fd).unwrap();
     assert_eq!(n, 0);
-    cleanup(&src);
-    cleanup(&dst);
 }
 
 /// A `COUNT` larger than the available bytes fails with `count`, since the
 /// caller asked for exactly that many and fewer were copied.
 #[test]
 fn count_exceeding_available_is_invalid_argument() {
-    let src = unique("cfra_src");
-    let dst = unique("cfra_dst");
-    let in_fd = source(&src, b"hello world");
-    let out_fd = dest(&dst);
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"hello world");
+    let out_fd = dest(&scratch.join("dst"));
     let e = copy_file_range_exec(&cfg(Some(100)), &in_fd, &out_fd).unwrap_err();
     assert!(matches!(
         e.current_context(),
         BuiltinError::InvalidArgument("count")
     ));
-    cleanup(&src);
-    cleanup(&dst);
 }
 
 /// Create (or truncate) `path` containing `bytes`, opened read-write at
 /// offset 0 — a pre-filled destination the restore path must undo.
-fn dest_with(path: &str, bytes: &[u8]) -> LocalFd {
+fn dest_with(path: &Path, bytes: &[u8]) -> LocalFd {
     let fd = open(path, O_RDWR | O_CREAT | O_TRUNC);
     fd.write_all(bytes).unwrap();
     fd.lseek(0, SEEK_SET).unwrap();
@@ -299,7 +294,7 @@ fn offset_of(fd: &LocalFd) -> i64 {
 }
 
 /// Re-open `path` read-only and read its whole content (tests stay small).
-fn contents(path: &str) -> Vec<u8> {
+fn contents(path: &Path) -> Vec<u8> {
     let fd = open(path, O_RDONLY);
     let mut buf = [0u8; 256];
     let n = fd.read_all(&mut buf).unwrap();
@@ -310,33 +305,27 @@ fn contents(path: &str) -> Vec<u8> {
 /// destination is left unchanged: size truncated back, offset restored.
 #[test]
 fn short_exact_copy_restores_size_and_offset() {
-    let src = unique("cfra_src");
-    let dst = unique("cfra_dst");
-    let in_fd = source(&src, b"hello world");
-    let out_fd = dest_with(&dst, b"hi");
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"hello world");
+    let out_fd = dest_with(&scratch.join("dst"), b"hi");
     let e = copy_file_range_exec(&cfg(Some(100)), &in_fd, &out_fd).unwrap_err();
     assert!(is(&e, "count"));
     assert_eq!(offset_of(&out_fd), 0);
-    assert_eq!(contents(&dst), b"hi");
-    cleanup(&src);
-    cleanup(&dst);
+    assert_eq!(contents(&scratch.join("dst")), b"hi");
 }
 
 /// A short exact copy started at a non-zero destination offset restores that
 /// offset and truncates the file back to its pre-copy size.
 #[test]
 fn short_exact_copy_restores_nonzero_offset() {
-    let src = unique("cfra_src");
-    let dst = unique("cfra_dst");
-    let in_fd = source(&src, b"hello world");
-    let out_fd = dest_with(&dst, b"0123456789");
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"hello world");
+    let out_fd = dest_with(&scratch.join("dst"), b"0123456789");
     out_fd.lseek(5, SEEK_SET).unwrap();
     let e = copy_file_range_exec(&cfg(Some(100)), &in_fd, &out_fd).unwrap_err();
     assert!(is(&e, "count"));
     assert_eq!(offset_of(&out_fd), 5);
-    assert_eq!(contents(&dst), b"0123456789");
-    cleanup(&src);
-    cleanup(&dst);
+    assert_eq!(contents(&scratch.join("dst")), b"0123456789");
 }
 
 /// A `COUNT` copy into a destination the kernel copy cannot write to
@@ -345,28 +334,24 @@ fn short_exact_copy_restores_nonzero_offset() {
 /// is reached.
 #[test]
 fn copy_to_dev_null_is_syscall_error() {
-    let src = unique("cfra_src");
-    let in_fd = source(&src, b"hello world");
-    let out_fd = open("/dev/null", O_WRONLY);
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"hello world");
+    let out_fd = open(Path::new("/dev/null"), O_WRONLY);
     let e = copy_file_range_exec(&cfg(Some(100)), &in_fd, &out_fd).unwrap_err();
     assert!(matches!(e.current_context(), BuiltinError::Syscall));
-    cleanup(&src);
 }
 
 /// An empty source with a `COUNT` fails with `count`; the destination is
 /// left unchanged (a no-op restore).
 #[test]
 fn empty_source_with_count_is_count_error() {
-    let src = unique("cfra_src");
-    let dst = unique("cfra_dst");
-    let in_fd = source(&src, b"");
-    let out_fd = dest_with(&dst, b"xy");
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"");
+    let out_fd = dest_with(&scratch.join("dst"), b"xy");
     let e = copy_file_range_exec(&cfg(Some(5)), &in_fd, &out_fd).unwrap_err();
     assert!(is(&e, "count"));
     assert_eq!(offset_of(&out_fd), 0);
-    assert_eq!(contents(&dst), b"xy");
-    cleanup(&src);
-    cleanup(&dst);
+    assert_eq!(contents(&scratch.join("dst")), b"xy");
 }
 
 /// `remaining`'s byte count is pinned at **its own computation site**: its only
@@ -377,8 +362,8 @@ fn empty_source_with_count_is_count_error() {
 /// the two forms agree, and a nonzero one, where they cannot.
 #[test]
 fn remaining_counts_the_bytes_past_the_position() {
-    let src = unique("cfra_src");
-    let in_fd = source(&src, b"0123456789ab");
+    let scratch = scratch();
+    let in_fd = source(&scratch.join("src"), b"0123456789ab");
     assert_eq!(
         remaining(&in_fd).unwrap(),
         12,
@@ -395,5 +380,4 @@ fn remaining_counts_the_bytes_past_the_position() {
         5,
         "the position is left where the caller put it"
     );
-    cleanup(&src);
 }
