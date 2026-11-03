@@ -515,10 +515,20 @@ what drifts (task #323). **The gate measures the keyword's own bytes** (task
 the row's matched literal prefix proves those bytes carry no quote byte, and what
 sits behind the breaking byte is the operand's — bash splits the word there, so
 `done>f` and `done>f"f"` are one keyword word either way. Only a word that is
-nothing but its keyword is measured on the span. Pin both answers:
+nothing but its keyword is measured on the span. That proof is the **byte-level**
+readers' alone: the token-level reader hands the gate quote-removed text with the
+*raw* span end, so its `word.len()` is not the span's length and the keyword's own
+bytes have to be located in `line` — a fully quoted word whose text carries a break
+byte (`"done x"`, `"fi>y"`) then reads its own bytes, finds them inside the quote,
+and stays data as bash does; taking the length off `word` instead moves exactly
+those words, silently (the #413 re-work). Pin both answers:
 `keywords/kind/tests.rs::closers_carry_their_block_closer` (glue, quoted operand,
 `>>`/`>&`), `keywords/kind/tests.rs::a_glued_opener_with_a_quoted_operand_is_scored`,
-e2e `tests/block_redirect.rs::a_glued_closer_takes_its_redirection`; the non-glue
+`keywords/kind/tests.rs::a_quoted_keyword_word_stays_data_at_the_gate`,
+`keywords/kind/tests.rs::the_gate_of_an_unalignable_word_is_the_row` (the pin that
+sees the alignment fail), e2e
+`tests/block_redirect.rs::a_glued_closer_takes_its_redirection` and
+`tests/block_redirect.rs::a_quoted_keyword_word_in_a_block_stays_data`; the non-glue
 answer stays pinned by
 `keywords/kind/tests.rs::non_keywords_and_the_time_prefix`. The per-byte mask and
 `fq` are **not** the gate: `""if`/`''if` carry no mask bit on the keyword bytes

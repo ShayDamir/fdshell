@@ -138,6 +138,69 @@ fn a_glued_opener_with_a_quoted_operand_is_scored() {
     assert_eq!(keyword_kind(b"\"if\"", b"\"if\"; then :; fi", 4), None);
 }
 
+/// The gate on the **token-level** reader's input (task #413, the shape that
+/// regressed once): `parse::semi::closing` hands the table the quote-removed text and
+/// the raw span end, so a fully quoted keyword word whose text carries a break byte
+/// (`"done x"`, `"fi x"`, `"fi>y"`) is measured on the keyword's **own** bytes —
+/// which lie inside the quote — and stays data, as POSIX §2.9.1 and bash read it.
+/// The rows are pinned e2e in
+/// `safe/fdshell/tests/block_redirect.rs::a_quoted_keyword_word_in_a_block_stays_data`.
+/// The controls must not move: the same words in argument position, a quoted keyword
+/// glued to an operand at the top level, and a quoted word that is no keyword at all.
+#[test]
+fn a_quoted_keyword_word_stays_data_at_the_gate() {
+    assert_eq!(
+        keyword_kind(
+            b"done x",
+            b"while :; do \"done x\"; echo b; break; done",
+            20
+        ),
+        None
+    );
+    assert_eq!(
+        keyword_kind(b"fi x", b"if :; then \"fi x\"; echo t; fi", 17),
+        None
+    );
+    assert_eq!(
+        keyword_kind(b"fi>y", b"if :; then \"fi>y\"; echo t; fi", 17),
+        None
+    );
+    // Controls: the same word in argument position, and a quoted word that is no
+    // keyword at all.
+    assert_eq!(
+        keyword_kind(b"done x", b"while :; do echo \"done x\"; break; done", 25),
+        None
+    );
+    assert_eq!(
+        keyword_kind(b"echo x", b"while :; do echo \"echo x\"; break; done", 25),
+        None
+    );
+    // The top-level spelling of the glue: the row matches the text, the gate reads
+    // the span, and bash runs the word.
+    assert_eq!(keyword_kind(b"if>x", b"\"if>x\"; then echo i; fi", 6), None);
+    assert_eq!(keyword_kind(b"fi>x", b"\"fi>x\"", 6), None);
+}
+
+/// The arm no reader reaches: a hand-written pin whose `word` and `word_end` disagree
+/// is the one case `keywords/quoted.rs::span_start` cannot align (the pins at
+/// `keywords/tests.rs::time_prefix_is_transparent_for_the_depth_rule` and
+/// `keywords/tests.rs::keyword_delta_group_delimiters` live on it). Such a word is
+/// decided by the row's literal-prefix rule — the keyword's own bytes are unquoted, so
+/// the word is the keyword, exactly as the glued `a&&if>x"y"` row above.
+#[test]
+fn the_gate_of_an_unalignable_word_is_the_row() {
+    assert_eq!(
+        keyword_kind(b"fi>xq", b"fi>x\"y\"", 7),
+        Some(Keyword::Closes(Closer::Fi))
+    );
+    // The same word aligned with the line: the answer is the same, and it comes from
+    // the keyword's own bytes, not the operand's quotes.
+    assert_eq!(
+        keyword_kind(b"fi>xq", b"fi>xq", 5),
+        Some(Keyword::Closes(Closer::Fi))
+    );
+}
+
 /// A word that is no keyword is `None`, not a `0`-delta keyword: a quoted
 /// keyword word is data, an ordinary word is data, and the `time [-p]` prefix
 /// run is transparent — the keyword behind it carries the kind.

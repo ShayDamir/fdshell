@@ -265,6 +265,68 @@ fn a_glued_opener_with_a_quoted_operand_keeps_its_measured_answer() {
     }
 }
 
+/// A **quoted** keyword word inside a block stays word data (task #413): bash reads
+/// a quoted keyword as a command word (POSIX §2.9.1), so `done`/`fi` written in quotes
+/// close nothing — the body runs to its end and the block's own closer is the unquoted
+/// one. The gate that decides it is the one the byte scan and the token scan share, and
+/// its unit pins are `keywords/kind/tests.rs::a_quoted_keyword_word_stays_data_at_the_gate`.
+/// The controls are the same words in argument position, a quoted keyword glued to an
+/// operand at the top level, and a quoted word that is no keyword; they must not move.
+#[test]
+fn a_quoted_keyword_word_in_a_block_stays_data() {
+    // bash: `done x` / `fi x` / `fi>y` are command-not-found on stderr, then the
+    // `echo`, rc 0 — nothing is filed, the quoted word redirects nothing.
+    for (script, want) in [
+        ("while :; do \"done x\"; echo b; break; done", "b\n"),
+        ("if :; then \"fi x\"; echo t; fi", "t\n"),
+        ("if :; then \"fi>y\"; echo t; fi", "t\n"),
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            (want, Some(0)),
+            "{script}: stderr={}",
+            err(&o)
+        );
+        assert!(
+            file(&dir, "y").is_none() && file(&dir, "x").is_none(),
+            "{script}: the quoted word is data, so no target is opened"
+        );
+    }
+    // Controls, at their measured values.
+    for (script, want) in [
+        (
+            "while :; do echo \"done x\"; echo b; break; done",
+            "done x\nb\n",
+        ),
+        ("while :; do echo \"echo x\"; break; done", "echo x\n"),
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            (want, Some(0)),
+            "{script}: stderr={}",
+            err(&o)
+        );
+        assert!(file(&dir, "x").is_none(), "{script}");
+    }
+    // A quoted keyword glued to an operand at the **top level** is a command word
+    // there too: bash refuses the line outright (rc 2), fdshell runs the three words,
+    // the last one fails, and it ends at rc 1 (the rc-1-vs-2 family). Nothing is filed.
+    let dir = Scratch::new();
+    let script = "\"if>x\"; then echo i; fi";
+    let o = run(&dir, script);
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("", Some(1)),
+        "{script}: bash rc 2, fdshell runs the words and its last one fails: stderr={}",
+        err(&o)
+    );
+    assert!(file(&dir, "x").is_none(), "{script}");
+}
+
 /// `>>` appends to a target the block did not create, in the same statement.
 #[test]
 fn append_after_a_closer_appends_to_the_block_target() {
