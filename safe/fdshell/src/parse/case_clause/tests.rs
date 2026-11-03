@@ -262,3 +262,38 @@ fn a_quoted_separator_word_is_pattern_or_body_text() {
     assert_eq!(clauses.len(), 2);
     assert_eq!(clauses[0].body.data, ShortCStr::from(c"echo A"));
 }
+
+/// The window search accepts a `;;` only at the arm's **own level**: the
+/// `;;` written inside a nested `case` belongs to the nested clause, so the
+/// arm the walk stops at is the outer one and its body is the whole nested
+/// clause (bash rc 0, prints `y`). The nested clause's own `;;` is the shape
+/// the bug cut the arm at, and the pinned body text below is what bash reads.
+#[test]
+fn the_window_search_skips_a_nested_block_s_own_window() {
+    let clauses = clauses_of(b"case x in a) case b in b) echo y;; esac;; esac").unwrap();
+    assert_eq!(clauses.len(), 1);
+    assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"a"));
+    assert_eq!(
+        clauses[0].body.data,
+        ShortCStr::from(c"case b in b) echo y;; esac")
+    );
+    // The window separated by spaces is the same window.
+    let clauses = clauses_of(b"case x in a) case b in b) echo y;; esac ;; esac").unwrap();
+    assert_eq!(clauses.len(), 1);
+    assert_eq!(
+        clauses[0].body.data,
+        ShortCStr::from(c"case b in b) echo y;; esac")
+    );
+    // The clause after a nested arm is still walked: the second clause keeps
+    // its own pattern and body (bash prints `y` for `a`, `z` for `c`).
+    let clauses =
+        clauses_of(b"case x in a) case b in b) echo y;; esac;; c) echo z;; esac").unwrap();
+    assert_eq!(clauses.len(), 2);
+    assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"a"));
+    assert_eq!(
+        clauses[0].body.data,
+        ShortCStr::from(c"case b in b) echo y;; esac")
+    );
+    assert_eq!(clauses[1].patterns[0].text, ShortCStr::from(c"c"));
+    assert_eq!(clauses[1].body.data, ShortCStr::from(c"echo z"));
+}

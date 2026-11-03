@@ -97,3 +97,30 @@ fn a_non_keyword_touches_no_stack() {
     assert_eq!(p.apply(b"wait", b"wait\n readable %rd) x ;;", 4), 1);
     assert_eq!(p.top(), Some(Closer::Done));
 }
+
+/// The **depth** a walk carries — the number of open blocks, which is the
+/// window test's level (task #418): the seed is the block the caller is already
+/// inside, an opener pushes, the matching closer pops back to the seed, and a
+/// mismatched closer scores nothing so the depth stays where the imbalance warns
+/// it stays. The top level seeds nothing, so depth `0` is where it stops.
+#[test]
+fn depth_is_the_level_the_walk_reads() {
+    let mut p = Pairing::new();
+    assert_eq!(p.depth(), 0, "the top level: nothing seeded");
+    p.open(Closer::Esac);
+    assert_eq!(p.depth(), 1, "the `case` block the walk is inside");
+    // A nested `case` pushes its own kind — its `;;` belongs to it.
+    assert_eq!(p.apply(b"case", b"case b in b) echo y;; esac", 4), 1);
+    assert_eq!(p.depth(), 2);
+    // A closer of another kind is word data, so the depth stays.
+    assert_eq!(p.apply(b"fi", b"case b in b) echo y;; fi", 22), 0);
+    assert_eq!(p.depth(), 2);
+    // The nested block's own closer pops it: the walk is back at its level.
+    assert_eq!(p.apply(b"esac", b"case b in b) echo y;; esac", 26), -1);
+    assert_eq!(p.depth(), 1);
+    // The seed is never popped by the walk: it is what "at my own level" means.
+    p.open(Closer::Esac);
+    assert_eq!(p.depth(), 2);
+    assert_eq!(p.apply(b"esac", b"case x in esac", 13), -1);
+    assert_eq!(p.depth(), 1);
+}

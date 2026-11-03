@@ -1361,3 +1361,112 @@ fn a_line_ending_on_a_cond_operator_continues_a_case_arm() {
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
     }
 }
+
+// --- a nested block in an arm keeps its own `;;` (task #418) -----------------
+//
+// The clause walk cuts an arm at a `;;` written **at the arm's own level**: a
+// `;;` inside a nested `case` (or `for`/`while`/`if`/`{ …; }) belongs to that
+// block and ends *its* arm. Every row below is a bash 5.3.9 measurement of
+// 2026-11-03; the ones here agree with bash.
+
+#[test]
+fn a_nested_block_in_an_arm_keeps_its_semi_semi() {
+    for (script, want) in [
+        ("case a in a) case b in b) echo y;; esac;; esac", "y\n"),
+        ("case a in a) case b in b) echo y;; esac ;; esac", "y\n"),
+        (
+            "case a in a) case b in b) echo y;; esac;; c) echo outer;; esac",
+            "y\n",
+        ),
+        (
+            "case a in a) echo pre; case b in b) echo y;; esac;; esac",
+            "pre\ny\n",
+        ),
+        (
+            "case a in a) case b in b) echo y;; esac; echo post;; esac",
+            "y\npost\n",
+        ),
+        (
+            "case a in a) while :; do case b in b) echo y;; esac; break; done ;; esac",
+            "y\n",
+        ),
+        (
+            "case a in a)\ncase b in b) echo y\n;;\nesac\n;;\nesac",
+            "y\n",
+        ),
+        (
+            "case a in a) case b in b) cat <<T;; esac;; esac\nbody\nT",
+            "body\n",
+        ),
+        (
+            "case a in a)\ncase b in b) cat <<T\nbody\nT\n;;\nesac\n;;\nesac",
+            "body\n",
+        ),
+        // A closer-shaped nested pattern is a pattern word (task #273's rule at
+        // arm granularity): the nested clause never matches, so nothing prints.
+        ("case a in a) case b in done) echo pat;; esac;; esac", ""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
+    }
+    // The nested clause list with a **second** clause is the row this task does
+    // not close: the arm's stray-`)` rule (task #300's, scoped to the region up
+    // to the window) sees the nested clause's `*)` in command position and bails
+    // `case: missing ';;' between clauses` at rc 1 where bash prints `inner` at
+    // rc 0. The plan pinned it as parity; the measured answer is pinned here.
+    let (out, err, code) = run("case a in a) case b in x) echo n;; *) echo inner;; esac;; esac");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash prints inner at rc 0: {err}"
+    );
+    assert!(err.contains("missing ';;'"), "{err}");
+}
+
+/// The nested-block rows bash rejects (rc 2) keep fdshell's own verdicts (its rc
+/// 1), except the accepted family the plan lists — a `;;` inside a nested
+/// `if`/`{}`/definer body written in an arm, which fdshell already accepts at
+/// the top level. Measured 2026-11-03; do not "fix" the rc.
+#[test]
+fn a_semi_inside_a_nested_arm_block_stays_as_measured() {
+    // Task #300's leniency inside an arm: the nested clause's `esac` sits in an
+    // argument position, so the walk never closes.
+    for (script, needle) in [
+        (
+            "case a in a) case b in b) echo y esac;; esac",
+            "'case' is missing its closing 'esac'",
+        ),
+        (
+            "case a in a) case b in esac;; esac;; esac",
+            "\"esac\" not found",
+        ),
+        ("case a in a) (echo y;; ) ;; esac", "case: empty pattern"),
+        (
+            "case a in a) case b in b) echo y; c) echo z;; esac;; esac",
+            "missing ';;'",
+        ),
+        (
+            "case a in a) cat <<T;\ncase b in b) echo y;; esac\n;;\nesac\nbody\nT",
+            "case: missing 'esac'",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
+        assert!(err.contains(needle), "{script}: {err}");
+    }
+    // The accepted family: fdshell accepts a `;;` inside a nested `if`/group/
+    // definer body in an arm (bash rc 2); the pairing counts keyword openers and
+    // exact brace words only, and the `;;` search's depth rule reads those.
+    for script in [
+        "case a in a) if true; then echo y;; fi ;; esac",
+        "case a in a) { echo y;; } ;; esac",
+        "case a in a) f() { echo y;; }; f ;; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("y\n", 0),
+            "{script}: bash rc 2: {err}"
+        );
+    }
+}

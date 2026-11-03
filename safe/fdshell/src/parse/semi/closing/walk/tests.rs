@@ -29,8 +29,14 @@ fn start_is_the_first_token_the_walk_reads() {
     let line = b"case b in b) echo y;; esac;; echo x";
     let t = toks(line);
     let at_zero = &|i, _, _| i == 0;
-    assert_eq!(walk_until(&t, line, Some(Closer::Esac), List::Case, 0, at_zero), Some(0));
-    assert_eq!(walk_until(&t, line, Some(Closer::Esac), List::Case, 1, at_zero), None);
+    assert_eq!(
+        walk_until(&t, line, Some(Closer::Esac), List::Case, 0, at_zero),
+        Some(0)
+    );
+    assert_eq!(
+        walk_until(&t, line, Some(Closer::Esac), List::Case, 1, at_zero),
+        None
+    );
 }
 
 /// The seed is part of the answer: `Some` seeds the pairing, so the walk starts
@@ -44,40 +50,49 @@ fn the_seed_is_part_of_the_stop_answer() {
     // The nested `case` word is the first token at depth 2 for a seeded walk; a
     // walk seeded with nothing never reaches depth 2.
     let at_two = &|_, depth, _| depth == 2;
-    assert_eq!(walk_until(&t, line, Some(Closer::Esac), List::Case, 0, at_two), Some(0));
+    assert_eq!(
+        walk_until(&t, line, Some(Closer::Esac), List::Case, 0, at_two),
+        Some(0)
+    );
     assert_eq!(walk_until(&t, line, None, List::Case, 0, at_two), None);
     // Back at the seed: for the seeded walk that is its `esac` (the nested
     // clause's terminator, `List::Case`'s own rule), for the top-level walk it is
     // the same token, reached from depth 0 by the same pop.
     let at_seed = &|_, depth, seed| depth == seed;
-    assert_eq!(walk_until(&t, line, Some(Closer::Esac), List::Case, 0, at_seed), Some(9));
+    assert_eq!(
+        walk_until(&t, line, Some(Closer::Esac), List::Case, 0, at_seed),
+        Some(9)
+    );
     assert_eq!(walk_until(&t, line, None, List::Case, 0, at_seed), Some(9));
 }
 
 /// The clause walk's stop test is a `;;` window **at the walk's own level**:
 /// seeded with the `case` block it is inside, it skips the window the nested
 /// clause wrote and answers the arm's own (task #418 — the arm whose text is the
-/// whole nested clause). Unseeded, the same predicate answers the nested window,
-/// which is the bug this task fixed.
+/// whole nested clause). The depth-blind predicate — the same scan with no level
+/// test — answers the nested window first: that is the bug this task fixed.
 #[test]
 fn the_window_test_reads_the_walk_s_own_level() {
     let line = b"case b in b) echo y;; esac;; echo x";
     let t = toks(line);
-    let window_at_seed = &|i, depth, seed| depth == seed && window(&t, i);
+    let blind = &|i, _, _| window(&t, i);
+    let at_seed = &|i, depth, seed| depth == seed && window(&t, i);
     assert_eq!(
-        walk_until(&t, line, Some(Closer::Esac), List::Case, 0, window_at_seed),
-        Some(10),
-        "the arm's own `;;`, past the nested block"
-    );
-    assert_eq!(
-        walk_until(&t, line, None, List::Case, 0, window_at_seed),
+        walk_until(&t, line, Some(Closer::Esac), List::Case, 0, blind),
         Some(7),
-        "the nested clause's own `;;` is the top level's first window"
+        "the first window is the nested clause's own — the bug this task fixed"
     );
-    // A window the walk never reaches: the region ends before it.
-    let t = toks(b"case b in b) echo y");
     assert_eq!(
-        walk_until(&t, line, Some(Closer::Esac), List::Case, 0, window_at_seed),
+        walk_until(&t, line, Some(Closer::Esac), List::Case, 0, at_seed),
+        Some(10),
+        "the arm's own window, past the nested block"
+    );
+    // A region whose windows all belong to a block it never closes: the walk ends
+    // without an answer.
+    let region = toks(b"case b in b) echo y");
+    let at_seed = &|i, depth, seed| depth == seed && window(&region, i);
+    assert_eq!(
+        walk_until(&region, line, Some(Closer::Esac), List::Case, 0, at_seed),
         None
     );
 }
