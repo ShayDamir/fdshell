@@ -333,6 +333,31 @@ fn the_rc_1_family_stays_a_parse_error() {
     );
 }
 
+/// Task **#405**'s landing on this file's boundary: a word written *directly*
+/// behind a closer — even one that looks like a keyword (a stray closer, the
+/// stray `}` of no group) — is word data where bash demands a separator, so every
+/// row reports the keyword-block twin of `group: unexpected word after '}'` at the
+/// house rc 1 with nothing run. bash rc 2 and fdshell rc 1 are both measured on
+/// 2026-11-03 (bash 5.3.9 and this build). The `;`-separated spellings of the same
+/// words stay the accepted family ([`a_compound_closer_before_the_closer_is_accepted`]),
+/// and so do the structural braces (`f() { if :; then :; fi }`, `tests/block_bodies.rs`).
+#[test]
+fn a_closer_shaped_word_directly_behind_a_closer_reports() {
+    err(
+        "if :; then :; fi done",
+        "'fi' must be followed by a separator",
+    );
+    err(
+        "case x in x) echo c;; esac fi",
+        "'esac' must be followed by a separator",
+    );
+    bounded_err(
+        "while :; do echo a; break; done done",
+        "'done' must be followed by a separator",
+    );
+    err("if :; then :; fi }", "'fi' must be followed by a separator");
+}
+
 /// The **accepted divergence** this rule opens: a nested block whose own body
 /// is unparseable, written inside a body that never runs. A block body is
 /// parsed only when it runs, so the compound-closer rule closes the outer block

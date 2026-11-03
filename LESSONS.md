@@ -6325,5 +6325,7 @@ each closer `done`/`fi`/`esac`, plus the fdshell-only `wait` twin whose landing 
 a decision, not bash parity),
 `tests/block_redirect.rs::the_pinned_divergences_behind_a_closer`,
 `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`,
-`tests/loops.rs::a_word_after_the_closing_keyword_is_a_parse_error`, and the group
-twin `parse/group_block/tail.rs` with `GroupTrailingWord`.
+`tests/loops.rs::a_word_after_the_closing_keyword_is_a_parse_error`,
+`tests/block_closers.rs::a_closer_shaped_word_directly_behind_a_closer_reports` (a
+word that looks like a keyword — a stray closer, a stray `}` — stays word data),
+and the group twin `parse/group_block/tail.rs` with `GroupTrailingWord`.
