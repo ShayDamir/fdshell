@@ -6288,18 +6288,24 @@ comment-terminated line, and `{ echo a }` without one.
 
 ## The closer tail's stop is load-bearing: only an ordinary word bails
 
-The walk in `parse/block_tail.rs` stops at the first token after a keyword
-block's closing keyword that is not a redirection, and since task #405 the stop
-**decides**: an ordinary word of the block's own text is a report (bash: rc 2,
-the house parse-error convention is rc 1, nothing of the block runs), while
-everything the stop covers stays accepted. The stop is the load-bearing half,
-because the block span ends at the closer's **run** end (LESSONS: "A keyword
-block is opaque to the cond-list split"), so the tail walk sees the run's
-leftovers: the tokenizer's separator and word-break tokens, comment text, and —
-since `tokenize_statement` blanks a body region's words but keeps a **delimiter
-line's** words — an appended heredoc's delimiter word. Keying the rule on "not a
-redirection" would report that delimiter word and flip every #408 pin; the
-group's tail solves the same shape by *cutting* the appended region
+The walk in `parse/block_tail.rs` takes the operators written after a keyword
+block's closing keyword **in source order** — path, here-doc, here-string — and
+since task #405 its stop **decides**: an ordinary word of the block's own text is
+a report (bash: rc 2, the house parse-error convention is rc 1, nothing of the
+block runs), while everything the stop covers stays accepted. Task #408 turned the
+two here-doc/here-string stops into arms (`parse/block_tail/heredoc.rs`): each is
+gated on its own raw-span shape rule, the here-doc one additionally on the **byte
+scan's** list of the operator's physical line — the count-agreement rule, and the
+reason a `<<` glued inside a word is declined rather than claimed. The stop is
+still the load-bearing half, because the block span ends at the closer's **run**
+end (LESSONS: "A keyword block is opaque to the cond-list split"), so the tail
+walk sees the run's leftovers: the tokenizer's separator and word-break tokens,
+comment text, and — since `tokenize_statement` blanks a body region's words but
+keeps a **delimiter line's** words — an appended heredoc's delimiter word. Keying
+the rule on "not a redirection" would report that delimiter word — the
+closer-position heredoc's own delimiter word since #408, and the
+word-behind-a-heredoc report with it; the group's tail solves the same shape by
+*cutting* the appended region
 (`group_block::tail::command_tail`), which it can key on its body-token range and
 its append/extension pair. A keyword builder has no body-token range at the
 tail, so the keyword side reads the delimiter's own span
@@ -6310,9 +6316,11 @@ The shapes that reach the report are the bare word, a quoted one, a `$( … )`
 word, an assignment word, and a `#` **inside** a word — all word data, so the
 raw span's first byte decides, and a quote or escape byte means data (task #336's
 reading, shared with the group so a quoted `";"` / `"|"` / `">"` cannot drift
-between the two). The shapes that stay stops: the `<<`/`<<<` operators (#408),
-the separator and word-break set read through `bytes::word_break` (#316/#396 —
-so `done (x)` stays accepted), the tokenizer's pipe token, the `&>` family
+between the two). The shapes that stay stops: the separator and word-break set
+read through `bytes::word_break` (#316/#396 — so `done (x)` stays accepted, and so
+is the `<<` glued inside the closer's word `done<<T`, which the byte scan never
+counts and the here-doc arm therefore declines: bash feeds the body, that row
+keeps its measured value), the tokenizer's pipe token, the `&>` family
 (#409), and a word-start `#` comment (#296 — the tokenizer swallows its text
 today, so that arm is the pinned boundary, not a reachable one). A closer
 **glued** to a word (`done#c`) is no closer at all and answers as the unclosed
@@ -6322,7 +6330,14 @@ the block where bash prints nothing.
 
 Pins: `parse/block_tail/tests.rs` (one row per exemption arm, and the report for
 each closer `done`/`fi`/`esac`, plus the fdshell-only `wait` twin whose landing is
-a decision, not bash parity),
+a decision, not bash parity), `parse/block_tail/heredoc/tests.rs` (one row per arm
+spelling — attached, bare, `<<-`, io-number, quoted delimiter — the global-order
+pair, the end-of-file and no-delimiter-word arms, and the glued row),
+`tests/block_redirect.rs::a_here_doc_or_here_string_on_a_closer_feeds_the_block`
+and `tests/block_redirect.rs::the_here_doc_tail_rows_that_keep_their_measured_values`
+(every value measured against bash 5.3.9; each non-parity row names its owner: the
+glued closer, the `&&`-run granularity of the body allocation, the rc-1-vs-2 pair,
+the `wait` round, the loop-status rule),
 `tests/block_redirect.rs::the_pinned_divergences_behind_a_closer`,
 `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`,
 `tests/loops.rs::a_word_after_the_closing_keyword_is_a_parse_error`,

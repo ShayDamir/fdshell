@@ -430,10 +430,16 @@ file `f>g`, fdshell never splitting a word at an operator byte, as above. A plai
 **word** behind the closer is a parse error, the way `group: unexpected word after
 '}'` is one for `{ …; }`: bash demands a separator after a closing keyword, so
 `done x`, `fi x#y` and `esac "c"` report it at fdshell's rc 1 (bash: rc 2) and
-nothing of the block runs. What the tail still
-deliberately does **not** read is a here-doc or here-string on the closer
-(`done <<T`, `done <<<hi`, task #408) and the `&>` family there (`done &> f`, task
-#409): each keeps the behavior its own pins record.
+nothing of the block runs. The tail reads its operators **in source order** — path,
+here-doc and here-string — so `done <<T` feeds the body stream to the whole block
+and `done <<<hi` feeds it its word, exactly as bash does (the `read`/`cat` commands
+in the body are the ones that read it), and the io-number forms `done 3<<T` /
+`done 3<<<hi` land on that descriptor. What the tail still deliberately does **not**
+read is the `&>` family there (`done &> f`, task
+#409): it keeps the behavior its own pins record. A `<<` **glued inside** the
+closer's word (`done<<T`) stays word data, as above: the byte scan counts no
+operator there, so nothing is claimed and the body lines run as commands — bash
+feeds them to the block, and that row keeps its measured value.
 
 ### Here-documents
 
