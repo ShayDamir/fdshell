@@ -559,6 +559,17 @@ rule for the `|`), and the token-level place machine reads the same fact through
 word the place an ordinary word leaves — an argument, and a `for` word list that
 **stays** a list (`for i in ";" do …` is one iteration over `;`).
 
+The two `case` slots of task **#415** read this rule from both sides. The **word**
+slot: a quoted empty pair (`case "" in esac`) and a quoted `";"` (`case ";" in
+esac`) are words, so the slot is not empty and both run at rc 0 as bash does —
+while a slot that trims to nothing carries no word and is a parse error (bash rc
+2, here rc 1). The slot after `in` is POSIX's `newline_list`, so an empty one is
+legal when it is spelled with newlines (`case x in` + newline `esac`, rc 0 in
+both shells) and a real `;` byte in it (`case x in; esac`) is the grammar
+violation. The tokenizer's `;` token covers the byte **and** the newline, so the
+two spellings are told apart by the byte, and the quoting half stays the span
+gate's.
+
 The pinned divergences are the owners' own, not this rule's: the bare path
 redirect of a quoted separator word (`echo x > ";"` — bash writes the file `;` at
 rc 0, fdshell answers `invalid redirect syntax`, task **#475**); a `)` behind an

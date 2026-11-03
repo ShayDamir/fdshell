@@ -1073,9 +1073,13 @@ errors — bash stops with rc 2, fdshell with rc 1 and its own message
 (`missing condition` for `if`/`elif`, `expected condition` for the loops). An
 empty condition is *true* at run time, so `while ; do echo x; done` would never
 end. The rule covers conditions only: a `for` **word list** may be empty
-(`for i in; do echo x; done` iterates zero times, bash rc 0), a `case` word is
-not a condition, and an empty `for ((…))` arithmetic condition is true, as in
-bash.
+(`for i in; do echo x; done` iterates zero times, bash rc 0), and an empty
+`for ((…))` arithmetic condition is true, as in bash. The `case` **word** is not
+a condition but has its own rule: POSIX #2.9.1 requires a `word` between `case`
+and `in`, so `case; in esac`, `case ; in esac`, `case in esac`, `case` + newline
+`in esac` and a comment-only word are parse errors (bash rc 2, here rc 1 with
+`case: empty word`) — while a quoted empty pair and a quoted `";"` **are** words,
+and those spellings run at rc 0 as bash does.
 
 A `for` **word list** is read as **words**: no keyword scores inside it, so
 `for i in done`, `for i in esac`, `for i in { 1 2` and `for i in }` are ordinary
@@ -1186,6 +1190,18 @@ written after an argument inside an arm (task #419), a nested `case` in an arm
 (task #418), bash's `;&`/`;;&` terminators (task #420), a subshell arm that
 **runs** (task #316), and a closer glued behind a pattern's `)`
 (`case x in a) echo hi;;b)esac`, task #421). Pinned in `safe/fdshell/tests/case.rs`.
+
+An **empty clause list** is legal only in the spellings bash allows: its slot is
+POSIX #2.9.1's `newline_list`, so `case x in esac`, `case x in` + newline `esac`
+and the blank-line spelling run at rc 0 in both shells, while a real `;` **byte**
+in that slot — `case x in; esac`, `case x in ; esac`, `case x in;; esac`,
+`case x in ;;; esac`, and the same `;` written as a newline — is a syntax error
+there (bash rc 2, here rc 1 with `case: ';' before an empty clause list`). The
+test is on the token's **byte**, so the newline the tokenizer spells as a `;`
+token stays legal (task #355's rule); and the guard covers only the **empty**
+slot, so the walk's own verdicts (`case: empty pattern`, `case: missing ')'`) and
+the leading-`;`-before-a-clause leniency of task #300 stay as they are. Pinned in
+`safe/fdshell/tests/case.rs`.
 
 `for ((init; cond; step))` is bash's arithmetic loop: the three clauses are
 evaluated exactly like an `((expr))` command — in the current shell, so the

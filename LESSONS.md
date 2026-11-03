@@ -3859,7 +3859,8 @@ guard can never fire and `while ; do` walked straight through it (the
 minimum is as dead as one past it, and deleting it is the fix, not keeping it
 "defensive"). The rule stays scoped: a `for` **word list** may be empty
 (`for i in; do …; done` iterates zero times, bash rc 0), a `case` word is not
-a condition (#415), and the arith clause's empty condition is true in bash, so
+a condition (its own rule, task #415, is the paragraph below), and the arith
+clause's empty condition is true in bash, so
 `for ((;;))` is untouched. Pins: `parse/tests.rs`
 (`empty_if_condition_is_err`, `empty_elif_condition_is_err`,
 `empty_loop_condition_is_err`, `non_empty_conditions_stay_green`),
@@ -3867,6 +3868,19 @@ a condition (#415), and the arith clause's empty condition is true in bash, so
 and `tests/block_conditions.rs` (every form rc 1 with its message; the loop
 forms under the bounded child — the empty condition is true, so the regression
 is a hang; the neighbouring leniencies green).
+
+The **`case` word** closed the same way (task #415): POSIX #2.9.1's `case_clause`
+production requires a `word` between `case` and `in`, so bash rejects every
+spelling whose slot trims to nothing (`case; in`, `case ; ; in`, `case` + newline
+`in`, a comment-only word — all rc 2, measured) and fdshell answers its own
+`case: empty word` at rc 1. The same **trimmed**-slice test as above, with the span
+gate on the other side: a quoted empty pair and a quoted `";"` are **words**, so
+`case "" in esac` and `case ";" in esac` stay green, as bash leaves them at rc 0.
+`block_condition` is **not** called there — the `case` word keeps the plain
+`trim_semi` (the `& ;` glue is statement text, and a word slot is not a condition),
+so the guard is the builder's own. Pins: `parse/case_block/tests.rs`
+(`the_empty_word_is_the_word_error`) and `tests/case.rs`
+(`an_empty_case_word_is_a_parse_error`).
 
 ## A `case` arm is a command list: empty at `esac`, and its stray `)` is the missing `;;`
 
@@ -3879,7 +3893,10 @@ out of that one place and the clause walk must know both (measured against bash
   deliberate opposite of the `then`/`elif`/`else`/`do` rule of the entry above (that
   grammar requires a non-empty `list`, this one does not), which is why
   `parse/semi.rs::block_body` is **not** called for a `case` arm and must not be.
-  A walk that ends a pattern list *by position* (`*pos >= esac_idx`) reports
+  An empty **clause list** (no clause at all) is not this rule's empty arm body:
+  task #415's guard is the builder's own, one slot earlier, and bash accepts the
+  empty list when it is spelled with newlines while rejecting a real `;` byte in
+  it. A walk that ends a pattern list *by position* (`*pos >= esac_idx`) reports
   `case x in a) esac` — which reaches `esac_idx` right after a **successful** `)` —
   as `case: missing ')'`. The fix is the flag the position was imitating:
   `ensure!(closed_paren, CaseMissingCloseParen)`, set at the `)` break. The
@@ -5099,6 +5116,18 @@ links behind it). The exception has a visible cost, pinned as measured in
 `tests/heredoc.rs`: a chain with a comment on one of its middle links still splits at the
 comment's newline, so that one shape does not produce what bash does; closing it means
 discarding comment text, a rule the parse layer owns and the runner must not re-derive.
+
+The byte is read at a second place now (task #415): the `case` clause list, whose
+POSIX #2.9.1 production is a `newline_list`. An empty slot there is legal when a
+newline spells it (`case x in` + newline `esac`, bash rc 0) while a **real** `;`
+in it is the violation (`case x in; esac`, bash rc 2) — the same split the
+tokenizer cannot see, so the guard asks the one owner the byte rule already has,
+`parse/semi/preceded.rs::semi_byte`. It reads only the slot the walk left
+**empty**: the leading-`;`-before-a-clause leniency (task #300) is a different
+question, and making the byte rule general there would flip those pins. Pins:
+`parse/case_block/tests.rs` (`a_semicolon_byte_in_an_empty_clause_list_is_the_clause_error`),
+whose two accepted rows kill the byte test from both sides, and `tests/case.rs`
+(`a_semicolon_byte_in_an_empty_clause_list_is_a_parse_error`).
 
 ## A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)
 
