@@ -439,3 +439,97 @@ fn a_group_behind_the_region_is_the_body() {
         "expected 'do'"
     );
 }
+
+// --- the word form's clause with no `in` (task #416) -----------------------
+
+/// Parse a whole statement, expecting the **word form** `for`.
+fn word_for(line: &[u8]) -> ForBlock {
+    match crate::parse::parse(&stext(line)).unwrap() {
+        ParsedLine::For(fb) => fb,
+        _ => panic!("not a word-form for: {line:?}"),
+    }
+}
+
+/// POSIX #2.9.1 makes the clause's `in compound-list` **optional**, and bash
+/// then reads `"$@"`: the clause is `for name` alone, the parse carries that
+/// fact as a field, and `words` is empty — the run layer takes the list from the
+/// positional deque (`for_run/tests.rs` is the run-side pin). The newline
+/// spelling of the terminator is the same clause, and the keyword-name family
+/// (`in`, `fi`, `do`, `then`) are **names** here: the scan parks every word
+/// behind `for` and never scores it. The family's `done` member is the block's
+/// own closer, pinned separately below.
+#[test]
+fn a_clause_without_in_has_no_words_and_the_default_flag() {
+    for (line, name) in [
+        (b"for i; do echo x; done".as_slice(), b"i".as_slice()),
+        (b"for i\ndo echo x; done".as_slice(), b"i".as_slice()),
+        (b"for in; do echo x; done".as_slice(), b"in".as_slice()),
+        (b"for fi; do echo x; done".as_slice(), b"fi".as_slice()),
+        (b"for do; do echo x; done".as_slice(), b"do".as_slice()),
+        (b"for then; do echo x; done".as_slice(), b"then".as_slice()),
+    ] {
+        let fb = word_for(line);
+        assert!(fb.words_default_to_positional, "{line:?}");
+        assert!(fb.words.is_empty(), "{line:?}");
+        assert!(fb.var.eq_bytes(name), "{line:?}");
+        assert_eq!(fb.body.data, c"echo x".into(), "{line:?}");
+    }
+}
+
+/// A **word** sitting where the optional `in` would be stays the head's error:
+/// the clause is `for name` only when the slot behind the name holds the clause
+/// terminator, through the span gate (task #247), so a quoted `"in"`/`";"` word
+/// is word data and a real word (`for x a`) is bash's rc-2 family — rc 1 here,
+/// the repo-wide convention. The last row is task #521's (`for i do …` — bash
+/// accepts it at rc 0 through the grammar's empty `newline_list`) and is pinned
+/// at today's message so the row cannot drift silently.
+#[test]
+fn a_word_where_the_optional_in_belongs_stays_the_heads_error() {
+    for (line, bash_rc) in [
+        (b"for i \"in\"; do echo x; done".as_slice(), 2),
+        (b"for i \"in\" a; do echo x; done".as_slice(), 2),
+        (b"for in done; do echo x; done".as_slice(), 2),
+        (b"for i &; do echo x; done".as_slice(), 2),
+        (b"for i \";\"; do echo x; done".as_slice(), 2),
+        (b"for i do echo x; done".as_slice(), 0),
+    ] {
+        assert_eq!(
+            parse_err(line),
+            "expected 'in'",
+            "{line:?}: bash rc {bash_rc}"
+        );
+    }
+}
+
+/// The pair that makes the flag load-bearing: `for name in; do` is the **empty**
+/// list — zero iterations (bash rc 0; task #299 pins it green against bash) — and
+/// parses with no words and the flag `false`.
+#[test]
+fn the_in_form_still_distinguishes_an_empty_list() {
+    let fb = word_for(b"for i in; do echo a; done");
+    assert!(!fb.words_default_to_positional);
+    assert!(fb.words.is_empty());
+    assert_eq!(fb.var, c"i".into());
+    assert_eq!(fb.body.data, c"echo a".into());
+}
+
+/// The name slot of a clause with no `in` is still walked by the closing-keyword
+/// walk, so a name written as the block's **own** closer answers with the walk's
+/// message (`semi/preceded.rs`) and not with `[a]` as bash does at rc 0; the `in`
+/// spelling of the same name lands in `parse/block_tail/word.rs`. Task #522 owns
+/// that decision; both rows are pinned at today's message meanwhile, so neither
+/// can drift silently. The rest of the keyword-name family (`in`, `fi`, `do`,
+/// `then`) is bash parity and is pinned above and in `tests/loops.rs`.
+#[test]
+fn the_closer_shaped_name_is_pinned_at_its_current_message() {
+    assert_eq!(
+        parse_err(b"for done; do echo x; done"),
+        "expected ';' before 'done'",
+        "bash prints x, rc 0 (task #522)"
+    );
+    assert_eq!(
+        parse_err(b"for done in a; do echo x; done"),
+        "'done' must be followed by a separator (';', a newline, '&', '|') — unexpected word",
+        "bash prints x, rc 0 (task #522)"
+    );
+}

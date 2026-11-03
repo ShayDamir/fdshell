@@ -326,3 +326,115 @@ fn a_failing_open_leaves_the_arithmetic_clauses_unrun() {
         "no clause is evaluated when the open fails"
     );
 }
+
+// --- the clause with no `in`: the default list is `"$@"` (task #416) --------
+
+/// Run a word-form `for` whose body counts its iterations in `n` and records the
+/// word it was given in `v`; both are shell variables, read back through `var`.
+fn run_recording(cell: &ForkCell<ShellState>, script: &[u8]) {
+    let text = stext(script);
+    let block = for_block(text.as_bytes().unwrap());
+    assert_eq!(run_for(&block, &text, cell).unwrap(), None);
+}
+
+/// POSIX #2.9.1 makes the clause's `in word-list` optional and bash then reads
+/// the positional parameters — the same words `"$@"` expands to (measured: `[a]`,
+/// `[b]`). The parse carries the fact as a field (`words_default_to_positional`),
+/// the run layer clones the deque out and walks it, one word per parameter. An
+/// empty deque produces **no** word at all — the body never runs, and the loop's
+/// own status rule reports 0 (task #164's rule, shared with `while`/`until`).
+#[test]
+fn a_for_clause_without_in_takes_the_positional_parameters() {
+    let cell = make_cell();
+    seed(&cell, b"set -- a b; n=0");
+    run_recording(&cell, b"for i; do n=$((n+1)); v=$i; done");
+    assert!(var(&cell, "n").is_some_and(|v| v.eq_bytes(b"2")));
+    assert!(var(&cell, "v").is_some_and(|v| v.eq_bytes(b"b")));
+    assert_eq!(status(&cell), 0);
+
+    let cell = make_cell();
+    seed(&cell, b"set --; n=0");
+    run_recording(&cell, b"for i; do n=$((n+1)); v=$i; done");
+    assert!(
+        var(&cell, "n").is_some_and(|v| v.eq_bytes(b"0")),
+        "no iteration"
+    );
+    assert_eq!(status(&cell), 0);
+}
+
+/// The default list is the deque **verbatim**: no IFS split, no pathname
+/// expansion, and an empty parameter is one iteration with an empty word (bash:
+/// `[a b]` then `[c]`, `[*]`, `[]`). Files sit in the scratch dir so a glob would
+/// have something to produce; the `"$@"` pipeline is what this must match.
+#[test]
+fn the_default_list_splits_and_globs_nothing() {
+    let cell = make_cell();
+    seed(&cell, b"set -- \"a b\"; n=0");
+    run_recording(&cell, b"for i; do n=$((n+1)); v=$i; done");
+    assert!(var(&cell, "n").is_some_and(|v| v.eq_bytes(b"1")));
+    assert!(var(&cell, "v").is_some_and(|v| v.eq_bytes(b"a b")));
+
+    let (_f, scratch) = temp_path("default_glob");
+    std::fs::write(scratch.join("x"), b"").unwrap();
+    let cell = make_cell();
+    seed(
+        &cell,
+        format!("cd {}; set -- \"*\"; n=0", scratch.display()).as_bytes(),
+    );
+    run_recording(&cell, b"for i; do n=$((n+1)); v=$i; done");
+    assert!(var(&cell, "n").is_some_and(|v| v.eq_bytes(b"1")));
+    assert!(var(&cell, "v").is_some_and(|v| v.eq_bytes(b"*")));
+
+    let cell = make_cell();
+    seed(&cell, b"set -- \"\"; n=0");
+    run_recording(&cell, b"for i; do n=$((n+1)); v=$i; done");
+    assert!(var(&cell, "n").is_some_and(|v| v.eq_bytes(b"1")));
+    assert!(var(&cell, "v").is_some_and(|v| v.eq_bytes(b"")));
+}
+
+/// The list is taken **once**, when the loop starts, so a body that moves the
+/// positionals does not change the walk — both spellings still run `a` then `b`
+/// (bash's `[a]`, `[b]`).
+#[test]
+fn the_default_list_is_taken_once_at_loop_start() {
+    for body in [
+        "for i; do n=$((n+1)); v=$i; set -- z; done",
+        "for i; do n=$((n+1)); v=$i; shift; done",
+    ] {
+        let cell = make_cell();
+        seed(&cell, b"set -- a b; n=0");
+        run_recording(&cell, body.as_bytes());
+        assert!(var(&cell, "n").is_some_and(|v| v.eq_bytes(b"2")), "{body}");
+        assert!(var(&cell, "v").is_some_and(|v| v.eq_bytes(b"b")), "{body}");
+    }
+}
+
+/// The flag's `false` side, and the mutation killer for a flag flipped either
+/// way: `for name in; do` carries the **empty list** (task #299's row, bash rc 0,
+/// nothing printed), so with the very same empty `words` the body must never run —
+/// even when the deque is full.
+#[test]
+fn an_empty_in_list_still_iterates_zero_times() {
+    let cell = make_cell();
+    seed(&cell, b"set -- a b; n=0");
+    run_recording(&cell, b"for i in; do n=$((n+1)); v=$i; done");
+    assert!(var(&cell, "n").is_some_and(|v| v.eq_bytes(b"0")));
+    assert!(!is_set(&cell, "v"), "the body never ran");
+    assert_eq!(status(&cell), 0);
+}
+
+/// Task #298's rule with the default list: the scope opens **before** the words
+/// are taken, so every iteration's output lands in the file (bash files
+/// `[a]`, `[b]`), and fd 1 is back on its original target when the loop ends.
+#[test]
+fn the_default_list_works_through_the_redirect_after_done() {
+    let (a, _sa) = temp_path("default_redirect");
+    let text = stext(format!("for x; do echo \"[$x]\"; done > {a}").as_bytes());
+    let before = link(1);
+    let cell = make_cell();
+    seed(&cell, b"set -- a b");
+    let block = for_block(text.as_bytes().unwrap());
+    assert_eq!(run_for(&block, &text, &cell).unwrap(), None);
+    assert_eq!(link(1), before, "fd 1 is back on its original target");
+    assert_eq!(body(&a), "[a]\n[b]\n");
+}

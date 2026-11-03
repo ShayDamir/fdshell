@@ -2405,3 +2405,84 @@ fn c_style_for_a_brace_body_on_the_next_line_is_a_divergence() {
     let (out, err, rc) = run("for ((i=0;i<2;i++))\n{ echo $i; }\n; echo after");
     assert_eq!((out.as_str(), rc), ("0\n1\nafter\n", 0), "{err}");
 }
+
+/// POSIX #2.9.1 makes the clause's `in word-list` **optional**, and bash reads a
+/// clause without it as the positional parameters — the same words `"$@"` expands
+/// to. Measured 2026-11-03 against bash 5.3.9 and this build: nothing printed with
+/// no positionals (the empty deque is **no word**), `[a] [b]` with two, and the
+/// newline spelling of the terminator is the same clause. `for in; do`, `for fi;`,
+/// `for do;` and `for then;` are keyword names in the **name** slot — bash reads
+/// them as the name and iterates the parameters (the scan never scores a word
+/// behind `for`); the family's `done` member is the block's own closer and is
+/// task #522's, pinned at its current message in `parse/for_block/tests.rs`. The
+/// function-scope row is the parameters of the **call**, not the shell's.
+#[test]
+fn for_clause_without_in_iterates_the_positional_parameters() {
+    for (script, want) in [
+        ("for i; do echo x; done", ""),
+        (
+            "set -- a b; for i; do printf \"[%s]\\n\" \"$i\"; done",
+            "[a]\n[b]\n",
+        ),
+        ("set -- a; for in; do :; done", ""),
+        (
+            "set -- a; for fi; do printf \"[%s]\\n\" \"$fi\"; done",
+            "[a]\n",
+        ),
+        (
+            "set -- a; for do; do printf \"[%s]\\n\" \"$do\"; done",
+            "[a]\n",
+        ),
+        (
+            "set -- a; for then; do printf \"[%s]\\n\" \"$then\"; done",
+            "[a]\n",
+        ),
+        (
+            "set -- a b; f() { for i; do printf \"[%s]\\n\" \"$i\"; done; }; f c d",
+            "[c]\n[d]\n",
+        ),
+        (
+            "set -- a; for i\ndo printf \"[%s]\\n\" \"$i\"; done",
+            "[a]\n",
+        ),
+        ("set -- a b; for i; do :; done; echo rc=$?", "rc=0\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+        assert_eq!(err, "", "{script}");
+    }
+}
+
+/// The default list is `"$@"` and nothing else: one word per parameter, verbatim —
+/// no IFS split, no pathname expansion (the scratch dir has a one-character file so
+/// a glob would have matched), an empty parameter is **one** iteration with an
+/// empty word, and the list is fixed when the loop starts, so a body that moves the
+/// positionals does not change the walk. Every row measured against bash 5.3.9; the
+/// `"$@"` spelling itself is `for_list_dollar_at_iterates_positionals`, and the last
+/// row is the other side of the pair task #299 pins green: `for name in; do` is the
+/// **empty** list, zero iterations, not the positional default.
+#[test]
+fn the_default_for_list_is_quoted_dollar_at() {
+    let dir = scratch("default-list");
+    std::fs::write(dir.join("x"), b"").unwrap();
+    for (script, want) in [
+        (
+            r#"set -- "a b" c; for i; do printf "[%s]\n" "$i"; done"#,
+            "[a b]\n[c]\n",
+        ),
+        (
+            r#"set -- "*"; cd PLACEHOLDER; for i; do printf "[%s]\n" "$i"; done"#,
+            "[*]\n",
+        ),
+        (r#"set -- ""; for i; do printf "[%s]\n" "$i"; done"#, "[]\n"),
+        (
+            r#"set -- a b; for i; do set -- z; printf "[%s]\n" "$i"; done"#,
+            "[a]\n[b]\n",
+        ),
+        ("set -- a b; for i in; do echo x; done", ""),
+    ] {
+        let script = script.replace("PLACEHOLDER", &dir.display().to_string());
+        let (out, err, code) = run(&script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}

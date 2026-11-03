@@ -2221,7 +2221,7 @@ fn for_missing_done_returns_err() {
 }
 
 #[test]
-fn for_no_in_returns_err() {
+fn for_word_where_the_optional_in_belongs_returns_err() {
     let line = b"for x a; do cmd; done";
     let tokens = token::tokenize(line).unwrap();
     assert!(for_block::tokens_to_for(&tokens, &stext(line)).is_err());
