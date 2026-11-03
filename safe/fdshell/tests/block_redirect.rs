@@ -718,6 +718,25 @@ fn a_here_doc_or_here_string_on_a_closer_feeds_the_block() {
         // One stream for the whole block: the body prints **once** for the two
         // iterations, so the claim belongs to the block and not to a round.
         ("for x in a b; do cat; done <<T\nbody\nT", "body\n"),
+        // A block whose closer carries an operator inside each `if` arm: the arm's
+        // text is reconstructed with the bodies it owns, so the closer's claim is
+        // the arm's own region (`parse/part_text`'s four sites, one rule).
+        (
+            "if true; then while :; do cat; break; done <<T\nbody\nT\nfi",
+            "body\n",
+        ),
+        (
+            "if false; then :; else while :; do cat; break; done <<T\nbody\nT\nfi",
+            "body\n",
+        ),
+        (
+            "if false; then :; elif true; then while :; do cat; break; done <<T\nbody\nT\nfi",
+            "body\n",
+        ),
+        (
+            "while :; do if true; then cat; fi <<T; break; done\nbody\nT",
+            "body\n",
+        ),
         // A loop whose condition fails on the first test never runs its body, and
         // an unrun body never reads the stream (bash prints nothing).
         ("until :; do cat; break; done <<T\nbody\nT", ""),
