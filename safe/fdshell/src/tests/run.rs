@@ -960,11 +960,23 @@ fn and_success_runs_second_command() {
     });
 }
 
+/// Task #406: the empty part **between** two operators is an operator with nothing in
+/// front of it — the text begins at a line start, so the rule reports and **nothing
+/// runs** (bash refuses the line at rc 2). The report is the proof that nothing ran:
+/// `last_status` is still the cell's initial one. The loop's `is_empty_part` guard no
+/// longer reaches this shape from here; if the loop is split, re-derive `cond.rs`'s
+/// accepted-equivalent list (the mutation Chore owns it). The integration pin is
+/// `tests/cond_blocks.rs::an_operator_that_opens_a_physical_line_reports`.
 #[test]
-fn empty_part_between_operators_is_separator() {
+fn an_operator_opening_a_part_reports_before_anything_runs() {
     child_test(|| {
         let cell = make_cell();
-        run_cond_list(b"false || && builtin true", &cell).unwrap();
+        let e = run_cond_list(b"false || && builtin true", &cell).unwrap_err();
+        assert!(matches!(e.current_context(), CmdError::Parse), "{e:?}");
+        assert!(
+            format!("{e:?}").contains("expected command before '&&'"),
+            "{e:?}"
+        );
         let state = borrow_state(&cell);
         assert_eq!(state.last_status.exit_code(), 0);
     });

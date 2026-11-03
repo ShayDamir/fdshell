@@ -2,7 +2,7 @@
 //! operator that ends a text with no command behind it.
 
 use super::boundary::next_boundary;
-use super::parts::{dangling_operator, take_bodies};
+use super::parts::{dangling_operator, empty_left_side, take_bodies};
 use crate::scan::ScanState;
 use alloc::vec;
 use sys::ShortCStr;
@@ -603,8 +603,10 @@ fn a_command_behind_the_operator_keeps_the_rule_off() {
     // (`tests/cond_blocks.rs` and `tests/heredoc.rs` pin the shapes end to end).
     assert_eq!(dangling_operator(b"echo a && #c\necho b"), None);
     assert_eq!(dangling_operator(b"cat <<\"&&\"\n&&"), None);
-    // The empty-*left* family, its own owner (task #406): an operator that opens the
-    // text needs the command **in front** of it, which bash's grammar also requires.
+    // The empty-*left* family, now owned by [`empty_left_side`] (task #406): these rows
+    // stay green as pins of *this* fn — an operator whose left side is blank is not the
+    // empty-*right* rule's, and the row that belongs to both (a blank side on each end)
+    // is declined by both.
     assert_eq!(dangling_operator(b"&&"), None);
     assert_eq!(dangling_operator(b"&& echo b"), None);
     assert_eq!(dangling_operator(b"false || && builtin true"), None);
@@ -615,4 +617,70 @@ fn a_command_behind_the_operator_keeps_the_rule_off() {
     // The lone `|` behind the operator is a word — the pipe rule's family, pinned by
     // the `expected command after pipe` rows.
     assert_eq!(dangling_operator(b"echo a || |"), None);
+}
+
+/// Task #406's half of the both-sides rule, from the report's side: the operator that
+/// **opens** a text which begins at a physical line start (`at_line_start`), with a
+/// command behind it. The glued pair is one operator token (task #496) and the scan
+/// reads quotes, escapes, comments, regions and `$( )` by the existing rules, so the
+/// rows below are the same rules restated at this granularity. A text that begins
+/// **mid-line** is the tail of a line whose head another layer claimed (a definition's
+/// body, a here-doc region), and a text that is **only** an operator has a blank side on
+/// both — each rule declines it, and those shapes keep their pinned answers
+/// (`tests/cond_blocks.rs::the_operator_that_opens_a_line_keeps_its_boundaries`,
+/// `tests/heredoc.rs::a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468`).
+#[test]
+fn an_operator_that_opens_the_text_is_the_report_s() {
+    assert_eq!(
+        empty_left_side(b"&& echo y", true),
+        Some(ShortCStr::from(c"&&"))
+    );
+    assert_eq!(
+        empty_left_side(b"&& echo b", true),
+        Some(ShortCStr::from(c"&&"))
+    );
+    assert_eq!(
+        empty_left_side(b"|| echo b", true),
+        Some(ShortCStr::from(c"||"))
+    );
+    // The operator opens the text's first line and something sits behind it — comment
+    // text is data to the scan, so it counts as "behind" here, and bash rejects the
+    // spelling either way (the family is pinned end to end in `tests/cond_blocks.rs`).
+    assert_eq!(
+        empty_left_side(b"&& #c", true),
+        Some(ShortCStr::from(c"&&"))
+    );
+    assert_eq!(
+        empty_left_side(b"&&\n&& echo b", true),
+        Some(ShortCStr::from(c"&&"))
+    );
+    // Mid-text operators of a text that begins at a line start: the second operator
+    // opens a *part* with nothing in front of it, and bash refuses those lines too.
+    assert_eq!(
+        empty_left_side(b"echo a && && echo b", true),
+        Some(ShortCStr::from(c"&&"))
+    );
+    assert_eq!(
+        empty_left_side(b"false || && builtin true", true),
+        Some(ShortCStr::from(c"&&"))
+    );
+    assert_eq!(
+        empty_left_side(b"echo a || && echo b", true),
+        Some(ShortCStr::from(c"&&"))
+    );
+    // A quoted word, a region's data, a comment tail a join keeps, a `;`-split unit,
+    // a lone `|`: the existing rules own them (the pins named in the doc comment).
+    assert_eq!(empty_left_side(b"echo \"a && b\"", true), None);
+    assert_eq!(empty_left_side(b"cat <<\"&&\"\n&&", true), None);
+    assert_eq!(empty_left_side(b"echo a && #c\necho b", true), None);
+    assert_eq!(empty_left_side(b"echo a && ; echo b", true), None);
+    assert_eq!(empty_left_side(b"echo a || |", true), None);
+    assert_eq!(empty_left_side(b"echo a &&", true), None);
+    // Both sides blank: the operator alone on a line is the deferral's shape, and the
+    // empty-*right* rule above declines a blank left.
+    assert_eq!(empty_left_side(b"&&", true), None);
+    // Mid-line: the head of the line was claimed by another layer, so the operator has
+    // its command — a definition's body (`f() { echo hi; } && echo done`) is the pin.
+    assert_eq!(empty_left_side(b" && echo done", false), None);
+    assert_eq!(empty_left_side(b"&& echo done", false), None);
 }
