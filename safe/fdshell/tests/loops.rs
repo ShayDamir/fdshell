@@ -2161,10 +2161,11 @@ fn a_word_after_the_closing_keyword_is_a_parse_error() {
     }
     // The exemption side of the same walk, so the boundary stays visible: a
     // separator/word-break shape behind the closer is the #316/#396 family's and
-    // stays accepted (bash rc 2 there, pinned as measured), and so is the `&>`
-    // family (#409) — see `parse/block_tail/tests.rs` for the unit rows. The
-    // here-doc operators, which used to sit on this list, are taken by the walk
-    // now (task #408 landed; its rows are in `tests/block_redirect.rs`).
+    // stays accepted (bash rc 2 there, pinned as measured), and so does the bare
+    // `&` (owner #352). The `&>` family and the here-doc operators, which used to
+    // sit on this list, are arms now — #408 and #409 landed; their rows are in
+    // `tests/block_redirect.rs` and `tests/group.rs`, and the unit rows in
+    // `parse/block_tail/tests.rs`.
     let (out, err, rc) = run_bounded("while false; do echo a; done (x)");
     assert_eq!((out.as_str(), rc), ("", 0), "stderr={err}, bash rc 2");
 }

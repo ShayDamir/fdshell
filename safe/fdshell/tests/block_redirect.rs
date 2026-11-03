@@ -6,9 +6,11 @@
 //! `{ …; } > f` already implements, and every expectation below is bash 5.3.9's
 //! own output for the same script — except the rows that name their owner task
 //! (the rc-convention family #179, the word-behind-the-closer family #405, the
-//! `&>` family #409, the saved-copy floor #184). Task **#408** landed the
+//! saved-copy floor #184). Task **#408** landed the
 //! here-doc / here-string half of the same tail; its matrix is
-//! `a_here_doc_or_here_string_on_a_closer_feeds_the_block`.
+//! `a_here_doc_or_here_string_on_a_closer_feeds_the_block`. Task **#409** landed
+//! the `&>` family; its matrix is
+//! `the_combined_redirect_family_on_a_closer`.
 
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -546,8 +548,9 @@ fn closer_shaped_words_stay_word_data() {
 /// `group: unexpected word after '}'`; the here-doc / here-string family on a
 /// closer is **parity** now (task **#408** landed — the two rows below are the
 /// ones that used to be dropped, kept here so the flip is visible, the matrix is
-/// in `a_here_doc_or_here_string_on_a_closer_feeds_the_block`); the `&>` family
-/// on a closer is dropped (bash combines), owned by **#409**; a bare `>` with no
+/// in `a_here_doc_or_here_string_on_a_closer_feeds_the_block`); the `&>` family on
+/// a closer is **parity** too (task **#409** landed — same reason, its matrix is
+/// `the_combined_redirect_family_on_a_closer`); a bare `>` with no
 /// operand is fdshell's rc-1 redirect syntax error (bash: rc 2) — the house
 /// parse-error convention.
 /// Every value below is measured on this build against bash 5.3.9.
@@ -615,14 +618,15 @@ fn the_pinned_divergences_behind_a_closer() {
     let o = run(&dir, "while :; do echo a; break; done <<< hi");
     assert_eq!((out(&o), rc(&o)), ("a\n", Some(0)), "stderr={}", err(&o));
 
-    // #409: bash combines stdout and stderr into `f`; fdshell drops the tail.
+    // **#409** landed: the `&>` family on a closer is **parity** — the tail is
+    // taken, the whole block writes through the one open, and the row used to be
+    // the dropped tail (stdout `a`, no `f`). Nothing is printed here because the
+    // block has no statement behind it — bash prints nothing either. The matrix
+    // with both streams is `the_combined_redirect_family_on_a_closer`.
     let dir = Scratch::new();
     let o = run(&dir, "while :; do echo a; break; done &> f");
-    assert_eq!((out(&o), rc(&o)), ("a\n", Some(0)), "stderr={}", err(&o));
-    assert!(
-        file(&dir, "f").is_none(),
-        "#409: the `&>` tail is not attached"
-    );
+    assert_eq!((out(&o), rc(&o)), ("", Some(0)), "stderr={}", err(&o));
+    assert_eq!(file(&dir, "f"), Some(b"a\n".to_vec()));
 
     // The house convention: rc 1 for a parse error, where bash prints rc 2.
     let dir = Scratch::new();
@@ -927,4 +931,130 @@ fn the_here_doc_tail_rows_that_keep_their_measured_values() {
         "bash rc 0 — the loop-status rule: stderr={}",
         err(&o)
     );
+}
+
+/// The `&>` family at a closer (task **#409**): the combined redirect — bare,
+/// attached, glued to the closer, and in either order beside a path redirect —
+/// belongs to the **whole** block, and its one open is shared by fd 1 and fd 2
+/// (LESSONS: "The `&>` family is one operator, so one open, so one description
+/// shared by fd 1 and fd 2"). A body writing to **both** streams is the observable
+/// that proves the single open: bash files `a` then `e` in one file, and so does
+/// fdshell. One row per builder closer. Every value is bash 5.3.9's own output for
+/// the same script, measured 2026-11-03 on this build; the rows that are **not**
+/// parity name their owner. The unit rows — one per arm spelling, each naming
+/// `extra_to` — are `parse/block_tail/bg/tests.rs` (integration tests contribute no
+/// coverage, LESSONS).
+#[test]
+fn the_combined_redirect_family_on_a_closer() {
+    for script in [
+        "while :; do echo a; echo e >&2; break; done &> f; echo tail",
+        "while :; do echo a; echo e >&2; break; done &>> f; echo tail",
+        "while :; do echo a; echo e >&2; break; done&>f; echo tail",
+        "until false; do echo a; echo e >&2; break; done &> f; echo tail",
+        "for i in x; do echo a; echo e >&2; done &> f; echo tail",
+        "if true; then echo a; echo e >&2; fi &> f; echo tail",
+        "case x in x) echo a; echo e >&2;; esac &> f; echo tail",
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            ("tail\n", Some(0)),
+            "{script:?}: stderr={}",
+            err(&o)
+        );
+        assert_eq!(file(&dir, "f"), Some(b"a\ne\n".to_vec()), "{script:?}");
+    }
+
+    // The source order of two redirects is observable, whichever of them is the
+    // family's: the bare operator consumes its operand token, so both spellings of
+    // the pair land in the order they were **written** (POSIX #2.5).
+    for (script, want_f, want_g) in [
+        (
+            "while :; do echo a; echo e >&2; break; done &> f 2> g; echo tail",
+            b"a\n".to_vec(),
+            b"e\n".to_vec(),
+        ),
+        (
+            "while :; do echo a; echo e >&2; break; done 2> g &> f; echo tail",
+            b"a\ne\n".to_vec(),
+            b"".to_vec(),
+        ),
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            ("tail\n", Some(0)),
+            "{script:?}: stderr={}",
+            err(&o)
+        );
+        assert_eq!(file(&dir, "f"), Some(want_f), "{script:?}");
+        assert_eq!(file(&dir, "g"), Some(want_g), "{script:?}");
+    }
+
+    // `noclobber` on a fresh target: the family opens its operand **once** (bash's
+    // `> f 2>&1` is one open too), so the exclusive create happens once and both
+    // streams still land in `f`.
+    let dir = Scratch::new();
+    let o = run(
+        &dir,
+        "set -o noclobber; while :; do echo a; echo e >&2; break; done &> f; echo tail",
+    );
+    assert_eq!((out(&o), rc(&o)), ("tail\n", Some(0)), "stderr={}", err(&o));
+    assert_eq!(
+        file(&dir, "f"),
+        Some(b"a\ne\n".to_vec()),
+        "one open, exclusive create"
+    );
+
+    // The `%var` target: bash takes the word as the **file name** `%v`; fdshell
+    // reads the fd-variable source — the family's documented divergence
+    // (POSIX_COMPATIBILITY, ">`%var` and `&>%var` redirect to the descriptor"),
+    // pinned at the simple-command level in `tests/redirect.rs` and here at the
+    // closer. The lookup runs, `%v` is unbound, rc 1, no file is created.
+    let dir = Scratch::new();
+    let o = run(
+        &dir,
+        "while :; do echo a; echo e >&2; break; done &>%v; echo tail",
+    );
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("", Some(1)),
+        "bash: stdout tail, file `%v`; stderr={}",
+        err(&o)
+    );
+    assert!(
+        err(&o).contains("fd variable 'v' is not set"),
+        "stderr={}",
+        err(&o)
+    );
+    assert!(
+        file(&dir, "%v").is_none(),
+        "the word is not a file name here"
+    );
+
+    // The pidvar half of the family (`&>&name`, `&>|&name`) is a **simple-command**
+    // position: at a closer bash rejects the line (rc 2) and the house convention
+    // reports the parse error at rc 1 — not a backgrounded block. Both spellings,
+    // measured 2026-11-03.
+    for script in [
+        "while :; do echo a; echo e >&2; break; done &>&job; echo tail",
+        "while :; do echo a; echo e >&2; break; done &>|&job; echo tail",
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            ("", Some(1)),
+            "bash rc 2; {script:?}: stderr={}",
+            err(&o)
+        );
+        assert!(
+            err(&o).contains("unexpected character in this context"),
+            "{script:?}: stderr={}",
+            err(&o)
+        );
+        assert!(file(&dir, "job").is_none(), "{script:?}");
+    }
 }

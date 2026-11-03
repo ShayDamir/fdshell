@@ -356,6 +356,83 @@ fn background_and_here_doc_on_group_are_parse_errors() {
     );
 }
 
+/// The `&>` family written after the group's closing brace (task **#409**): the
+/// family's redirect arms are the one parser the simple-command collector and the
+/// keyword block's tail also drive, so `{ …; } &> f` files **both** streams through
+/// the one open and the shell's own fds are back at the group's end (`echo tail`
+/// prints). Every value below is bash 5.3.9's own output for the same script,
+/// measured 2026-11-03 on this build; the rows that are **not** parity name their
+/// owner. The bare `&`/`&&` and the `<<EOF` bails stay their owners' (#188/#192 —
+/// `background_and_here_doc_on_group_are_parse_errors` and
+/// `ampersand_does_not_loosen_the_group_closer_rule`); the unit rows naming
+/// `extra_to` are `parse/group_block/tail/tests.rs`.
+#[test]
+fn the_combined_redirect_family_on_the_group_closer() {
+    for (script, want_file) in [
+        ("{ echo g; } &> {f}; echo tail", "g\n"),
+        ("{ echo g; echo e >&2; } &> {f}; echo tail", "g\ne\n"),
+        ("{ echo g; echo e >&2; } &>> {f}; echo tail", "g\ne\n"),
+        ("{ echo g; echo e >&2; }&>{f}; echo tail", "g\ne\n"),
+    ] {
+        let (f, _scratch) = temp_path("fam");
+        let (out, err, rc) = run(&script.replace("{f}", &f));
+        assert_eq!((out.as_str(), rc), ("tail\n", 0), "stderr={err}");
+        assert_eq!(body(&f), want_file, "{script}");
+    }
+
+    // The source order of two redirects is observable either way: the bare operator
+    // consumes its operand token, so both spellings apply in the order they were
+    // written (POSIX #2.5, `bg_redirect::insert_redirect`).
+    for (script, want_f, want_g) in [
+        (
+            "{ echo g; echo e >&2; } &> {f} 2> {g}; echo tail",
+            "g\n",
+            "e\n",
+        ),
+        (
+            "{ echo g; echo e >&2; } 2> {g} &> {f}; echo tail",
+            "g\ne\n",
+            "",
+        ),
+    ] {
+        let (f, _scratch) = temp_path("fam_f");
+        let (g, _scratch2) = temp_path("fam_g");
+        let script = script.replace("{f}", &f).replace("{g}", &g);
+        let (out, err, rc) = run(&script);
+        assert_eq!((out.as_str(), rc), ("tail\n", 0), "{script}: stderr={err}");
+        assert_eq!(body(&f), want_f, "{script}");
+        assert_eq!(body(&g), want_g, "{script}");
+    }
+
+    // The shapes that stay reports — the family's pidvar half (bash rejects it
+    // behind a `}`; the pidvar is a simple-command position) and the
+    // rc-1-vs-2 pair (no operand, a word behind the operator). The `%var` target is
+    // the documented fd-variable divergence (POSIX_COMPATIBILITY, ">`%var` and
+    // `&>%var` redirect to the descriptor"): the lookup runs, `%v` is unbound, rc 1,
+    // and no file named `%v` is created — bash writes that file.
+    for (script, want_err) in [
+        (
+            "{ echo g; } &>&job; echo tail",
+            "unexpected character in this context",
+        ),
+        (
+            "{ echo g; } &>|&job; echo tail",
+            "unexpected character in this context",
+        ),
+        ("{ echo g; } &>|f; echo tail", "invalid redirect syntax"),
+        ("{ echo g; } &> ; echo tail", "invalid redirect syntax"),
+        (
+            "{ echo g; } &> f x; echo tail",
+            "group: unexpected word after '}'",
+        ),
+        ("{ echo g; } &>%v; echo tail", "fd variable 'v' is not set"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "bash rc 2; {script}: {err}");
+        assert!(err.contains(want_err), "{script}: {err}");
+    }
+}
+
 /// bash requires the `;` before `}`, an empty group is a syntax error, and a word
 /// after the closing brace is not part of the group.
 #[test]
