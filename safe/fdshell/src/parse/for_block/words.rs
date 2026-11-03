@@ -36,14 +36,18 @@ pub(super) fn plain_amp(tokens: &[Token]) -> bool {
 }
 
 /// The word list of a `for` block (the `in` words up to `do`).
+///
+/// `anchor` is the token the list starts behind: the `in`, or — for a clause
+/// with no `in` (task #416) — the name, so the slot holds only the terminator
+/// and the list comes back empty.
 pub(super) fn collect_words(
     tokens: &[Token],
-    in_pos: usize,
+    anchor: usize,
     do_idx: usize,
 ) -> Result<ForWords, Report<ParseError>> {
     let word_tokens = trim_semi(
         tokens
-            .get(in_pos + 1..do_idx)
+            .get(anchor + 1..do_idx)
             .ok_or(ParseError::ExpectedWordList)?,
     );
     let words: Vec<ShortCStr> = word_tokens

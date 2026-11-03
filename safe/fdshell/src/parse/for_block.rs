@@ -33,6 +33,12 @@ pub struct ForBlock {
     /// `parse::block_tail`); they apply to the whole loop and open **before**
     /// the word list is expanded (bash's order, measured).
     pub redirects: Vec<RedirectDef>,
+    /// The clause had **no** `in` (task #416), so its word list is the
+    /// positional parameters at run time — `"$@"`-shaped: one word per
+    /// parameter, verbatim, nothing when none are set. `words` is empty here;
+    /// the empty list of `for name in; do` means zero iterations, and the flag
+    /// is the whole distinction between the two rows.
+    pub words_default_to_positional: bool,
 }
 
 pub(crate) fn tokens_to_for(
@@ -43,12 +49,17 @@ pub(crate) fn tokens_to_for(
     // The `for` keyword, its variable name and the `in` that opens the word
     // list are the head, and their three errors are the head's contract.
     let (var, in_pos) = head::head(tokens, line)?;
+    // The anchor the `do` search and the word list are measured from: the `in`
+    // token index, or the name index when the clause has no `in` (task #416) —
+    // the slot behind it then holds nothing but the clause terminator, so
+    // `trim_semi` yields the empty list (the invariant `head.rs` guards).
+    let anchor = in_pos.unwrap_or(1);
 
     // The `for` word list takes no list terminator **and** no plain `&` word:
     // its `do` is searched with `;` alone, and a `&` in the list is rejected
     // below (`for i in 1 & do`, `for i in 1 & ; do` are bash syntax errors).
     let do_idx =
-        find_preceded_by(tokens, in_pos, b"do", line, Term::Semi).ok_or(ParseError::ExpectedDo)?;
+        find_preceded_by(tokens, anchor, b"do", line, Term::Semi).ok_or(ParseError::ExpectedDo)?;
 
     // A plain `&` is the async operator, not a word: bash's word list ends at it
     // and its `do`-expectation fails there (task #360). The `;`-terminated shape
@@ -56,7 +67,7 @@ pub(crate) fn tokens_to_for(
     // runs **before** the closer/body validators because bash reports the
     // earliest offending token: `for i in 1 & ; do; done` says `expected 'do'`,
     // not `'do' body is empty`.
-    if words::plain_amp(tokens.get(in_pos + 1..do_idx).unwrap_or(&[])) {
+    if words::plain_amp(tokens.get(anchor + 1..do_idx).unwrap_or(&[])) {
         bail!(ParseError::ExpectedDo);
     }
 
@@ -99,7 +110,7 @@ pub(crate) fn tokens_to_for(
         )?,
     )?;
 
-    let ws = words::collect_words(closed, in_pos, do_idx)?;
+    let ws = words::collect_words(closed, anchor, do_idx)?;
 
     Ok(ForBlock {
         var,
@@ -109,6 +120,7 @@ pub(crate) fn tokens_to_for(
         words_quoted: ws.words_quoted,
         body,
         redirects,
+        words_default_to_positional: in_pos.is_none(),
     })
 }
 
