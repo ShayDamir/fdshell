@@ -1198,10 +1198,28 @@ level (task #422) — the parse is the gate here. The paren test reads a word's
 bytes **with its quote mask**, so a quoted `(` (`a) echo "x(" b) ;;`) and an
 escaped one (`a) echo x\() ;;`, where the mask marks the pair unquoted and only
 the backslash says it is escaped) open no group. Shapes that stay open: a `)`
-written after an argument inside an arm (task #419), a nested `case` in an arm
-(task #418), bash's `;&`/`;;&` terminators (task #420), a subshell arm that
+written after an argument inside an arm (task #419), bash's `;&`/`;;&`
+terminators (task #420), a subshell arm that
 **runs** (task #316), and a closer glued behind a pattern's `)`
 (`case x in a) echo hi;;b)esac`, task #421). Pinned in `safe/fdshell/tests/case.rs`.
+
+A `;;` written inside a block **nested in an arm** belongs to that block: the
+clause walk's `;;` search accepts a window only at the arm's **own level** — the
+same walk the closing-keyword search runs (the block's seed, the `case` word-list
+rule, LESSONS "One clause rule, three scorers"), stopped by a different predicate
+— so `case a in a) case b in b) echo y;; esac;; esac` and
+`case a in a) case b in b) echo y;; esac;; c) echo outer;; esac` print `y` at
+rc 0 as bash does, and so do the nested `for`/`while`/`if`/`{ …; }` arms and the
+heredoc-carrying nested arm. The pairing counts keyword openers and exact brace
+words only, so a `;;` inside a **subshell** in an arm is still the arm's
+(`case a in a) (echo y;; ) ;; esac` keeps its verdict), and the nested `case`'s
+first pattern `)` stays word-list data behind `in`. Two rows stay divergent by
+rule, both pinned: a nested clause list with a **second** clause
+(`case a in a) case b in x) echo n;; *) echo inner;; esac;; esac`) — the
+stray-`)` rule above reads the nested clause's pattern paren and answers at rc 1,
+bash rc 0; and a `;;` inside a nested `if`/`{ …; }`/definer body written in an
+arm, which fdshell accepts at rc 0 as it already does at top level (bash rc 2).
+Pinned in `safe/fdshell/tests/case.rs::a_nested_block_in_an_arm_keeps_its_semi_semi`.
 
 An **empty clause list** is legal only in the spellings bash allows: its slot is
 POSIX #2.9.1's `newline_list`, so `case x in esac`, `case x in` + newline `esac`

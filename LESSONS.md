@@ -4141,9 +4141,11 @@ One shared state machine (`keywords/position.rs`) is consumed verbatim by every
 scorer that walks block text: the cond-boundary block counter
 (`cond/boundary.rs` + `cond/boundary/block.rs`, which carry a `Place` flag), the
 block-span scan (`comment/depth_delta`), the parse closing-keyword search
-(`parse/semi/closing.rs`), and the `case` arm's stray-paren walk
-(`parse/case_clause/stray.rs`). Two gates: the word's *place* and the closer's
-*kind*. All measured against bash.
+(`parse/semi/closing.rs`), the `case` arm's stray-paren walk
+(`parse/case_clause/stray.rs`), and the `case` clause's `;;` window walk
+(`parse/case_clause/extract.rs`, which calls the closing search's loop as
+`parse/semi/closing/walk.rs` — point 10). Two gates: the word's *place* and the
+closer's *kind*. All measured against bash.
 
 1. **The gate is place-based, and the closer's gate is wider than the opener's.**
    Openers score in `Command` only; closers score in `Command | Pattern` — the
@@ -4264,10 +4266,36 @@ block-span scan (`comment/depth_delta`), the parse closing-keyword search
    sweep's count is a lower bound). `Place::Pattern` pays the same type-blindness
    for `case x in esac`: a `done` in a `case`/`for` *list* is a pattern word, not
    a closer, and the seed carries the `case`-**pattern**-list half for free
-   (`case x in done) echo p;; esac` reaches its real `esac`, rc 0 = bash parity);
-   the rest of the list rule is the word-list entry's.
+    (`case x in done) echo p;; esac` reaches its real `esac`, rc 0 = bash parity);
+    the rest of the list rule is the word-list entry's.
+10. **A `;;` window is the arm's only *at the arm's level*** (task #418): the
+    `case` clause walk's separator search reads this very state machine — seed +
+    `List::Case` + `Place`/`after` + `Pairing` — and the only difference between
+    it and the closing-keyword walk is the **stop predicate**, so the walk is one
+    function (`parse/semi/closing/walk.rs`), not two copies: the closing search
+    stops where the pairing empties, the clause walk at a `;;` window where the
+    pairing is back at its **seed** (its own level). A `;;` inside a nested
+    `case`/`for`/`while`/`if`/`{ …; }` belongs to that block and ends *its* arm,
+    so the outer arm takes the whole nested clause. The pairing counts keyword
+    openers and exact brace words only; definers, array literals, `((` and
+    subshell parens are word bytes and keep no depth, which is why a `;;` inside
+    a *subshell* in an arm stays unfixed by this rule. The predicate is asked at
+    the payload's apply **and** at the end of every token, because one word can
+    score and carry a payload at once (`{&&fi`: opener + closer) and the window
+    sits on separator words, which score nothing. The stray walk's bound is the
+    same window, so a nested block's own pattern parens are in its scope: the
+    nested clause right behind `in` is word-list data (unchanged), a **second**
+    nested clause is not — its pattern sits in command position and the stray rule
+    answers where bash runs both clauses (measured, pinned as a divergence).
+    Pins:
+    `parse/case_clause/tests.rs::the_window_search_skips_a_nested_block_s_own_window`,
+    `keywords/pairing/tests.rs::depth_is_the_level_the_walk_reads`,
+    `parse/case_clause/stray/tests.rs::the_window_test_reads_the_region_it_now_spans`,
+    `tests/case.rs::a_nested_block_in_an_arm_keeps_its_semi_semi`,
+    `parse/semi/closing/tests.rs::closing_index_walks_the_block_depth`.
 
 Pins: `cond/boundary/block/tests.rs::in_block_words_follow_the_clause_rule`,
+
 `keywords/position/tests.rs`, `tests/cond_blocks.rs` (the in-block section, the
 `echo done` row bounded like `tests/loops.rs`),
 `tests/heredoc.rs::comment_block_closer_in_a_block_body_line_is_inert`.
