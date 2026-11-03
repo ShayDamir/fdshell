@@ -4704,6 +4704,54 @@ fn a_redirect_after_a_block_closer_is_the_blocks_own() {
     }
 }
 
+/// The glued closer with a **quoted** operand is the spaced closer, in every
+/// builder: the gate that decides "is this word the keyword" reads the keyword's
+/// own bytes, and the bytes behind the word break belong to the operand glued to
+/// it (task #413), so `block_tail` takes the redirection — bash's rule, measured.
+/// The builders already read the glued closer through `block_tail::is_closer`
+/// (the text rule), so this row pins what the parser gives; the statement level,
+/// where the gate used to answer *data*, is pinned in
+/// `safe/fdshell/tests/block_redirect.rs::a_glued_closer_takes_its_redirection`.
+#[test]
+fn a_glued_closer_with_a_quoted_operand_is_the_spaced_closer() {
+    for (glued, spaced) in [
+        (
+            b"while :; do :; done>\"f\"".as_slice(),
+            b"while :; do :; done > \"f\"".as_slice(),
+        ),
+        (
+            b"until :; do :; break; done>>\"f\"".as_slice(),
+            b"until :; do :; break; done >> \"f\"".as_slice(),
+        ),
+        (
+            b"if :; then :; fi>\"f\"".as_slice(),
+            b"if :; then :; fi > \"f\"".as_slice(),
+        ),
+        (
+            b"for x in a; do :; done>\"f\"".as_slice(),
+            b"for x in a; do :; done > \"f\"".as_slice(),
+        ),
+        (
+            b"for ((i=0;i<1;i++)); do :; done>\"f\"".as_slice(),
+            b"for ((i=0;i<1;i++)); do :; done > \"f\"".as_slice(),
+        ),
+        (
+            b"case x in x) :;; esac>\"f\"".as_slice(),
+            b"case x in x) :;; esac > \"f\"".as_slice(),
+        ),
+        (
+            b"wait\n readable %rd) : ;;\ndone>\"f\"".as_slice(),
+            b"wait\n readable %rd) : ;;\ndone > \"f\"".as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            block_redirects(glued),
+            block_redirects(spaced),
+            "{glued:?} must parse as {spaced:?}"
+        );
+    }
+}
+
 /// The operator family the tail reads on a closer: append, an io-number, a dup,
 /// a close, a read, and several redirections in source order.
 #[test]

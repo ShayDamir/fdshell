@@ -113,7 +113,9 @@ fn every_keyword_block_takes_its_trailing_redirect() {
 
 /// The **glued** closer — no space between the keyword and the operator — is
 /// the same block: `done>f`, `fi>f`, `esac>f` close the block and the operator
-/// redirects it (`while … done>f` was bash's shape all along).
+/// redirects it (`while … done>f` was bash's shape all along). The operand's
+/// **quotes** change nothing (task #413): bash splits the word at the operator
+/// byte, and the keyword's own bytes decide whether it is the keyword.
 #[test]
 fn a_glued_closer_takes_its_redirection() {
     for (script, want) in [
@@ -124,6 +126,16 @@ fn a_glued_closer_takes_its_redirection() {
         ("for ((i=0;i<2;i++)); do echo $i; done>f", "0\n1\n"),
         ("case x in x) echo C;; esac>f", "C\n"),
         ("while :; do echo a; break; done>>f", "a\n"),
+        // Glued to a quoted operand — the task #413 rows.
+        ("while :; do echo a; break; done>\"f\"", "a\n"),
+        ("until false; do echo u; break; done>\"f\"", "u\n"),
+        ("if :; then echo t; fi>\"f\"", "t\n"),
+        ("case x in x) echo C;; esac>\"f\"", "C\n"),
+        ("while :; do echo a; break; done>>\"f\"", "a\n"),
+        ("while :; do echo a; break; done>\"$(echo f)\"", "a\n"),
+        ("while :; do echo a; break; done&>\"f\"", "a\n"),
+        // The spaced-quoted control: the same block, the same file.
+        ("while :; do echo a; break; done > \"f\"", "a\n"),
     ] {
         let dir = Scratch::new();
         let o = run(&dir, script);
@@ -135,6 +147,50 @@ fn a_glued_closer_takes_its_redirection() {
         );
         assert_eq!(file(&dir, "f"), Some(want.as_bytes().to_vec()), "{script}");
     }
+    // `>&"f"` is the other operator: bash's `>&word` (a non-numeric operand) is a
+    // file redirect, fdshell's dup arm answers *no redirect* for it and the block's
+    // output stays on stdout — the loops' own vocabulary, pinned at the
+    // simple-command level in `tests/redirect.rs`
+    // [`an_ampersand_operand_follows_the_loops_own_vocabulary`]. The glue and the
+    // quotes change nothing here either: the spaced `>& "f"` answers the same.
+    for script in [
+        "while :; do echo a; break; done>&\"f\"",
+        "while :; do echo a; break; done >& \"f\"",
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            ("a\n", Some(0)),
+            "{script}: stderr={}",
+            err(&o)
+        );
+        assert!(
+            file(&dir, "f").is_none(),
+            "{script}: bash files it, fdshell does not"
+        );
+    }
+    // The **io-number** spelling glued to the closer: `done2>"f"` is not a closer
+    // word — the digits belong to it — so bash stops at rc 2 and fdshell at its
+    // rc-1 missing closer (the rc-1-vs-2 family), and the block never runs.
+    let dir = Scratch::new();
+    let script = "while :; do echo a; break; done2>\"f\"";
+    let o = run(&dir, script);
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("", Some(1)),
+        "{script}: bash rc 2, fdshell's house parse-error rc: stderr={}",
+        err(&o)
+    );
+    assert!(
+        err(&o).contains("'while' is missing its closing 'done'"),
+        "stderr={}",
+        err(&o)
+    );
+    assert!(
+        file(&dir, "f").is_none(),
+        "the block never runs, so `f` is not created: {script}"
+    );
     // A *chained* glued redirection (`done>f>g`) is the word-tokenizer's
     // pre-existing gap, not the block tail's: `echo a>f>g` files nothing on
     // master either, while bash gives `f` empty and `g` the output. fdshell
@@ -161,47 +217,51 @@ fn a_glued_closer_takes_its_redirection() {
         Some(b"a\n".to_vec()),
         "the glue ends the block, the statement after it runs"
     );
+}
 
-    // A glued closer with a **quoted** operand is still rejected at the
-    // byte-level word/quote scan, before any block tail runs: bash files the
-    // block's output, fdshell reports the missing closer. Measured identical on
-    // `master`, so this is not a regression of the glue work — the shape is
-    // owned by task **#413**.
-    for (script, closer) in [
-        (
-            "while :; do echo a; break; done>\"f\"",
-            "'while' is missing its closing 'done'",
-        ),
-        (
-            "if :; then echo t; fi>\"f\"",
-            "'if' is missing its closing 'fi'",
-        ),
-        (
-            "case x in x) echo C;; esac>\"f\"",
-            "'case' is missing its closing 'esac'",
-        ),
-        (
-            "while :; do echo a; break; done>>\"f\"",
-            "'while' is missing its closing 'done'",
-        ),
-        (
-            "while :; do echo a; break; done>\"$(echo f)\"",
-            "'while' is missing its closing 'done'",
-        ),
+/// The **glued opener** with a quoted operand, seen through the same gate (task
+/// #413). `if>`/`while>` land on bash's answer: bash splits the word at the
+/// operator byte, so `if` is the keyword and `>"x"` is a redirection on the
+/// condition command — the file is created and the body's output stays on stdout.
+/// The `case>` and arithmetic-`for` words are scored by the same gate and keep the
+/// answers their builders give; both are pinned at what was measured.
+#[test]
+fn a_glued_opener_with_a_quoted_operand_keeps_its_measured_answer() {
+    for (script, want, name) in [
+        ("if>\"x\"; then echo i; fi", "i\n", "x"),
+        ("while>\"x\"; do echo w; break; done", "w\n", "x"),
     ] {
         let dir = Scratch::new();
         let o = run(&dir, script);
         assert_eq!(
             (out(&o), rc(&o)),
-            ("", Some(1)),
+            (want, Some(0)),
             "{script}: stderr={}",
             err(&o)
         );
-        assert!(err(&o).contains(closer), "#413: stderr={}", err(&o));
-        assert!(
-            file(&dir, "f").is_none(),
-            "#413: the block never runs, so `f` is not created: {script}"
+        assert_eq!(
+            file(&dir, name),
+            Some(Vec::new()),
+            "{script}: bash creates it empty"
         );
+    }
+    // `case>` and the arithmetic `for`: bash rejects both lines outright (rc 2).
+    // fdshell reads the glued keyword through the gate and lands on its own answer
+    // — the empty case runs at rc 0, the arith `for` keeps its `expected 'in'`
+    // parse error (the rc-1-vs-2 family). Nothing files here in either shell.
+    for (script, want, want_rc) in [
+        ("case>\"x\" in x) echo C;; esac", "", Some(0)),
+        ("for((\"x\") :; do :; done", "", Some(1)),
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            (want, want_rc),
+            "{script}: stderr={}",
+            err(&o)
+        );
+        assert!(file(&dir, "x").is_none(), "{script}");
     }
 }
 

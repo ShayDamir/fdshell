@@ -235,9 +235,10 @@ fn glued_closer_splits_at_the_keyword() {
 /// the target's word expansion reads them (the tilde rule, the `$(…)` regions —
 /// tasks #321/#278). The whole [`RedirectDef`] is compared, not the target text:
 /// the text is driven by the mask alone, so an emptied or unshifted span list
-/// passes a text-only check. The statement level cannot show this — a glued
-/// closer with a **quoted** operand is rejected by the byte scan (task #413) —
-/// so this module's own tests are the only place the rule is pinned.
+/// passes a text-only check. The statement level shows the same rule now that the
+/// gate reads a glued keyword's own bytes (task #413) — pinned end to end in
+/// `tests/block_redirect.rs::a_glued_closer_takes_its_redirection` — so these
+/// module pins stay as the mask/span detail the e2e run cannot see.
 #[test]
 fn the_glued_tail_word_is_the_spaced_word() {
     for (kw, glued, spaced) in [

@@ -506,13 +506,19 @@ fn or_after_the_group() {
     assert_eq!((out.as_str(), err.as_str(), rc), ("c\n", "", 0));
 }
 
-/// The glued `}>out` form writes the group's output to the file.
+/// The glued `}>out` form writes the group's output to the file — and so does a
+/// glued `>` with a **quoted** operand (task #413): bash splits the word at the
+/// operator byte, and the brace word keeps its keyword.
 #[test]
 fn glued_redirect_after_the_brace_writes_the_file() {
     let (a, _sa) = temp_path("glued");
     let (out, err, rc) = run(&format!("{{ echo a; }}>{a}"));
     assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0));
     assert_eq!(body(&a), "a\n");
+    let (q, _sq) = temp_path("glued-quoted");
+    let (out, err, rc) = run(&format!("{{ echo a; }}>\"{q}\""));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0), "{err}");
+    assert_eq!(body(&q), "a\n");
 }
 
 /// A brace-shaped word at top level stays a word: `echo {}` prints the braces
