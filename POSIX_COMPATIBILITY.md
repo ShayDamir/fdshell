@@ -525,7 +525,15 @@ the `case` clause's `|` / `)` / `;;`, a `wait` arm's pattern head, a definer's
 The one separator rule that reads a **newline** is the terminator one: an unquoted
 `&&`/`||` at the end of a physical line is POSIX #2.9's AND-IF/OR-IF terminator and
 continues the list onto the next line (task #492), so the quoted spellings above are
-the only ones that do not join (the escaped `\&&` word is owner #496).
+the only ones that do not join (the escaped `\&&` word is owner #496). Its mirror reads
+the same newline from the other side: the grammar is `command (TERMINATOR command) …`, so
+an operator that **opens** a physical line has no command in front of it — bash rejects the
+line at rc 2, and fdshell reports its own message at the house rc 1 before running any part
+of the list (task #406). The walk covers a text that begins at a physical-line start, so an
+operator opening a *part* inside such a text reports too (`echo a && && echo b`); a text that
+begins **mid-line** — the tail of a line whose head a definition's body or a here-doc region
+claimed — and a text that is only an operator, blank on both sides, keep their measured
+answers.
 
 The gate is the token's **raw span**, one owner:
 `safe/fdshell/src/parse/word_quoted.rs::span_word` (text **and** span). Not the

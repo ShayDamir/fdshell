@@ -1320,6 +1320,22 @@ and `last`. The
 `set -e; false &&` + newline + `echo b` + newline + `echo tail` prints `tail` and
 ends 0.
 
+The rule reads **both** sides of the operator, so one that **opens** a physical line
+reports: in `echo a` + newline + `&& echo y` nothing sits in front of the `&&`, and bash
+rejects the line at rc 2 while fdshell reports `expected command before '&&'` / `'||'` at
+the house rc 1. The report fires **before** any part of the list runs and what already ran
+stays run, so that row prints `a` and ends 1 — the same shape written as the first line of a
+block body, a loop body, a `case` arm, a function body or a `{ …; }` group, and through the
+interactive shell, where the session reads on to its own end-of-input answer. The walk covers
+a text that **begins at a physical-line start**, so an operator opening a part inside such a
+text reports too (`echo a && && echo b`, `echo a &&` + newline + `&& echo b`, `false || &&
+builtin true`). What stays outside is a text that begins **mid-line** — the tail of a line
+whose head another mechanism claimed: a definition's body (`f() { echo hi; } && echo done`
+runs in both shells at rc 0) or a here-doc region — and a text that is **only** an operator,
+where both sides are blank and each rule declines it. A `#` comment on the line above does
+not shield the operator either: the parse layer reads comment text only up to its newline, so
+`if :; then` + `#c` + `&& echo y` + `fi` reports too (task #406).
+
 A stage is a **command**, so the word behind a `|` starts a command and a keyword
 block can be a stage: `echo a | while read l; do echo "$l"; done` runs the loop in
 the stage's own fork with the upstream stage's output on its stdin, and
