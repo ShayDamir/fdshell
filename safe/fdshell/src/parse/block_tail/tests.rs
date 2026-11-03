@@ -8,17 +8,25 @@ use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
+use sys::{Origin, Position, ShortCStr};
 
 /// The block line `b` tokenized, then read as a tail: the tokens from its
 /// closing keyword `kw` on, through [`redirects`]. The closer is located by the
 /// token rule ([`is_closer`]), so the glued `done>f` form is reachable here
-/// exactly as the byte scan hands it over once `keywords` scores the glue.
+/// exactly as the byte scan hands it over once `keywords` scores the glue. The
+/// text is `b` itself: these rows are single-physical-line blocks, so the
+/// reconstructed text a builder is handed and its bytes coincide.
 fn run(b: &[u8], kw: &[u8]) -> Result<Vec<RedirectDef>, Report<ParseError>> {
+    let text = ScriptText::new(
+        ShortCStr::from_vec(b.to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    );
     let tokens = tokenize_statement(b).unwrap();
     let at = (0..tokens.len())
         .rfind(|&i| tokens.get(i).is_some_and(|t| is_closer(t, kw)))
         .unwrap();
-    redirects(kw, tokens.get(at..).unwrap_or(&[]), b)
+    redirects(kw, tokens.get(at..).unwrap_or(&[]), &text)
 }
 
 fn tail(b: &[u8]) -> Vec<RedirectDef> {
@@ -121,6 +129,21 @@ fn redirect_shapes_after_the_closer() {
     assert_eq!(
         shape(&tail(b"while :; do :; done >&-")),
         vec![(1, RedirectDirection::Read, b"close".to_vec())]
+    );
+    // The here-doc and here-string arms (task #408): single-line rows, so the
+    // here-doc bodies are the end-of-file shape and their target text is the
+    // claim they cover; the detail of each arm is `heredoc::tests`.
+    assert_eq!(
+        shape(&tail(b"while :; do :; done <<T")),
+        vec![(0, RedirectDirection::Read, b"heredoc".to_vec())]
+    );
+    assert_eq!(
+        shape(&tail(b"while :; do :; done 3<<T")),
+        vec![(3, RedirectDirection::Read, b"heredoc".to_vec())]
+    );
+    assert_eq!(
+        shape(&tail(b"while :; do :; done <<<hi")),
+        vec![(0, RedirectDirection::Read, b"hi".to_vec())]
     );
 }
 
@@ -315,18 +338,15 @@ fn the_glued_tail_word_shifts_its_spans_by_the_keyword() {
     );
 }
 
-/// The leniency boundary: the walk **stops** at a `<<`-shaped operator (task
-/// #408's owner) and at the shapes [`word`] names, and a block with no tail has no
-/// redirections at all; an ordinary word is the report (task #405), so a redirect
-/// collected before it is gone — the parse dies, and the test reads the message.
+/// The leniency boundary: the walk takes its own three arms (path, here-doc,
+/// here-string — the rows above), and **stops** without judging the shapes
+/// [`word`] names; a block with no tail has no redirections at all. An ordinary
+/// word is the report (task #405), so a redirect collected before it is gone —
+/// the parse dies, and the test reads the message.
 #[test]
 fn the_walk_stops_at_the_exemption_shapes_and_reports_a_word() {
     assert!(shape(&tail(b"while :; do :; done")).is_empty());
     // The exemption arms, one row each, so none of them is dead code.
-    assert!(shape(&tail(b"while :; do :; done <<T")).is_empty());
-    assert!(shape(&tail(b"while :; do :; done <<<hi")).is_empty());
-    // The io-number form of the same operator is the here-doc shape too.
-    assert!(shape(&tail(b"while :; do :; done 3<<T")).is_empty());
     // The `&>` family on a closer is #409's, and the bare `&` separator with it.
     assert!(shape(&tail(b"while :; do :; done &> f")).is_empty());
     assert!(shape(&tail(b"while :; do :; done &")).is_empty());

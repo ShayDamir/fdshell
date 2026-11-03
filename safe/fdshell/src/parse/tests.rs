@@ -4764,11 +4764,14 @@ fn the_tail_reads_the_whole_redirect_family() {
 }
 
 /// The leniency boundary, in every builder: the bare closer takes no
-/// redirection, and a here-doc/here-string operator on the closer is #408's. A
-/// plain word behind it is task #405's and reaches the report — pinned in
+/// redirection, and a here-doc operator **inside the body** stays the body's own
+/// (task #273's rule — `while :; do cat <<T; done` reads no tail). The operators
+/// behind the closer are taken by `parse/block_tail` (task #408: the here-doc
+/// arm claims its region from the block text, the here-string arm its word), and
+/// a plain word behind it is task #405's — pinned in
 /// [`a_word_behind_a_closer_is_the_report_in_every_builder`].
 #[test]
-fn the_bare_closer_and_the_here_doc_shapes_behind_a_closer_stay_their_owners() {
+fn the_bare_closer_takes_no_redirection_and_a_body_operator_stays_in_the_body() {
     for line in [
         b"while :; do :; done".as_slice(),
         b"if :; then :; fi".as_slice(),
@@ -4776,12 +4779,28 @@ fn the_bare_closer_and_the_here_doc_shapes_behind_a_closer_stay_their_owners() {
         b"for ((i=0;i<1;i++)); do :; done".as_slice(),
         b"case x in x) :;; esac".as_slice(),
         b"while :; do cat <<T; done".as_slice(),
-        b"while :; do :; done <<T".as_slice(),
-        b"if :; then :; fi <<<hi".as_slice(),
-        b"for x in a; do :; done 3<<T".as_slice(),
     ] {
         assert!(block_redirects(line).is_empty(), "{line:?}");
     }
+    // Behind the closer, each arm's def, one physical line so the here-doc
+    // bodies are the end-of-file claim (task #364, empty and accepted).
+    assert_eq!(
+        block_redirects(b"while :; do :; done <<T"),
+        vec![RedirectDef::here_doc(0, c"", true)]
+    );
+    assert_eq!(
+        block_redirects(b"for x in a; do :; done 3<<T"),
+        vec![RedirectDef::here_doc(3, c"", true)]
+    );
+    assert_eq!(
+        block_redirects(b"if :; then :; fi <<<hi"),
+        vec![RedirectDef::here_string(
+            0,
+            c"hi",
+            vec![Unquoted; 2],
+            Vec::new()
+        )]
+    );
 }
 
 /// Task #405: a word behind the closing keyword is the report, in every builder,

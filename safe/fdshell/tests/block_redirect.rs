@@ -6,7 +6,9 @@
 //! `{ …; } > f` already implements, and every expectation below is bash 5.3.9's
 //! own output for the same script — except the rows that name their owner task
 //! (the rc-convention family #179, the word-behind-the-closer family #405, the
-//! here-doc / `&>` families #408 / #409, the saved-copy floor #184).
+//! `&>` family #409, the saved-copy floor #184). Task **#408** landed the
+//! here-doc / here-string half of the same tail; its matrix is
+//! `a_here_doc_or_here_string_on_a_closer_feeds_the_block`.
 
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -541,11 +543,13 @@ fn closer_shaped_words_stay_word_data() {
 /// The pinned divergences, each with its owner. A plain word behind the closer is
 /// the **house parse error at rc 1** (bash: rc 2) — task **#405** landed it, the
 /// block runs nothing, and the wording is the keyword-block twin of the group's
-/// `group: unexpected word after '}'`; a here-doc / here-string
-/// operator on the closer is dropped (bash feeds the body to the block),
-/// owned by **#408**; the `&>` family on a closer is dropped (bash combines),
-/// owned by **#409**; a bare `>` with no operand is fdshell's rc-1 redirect
-/// syntax error (bash: rc 2) — the house parse-error convention.
+/// `group: unexpected word after '}'`; the here-doc / here-string family on a
+/// closer is **parity** now (task **#408** landed — the two rows below are the
+/// ones that used to be dropped, kept here so the flip is visible, the matrix is
+/// in `a_here_doc_or_here_string_on_a_closer_feeds_the_block`); the `&>` family
+/// on a closer is dropped (bash combines), owned by **#409**; a bare `>` with no
+/// operand is fdshell's rc-1 redirect syntax error (bash: rc 2) — the house
+/// parse-error convention.
 /// Every value below is measured on this build against bash 5.3.9.
 #[test]
 fn the_pinned_divergences_behind_a_closer() {
@@ -596,10 +600,17 @@ fn the_pinned_divergences_behind_a_closer() {
         err(&o)
     );
 
-    // #408: bash feeds the here-doc body to the block; fdshell prints nothing.
+    // **#408** landed: bash feeds the here-doc body to the block, and so does
+    // fdshell now — both rows are parity (the whole matrix is in
+    // `a_here_doc_or_here_string_on_a_closer_feeds_the_block`).
     let dir = Scratch::new();
     let o = run(&dir, "while :; do cat; break; done <<T\nbodyT\nT");
-    assert_eq!((out(&o), rc(&o)), ("", Some(0)), "stderr={}", err(&o));
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("bodyT\n", Some(0)),
+        "stderr={}",
+        err(&o)
+    );
     let dir = Scratch::new();
     let o = run(&dir, "while :; do echo a; break; done <<< hi");
     assert_eq!((out(&o), rc(&o)), ("a\n", Some(0)), "stderr={}", err(&o));
@@ -671,6 +682,230 @@ fn a_tail_that_closes_the_saved_copy_fails_the_block() {
         (out(&o), rc(&o), file(&dir, "f")),
         ("", Some(1), Some(b"".to_vec())),
         "the group twin behaves identically (already `master`'s behavior): stderr={}",
+        err(&o)
+    );
+}
+
+/// The here-doc half of this tail (task **#408**): a `<<`/`<<-`/`<<<` operator —
+/// and its io-number form `N<<word` — written after a closing keyword belongs to
+/// the **whole block**, so the block's `cat`/`read`-style body commands read the
+/// claimed body stream and the shell's own fds are back when the block ends.
+/// Every value below is bash 5.3.9's own output for the same script, measured
+/// 2026-11-03 on this build; the rows that are **not** parity name their owner in
+/// `the_here_doc_tail_rows_that_keep_their_measured_values`. The unit rows — one
+/// per arm — are `parse/block_tail/heredoc/tests.rs` (integration tests
+/// contribute no coverage, LESSONS).
+#[test]
+fn a_here_doc_or_here_string_on_a_closer_feeds_the_block() {
+    for (script, want) in [
+        ("while :; do cat; break; done <<T\nbody\nT", "body\n"),
+        ("while :; do cat; break; done << T\nbody\nT", "body\n"),
+        ("while :; do cat; break; done <<-T\n\tbody\n\tT", "body\n"),
+        ("while :; do cat <&3; break; done 3<<T\nbody\nT", "body\n"),
+        (
+            "while read l; do echo \"[$l]\"; break; done <<T\nbody\nT",
+            "[body]\n",
+        ),
+        (
+            "while read l; do echo \"[$l]\"; break; done <<< hi",
+            "[hi]\n",
+        ),
+        ("while :; do cat; break; done 0<<<hi", "hi\n"),
+        ("while :; do cat; break; done <<< hi", "hi\n"),
+        ("if true; then cat; fi <<T\nbody\nT", "body\n"),
+        ("case x in\nx) cat;;\nesac <<T\nbody\nT", "body\n"),
+        ("for ((i=0;i<1;i++)); do cat; done <<T\nbody\nT", "body\n"),
+        // One stream for the whole block: the body prints **once** for the two
+        // iterations, so the claim belongs to the block and not to a round.
+        ("for x in a b; do cat; done <<T\nbody\nT", "body\n"),
+        // A loop whose condition fails on the first test never runs its body, and
+        // an unrun body never reads the stream (bash prints nothing).
+        ("until :; do cat; break; done <<T\nbody\nT", ""),
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o)),
+            (want, Some(0)),
+            "{script:?}: stderr={}",
+            err(&o)
+        );
+    }
+
+    // The target file, in both operator orders: the here-doc feeds stdin, `> f`
+    // takes stdout, and the body lands in `f` with stdout empty.
+    for (script, want) in [
+        ("while :; do cat; break; done <<T > f\nbody\nT", "body\n"),
+        ("while :; do cat; break; done > f <<T\nbody\nT", "body\n"),
+    ] {
+        let dir = Scratch::new();
+        let o = run(&dir, script);
+        assert_eq!(
+            (out(&o), rc(&o), file(&dir, "f")),
+            ("", Some(0), Some(want.as_bytes().to_vec())),
+            "{script:?}: stderr={}",
+            err(&o)
+        );
+    }
+
+    // The scope is undone at the block's end: the body first, then the shell's
+    // own stdout answers the statement written behind the closer's separator.
+    let dir = Scratch::new();
+    let o = run(&dir, "while :; do cat; break; done <<T; echo tail\nbody\nT");
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("body\ntail\n", Some(0)),
+        "stderr={}",
+        err(&o)
+    );
+
+    // A pipeline stage: the block's stdin is the body and the stage sees it.
+    let dir = Scratch::new();
+    let o = run(&dir, "while :; do cat; break; done <<T | cat\nbody\nT");
+    assert_eq!((out(&o), rc(&o)), ("body\n", Some(0)), "stderr={}", err(&o));
+
+    // The `$( … )` capture: the body reaches the substitution's stdout. bash
+    // additionally warns (its delimiter search sees `T)` as the last line and the
+    // stream ends), fdshell parses per statement and stays silent — the warning-
+    // count divergence of task #364's rule, pinned at the other granularity there.
+    let dir = Scratch::new();
+    let o = run(
+        &dir,
+        "echo \"$(while :; do cat; break; done <<T\nbody\nT)\"",
+    );
+    assert_eq!((out(&o), rc(&o)), ("body\n", Some(0)), "stderr={}", err(&o));
+
+    // The body-position operator written **before** the closer's one on the same
+    // physical line owns the first region of the line's stream, so the closer
+    // claims the second in global per-line operator order (LESSONS).
+    let dir = Scratch::new();
+    let o = run(
+        &dir,
+        "while :; do cat <<A; break; done <<T\nbodyA\nA\nbodyT\nT",
+    );
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("bodyA\n", Some(0)),
+        "bash agrees: the closer's own claim is the second region: stderr={}",
+        err(&o)
+    );
+}
+
+/// The rows of the same family that keep their **measured** values, each with its
+/// owner. All values measured 2026-11-03 on this build against bash 5.3.9.
+#[test]
+fn the_here_doc_tail_rows_that_keep_their_measured_values() {
+    // The `&&` row: the block is the left side of a cond operator, so its text is
+    // a run and the body stream is allocated at the **run's** granularity (task
+    // #403's rule) — the claim that reaches the block's builder is empty, the
+    // parse warns, and only the tail's own command prints. Predates task #408
+    // (measured identically on `master` before the tail was taught to parse).
+    let dir = Scratch::new();
+    let o = run(
+        &dir,
+        "while :; do cat; break; done <<T && echo tail\nbody\nT",
+    );
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("tail\n", Some(0)),
+        "bash prints the body first: stderr={}",
+        err(&o)
+    );
+    assert!(
+        err(&o).contains("delimited by end-of-file"),
+        "the empty claim is the end-of-file shape: stderr={}",
+        err(&o)
+    );
+
+    // A `<<` glued inside the closer's word opens no word, so the byte scan counts
+    // no operator and nothing is claimed: the pinned house rule ("a `<<` glued
+    // inside a word stays word data") through the keyword-glue exception. The body
+    // lines stay commands, and they fail. Aligning it needs a byte-scan arm.
+    let dir = Scratch::new();
+    let o = run(&dir, "while :; do cat; break; done<<T\nbody\nT");
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("", Some(1)),
+        "bash prints the body: stderr={}",
+        err(&o)
+    );
+    assert!(err(&o).contains("\"body\" not found"), "stderr={}", err(&o));
+
+    // A multi-line block whose closer operator interleaves with a body-position
+    // operator: the rc-1-vs-2 family (bash stops on the whole construct at rc 2,
+    // the house convention reports at rc 1); the scan is not to be "fixed".
+    let dir = Scratch::new();
+    let o = run(
+        &dir,
+        "while :; do cat <<A; break;\ndone <<T\nbodyA\nA\nbodyT\nT",
+    );
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("", Some(1)),
+        "bash: rc 2, stderr={}",
+        err(&o)
+    );
+    assert!(err(&o).contains("expected 'done'"), "stderr={}", err(&o));
+
+    // A **word** behind a heredoc on the closer is task #405's report. The
+    // delimiter is found in the body lines below, so neither shell warns; the
+    // difference is only the rc-1-vs-2 convention (the house parse-error rule).
+    let dir = Scratch::new();
+    let o = run(&dir, "while :; do cat; break; done <<T x\nbody\nT");
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("", Some(1)),
+        "bash: rc 2, stderr={}",
+        err(&o)
+    );
+    assert!(
+        err(&o).contains("must be followed by a separator"),
+        "stderr={}",
+        err(&o)
+    );
+
+    // An operator whose delimiter line never arrived is accepted with the empty
+    // claim it covers, at rc 0 — task #364's rule, pinned for this tail.
+    let dir = Scratch::new();
+    let o = run(&dir, "while :; do cat; break; done <<T");
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("", Some(0)),
+        "bash agrees: stderr={}",
+        err(&o)
+    );
+    assert!(
+        err(&o).contains("delimited by end-of-file"),
+        "stderr={}",
+        err(&o)
+    );
+
+    // The `wait` round is fdshell-only (bash has no twin: it stops at its rc 2
+    // syntax error on the clause), so this row pins the **decision**: the shared
+    // module judges its closer's tail exactly as it judges the others — the tail
+    // is taken, the body lines are claimed (they never run as commands), and the
+    // round fails on the unset `%rd` fd.
+    let dir = Scratch::new();
+    let o = run(&dir, "wait\nreadable %rd) echo hi ;;\ndone <<T\nbody\nT");
+    assert_eq!(rc(&o), Some(1), "stderr={}", err(&o));
+    assert!(err(&o).contains("rd is not set"), "stderr={}", err(&o));
+    assert!(
+        !err(&o).contains("not found"),
+        "the body lines are claimed, never commands: stderr={}",
+        err(&o)
+    );
+
+    // The stdin feed asserted through a builtin that reads it: the body lands in
+    // `read`, and the loop's **status** stays the pre-existing divergence —
+    // fdshell reports the failing condition's status (rc 1) where bash reports the
+    // last body command's (rc 0); the here-doc itself is parity.
+    let dir = Scratch::new();
+    let o = run(&dir, "while read l; do echo \"[$l]\"; done <<T\nbody\nT");
+    assert_eq!(out(&o), "[body]\n", "bash agrees: stderr={}", err(&o));
+    assert_eq!(
+        rc(&o),
+        Some(1),
+        "bash rc 0 — the loop-status rule: stderr={}",
         err(&o)
     );
 }
