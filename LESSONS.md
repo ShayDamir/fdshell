@@ -3884,112 +3884,97 @@ so the guard is the builder's own. Pins: `parse/case_block/tests.rs`
 
 ## A `case` arm is a command list: empty at `esac`, and its stray `)` is the missing `;;`
 
-bash's `case` grammar reads an arm body as a command sequence, so two rules come
-out of that one place and the clause walk must know both (measured against bash
-5.3.9):
+bash's `case` grammar reads an arm body as a command sequence; every rule below
+comes out of that one place (measured against bash 5.3.9):
 
-- **An arm may be empty**, closed straight at `esac`: `case x in a) esac` is rc 0,
-  and an empty **last** clause too (`case x in a) echo one;; b) esac`). This is the
-  deliberate opposite of the `then`/`elif`/`else`/`do` rule of the entry above (that
-  grammar requires a non-empty `list`, this one does not), which is why
-  `parse/semi.rs::block_body` is **not** called for a `case` arm and must not be.
-  An empty **clause list** (no clause at all) is not this rule's empty arm body:
-  task #415's guard is the builder's own, one slot earlier, and bash accepts the
-  empty list when it is spelled with newlines while rejecting a real `;` byte in
-  it. A walk that ends a pattern list *by position* (`*pos >= esac_idx`) reports
-  `case x in a) esac` — which reaches `esac_idx` right after a **successful** `)` —
-  as `case: missing ')'`. The fix is the flag the position was imitating:
-  `ensure!(closed_paren, CaseMissingCloseParen)`, set at the `)` break. The
-  multi-line spelling works under the position test because the tokenizer turns a
-  newline into a `;` token and `pos` lands one short of `esac_idx` — a position
-  test hides a shape a flag test catches.
-- **The pattern paren of the next clause is a token the arm's list cannot take**:
-  `case x in a) b) ;; esac` is bash's `syntax error near unexpected token ')'`
-  (rc 2) and fdshell's `case: missing ';;' between clauses` at its rc 1. The test
-  is the shared command-position machine ("One clause rule, three scorers") in
-  `parse/case_clause/stray.rs`: the arm region — bounded by the `;;` **window**, so
-  the next clause's own pattern parens are never in scope — contains a `)` whose
-  predecessor word **sits** in `Place::Command` **and that closes no group the arm
-  itself opened**. Four gates carry the measurements:
-  (1) the **paren depth the arm opened** (`opens_groups`): a definer's parameter
-  list is the word `f(` plus a `)` token, a subshell is a `(w` word plus a `)`
-  token, an array-literal assignment is `m=(1` plus a `)` token, so a `)` at
-  depth > 0 is the arm's own and only a depth-0 `)` is a candidate —
-  `case x in a) f() { echo y; }; f ;; esac`, `a) (cat) ;;`, `a) echo hi | (cat) ;;`,
-  `a) g() ( : ) ;;`, `a) m=(1) ;;`, `a) arr=("$@") ;;` and the definers/array
-  literals an arm's `if`/`while`/`for`/`{ …; }` bodies write behind a `;` are all
-  bash rc 0; (2) the `((` arithmetic region
-  (`for ((i=0;i<2;i++))` writes bare `)` tokens behind its `;`, in command
-  position, and bash takes the arm at rc 0) — `((` is deliberately **not** an
-  `opens_groups` paren at a word's edge (`a) ((1)); b) ;; esac` still bails) nor
-  mid-word (`m=$((1))` is one word whose parens close inside it, so counting them
-  would hold the depth above 0 and swallow the clause paren of
-  `a) m=$((1)); b) ;; esac`, bash rc 2); (3) the operator-predecessor test (the
-  tokenizer emits every unquoted `)` as its own token, so `((1))` is the tokens
-  `((1`, `)`, `)` and its second `)` closes the arithmetic command, not a pattern
-  list); (4) `keyword_word`, the same quote gate the keyword scorers open with, for
-  a quoted `")"` (an escaped `\)` keeps its pair in the word text, so
-  `eq_bytes(b")")` never sees it).
-  **The neighbouring word is not enough:** a gate that only excludes a predecessor
-  whose bytes touch `(` accepts `a) (cat) ;;` (predecessor `(cat`) and
-  `a) (echo sub) ;;` (predecessor `sub`, an argument) yet rejects `a) g() ( : ) ;;
-  esac` (bash rc 0) whose `)` follows `:`, a command-position word of the arm's own
-  subshell. Paren ownership is a **nesting** question, so the scan counts the arm's
-  opens and closes; a byte test on one token sees the shape of the tokenizer, not
-  the shape of the command. Two cheaper rules were measured and rejected: a
-  whole-arm `((` exemption loses `case x in a) ((1)); b) ;; esac` (bash rc 2), and
-  "any `)` in an arm is an error" rejects `case x in a) (echo sub) ;; esac` (bash
-  rc 0). **The word's two edges are not enough either:** counting `(` at a word's
-  start and end covers `(cat` and `f(` but not an **array-literal assignment** —
-  the tokenizer's word for `m=(1)` is `m=(1` (mask: every byte `Unquoted`) and the
-  array's `)` is a token of its own, so a mid-word `(` never entered the depth and
-  `case x in a) m=(1) ;; esac` (bash rc 0, idem `a) x=(1) y=2 ;;`, `a) echo hi;
-  x=(1) ;;`, `a) arr=("$@") ;;`, `a) m=() ;;`, and the array literals behind a `;`
-  in the arm's bodies) became `case: missing ';;' between clauses`. So the gate
-  counts **every** group-opening `(` byte of the word and reads the token's **quote
-  mask** to do it: a quoted `(` (`echo "x(" b) ;;`) is word text, and an **escape
-  pair** is one literal byte whose mask bit is `Unquoted` — the backslash is the
-  only marker — so `x\(` opens nothing and `case x in a) x\() ;; esac` (bash rc 2)
-  is refused. Running an array assignment is task **#422**'s word-model half
-  (fdshell has no arrays, so the arm dispatches the literal's `)` as a command, as
-  at top level); the **parse** gate is this rule's. One shape the tokenizer
-  **cannot** show: the mask test of the escape arm. A quoted backslash enters the
-  word as a *pair* of quoted bytes (`'\'(x)` and `"\\"(x)` are both the word
-  `\\(x`, mask quoted, quoted, unquoted, unquoted), and skipping that pair one byte
-  at a time lands on the same byte as one jump of two, so no tokenized line
-  distinguishes the arm from an always-true guard. The kill is a direct call on the
-  counter with a hand-written mask (`[Quoted, Unquoted, Unquoted]` — the mask a
-  **derived** word carries, `MaskBit::from_quoted`), pinned in
-  `parse/case_clause/stray/tests.rs`: a quoted `\` consumes nothing behind it, an
-  unquoted escape pair consumes its second byte.
+- **An arm may be empty**, closed straight at `esac` (`case x in a) esac` rc 0; so
+  is an empty **last** clause). Deliberate opposite of the `then`/`elif`/`else`/`do`
+  rule of the entry above: `parse/semi.rs::block_body` is **not** called for a
+  `case` arm and must not be. An empty **clause list** is not this rule's empty body
+  (task #415's guard is one slot earlier; bash accepts the newline spelling, rejects
+  a real `;`). A pattern list ended *by position* misreports `case x in a) esac` as
+  `case: missing ')'`; the fix is the flag the position was imitating
+  (`ensure!(closed_paren, CaseMissingCloseParen)`, set at the `)` break): the
+  tokenizer turns a newline into a `;` token, so a position test hides a shape a
+  flag test catches.
+- **A depth-0 `)` in the arm region — bounded by the `;;` **window**, so the next
+  clause's own pattern parens are never in scope — is judged** by the shared machine
+  ("One clause rule, three scorers"), in this order: a predecessor word in a
+  **word-list place** (`Place::Pattern` behind `in`, `Place::Words`) is the arm's own
+  pattern paren and passes; a command-position predecessor that is not an operator
+  token is the clause pattern paren of the missing `;;` (`case x in a) b) ;; esac`
+  answers `case: missing ';;' between clauses` — task #300's arm, no caret);
+  **everything else at depth 0** — behind an **argument** (`a) echo hi) ;;`), behind
+  an **operator token** (`| )`, `& )`, `;& )`) or with **no word before it at all**
+  (`a) ) ;;`) — is a paren the command list cannot take (bash rc 2): fdshell rc 1,
+  `case arm: unexpected ')' — a command list cannot take a paren` — task #419's arm,
+  pinned by **text**, riding with a caret at the judged token's span start (the
+  mechanism `report_unbalanced_quote` uses; the layer that detects owns the message;
+  the sibling keeps no caret). The `i > 0` guard belongs to task #300's arm only.
 
-Two layer facts the fix leans on. **A heredoc body is never in the region**:
-`parse/token/statement.rs::tokenize_statement` blanks the body regions and the
-structural bytes of a terminator line, so `case x in x) cat <<T` newline `x)`
-newline `T` newline `esac` prints `x)` verbatim at rc 0. **The scan layer is a
-separate traversal**: `case x in a) echo hi;;b)esac` (a closer glued behind a
-pattern's `)`) is refused by `script/unclosed.rs`, not by the clause walk —
-fdshell rc 1 where bash is rc 0, tracked as task #421; the lenient
-brace-protection walk of `case_block/literal.rs` already accepted the shape and
-stays lenient (pinned there, so the two traversals of one `case` line cannot
-drift apart). Pins: `parse/case_clause/tests.rs` (the `esac`-closed clause's
-shape, and the missing-paren/empty-pattern verdicts that stayed),
-`parse/case_clause/stray/tests.rs` (every gate, called on a token region
-directly), `parse/tests.rs::case_*`, `parse/case_block/tests.rs`,
-`parse/case_block/literal/tests.rs` and `tests/case.rs` (the bash-parity table;
-the runnable `case x in x) f() { echo y; }; f ;; esac` prints `y` exactly as bash
-does; the runnable `case x in x) m=(1); echo done ;; esac` prints `done`, its `)`
-dispatching as a command on stderr exactly as at top level; the accepted
-leniencies — `case x in a) ; esac`, the `&` and `;&` closers, the closer-shaped
-word in an arm, a `)` with no word before it (`a) ) ;; esac`); the open rows of
-the family are tasks #418, #419, #420, #421, #316, #422. **Follow-up:** when `(`
-becomes an operator token (task #316), all three of `stray.rs`'s paren readers —
-the `((` region rule and the `opens_groups` **depth counter** (those two read
-**word bytes** today: the region rule its word's leading `((`, the depth counter
-every unquoted, unescaped `(` byte of the word, mid-word ones included) and the
-command-position rule (it reads the **token list**, through the shared `Place`
-machine) — must be scored on the token list, so a subshell's `(`/`)` pair becomes
-operators there and `(w`/`f(`/`m=(1` stop being word bytes.
+Five facts carry the gates. (1) The **place gate**: `opens_groups` — the arm's own
+paren depth (definer `f(`, subshell `(cat`, the mid-word **array literal** `m=(1`:
+every group-opening `(` byte, read through the token's **quote mask**, so a quoted
+`(` is word text and an **escape pair** is one literal byte) — is asked only in
+command position, where bash's grammar recognises `(` as an operator; an
+argument-position word contributes no openers (the paren behind `echo (b` is a
+depth-0 candidate), while `a) (echo sub) ;;` (bash rc 0, task #316's shape) closes
+the group the arm opened itself. The gate is the call site's; the counter's byte
+contract, its hand-written-mask tests and the unconditional decrement stay its own.
+(2) The **`((` region owns two closers** (bash's arithmetic command is `(( … ))`):
+`a) ((1)) ;; esac` is rc 0, each closer consumed in order, every other token inside
+the region data. A `((` word **outside** the region — the clause's stripped first
+pattern — seeds the walk with the closer the production did not spend, so
+`case abc in ((a*)) echo m` stays accepted while `case abc in (a*) ) echo m` is
+refused. A region that never closes swallows later parens (a closer can sit glued
+inside a word): pin as measured, do not chase. `((` is **not** an `opens_groups`
+paren at a word's edge (`m=$((1))` is one word; counting its parens would hold the
+depth above 0 and swallow the clause paren of `a) m=$((1)); b) ;; esac`, bash rc 2,
+like `a) ((1)); b) ;; esac`). The old operator-rescue of the region's second `)`
+died with the two-closer count. (3) The operator-predecessor test stands for task
+#300's arm: a `)` behind `;`/`|`/`&` closes that operator, never a pattern list —
+those rows answer with the new variant now. (4) The span gate `keyword_word`, the
+same one the keyword scorers open with, for a quoted `")"` (an escaped `\)` keeps
+its pair in the word text). (5) **The neighbouring word is not enough** (a byte test
+on one token sees the tokenizer, not the command — `a) g() ( : ) ;; esac` is bash
+rc 0) and **the word's two edges are not enough either** (the array literal's `(`
+is mid-word): the scan counts the arm's own opens and closes over every byte and its
+mask. Two cheaper rules were measured and rejected: a whole-arm `((` exemption loses
+`case x in a) ((1)); b) ;; esac` (bash rc 2), and "any `)` in an arm is an error"
+rejects `case x in a) (echo sub) ;; esac` (bash rc 0) — it survives only with the
+place gate. One shape the tokenizer **cannot** show: a quoted backslash enters the
+word as a *pair* of quoted bytes (`'\'(x)` and `"\\"(x)` are both the word `\\(x`),
+and skipping the pair one byte at a time lands on the same byte as one jump of two —
+the kill is a direct call on the counter with a hand-written mask
+(`[Quoted, Unquoted, Unquoted]` — `MaskBit::from_quoted`): a quoted `\` consumes
+nothing behind it, an unquoted escape pair consumes its second byte. Running an array
+assignment is task **#422**'s word-model half (fdshell has no arrays; the arm
+dispatches the literal's `)` as a command, as at top level); the **parse** gate is
+this rule's.
+
+Two layer facts. **A heredoc body is never in the region**:
+`parse/token/statement.rs::tokenize_statement` blanks it, so `case x in x) cat <<T`
+newline `x)` newline `T` newline `esac` prints `x)` verbatim at rc 0. **The scan
+layer is a separate traversal**: `case x in a) echo hi;;b)esac` (a closer glued
+behind a pattern's `)`) is refused by `script/unclosed.rs`, not by the clause walk —
+fdshell rc 1 where bash is rc 0, tracked as task #421; the lenient brace-protection
+walk of `case_block/literal.rs` already accepted the shape and stays lenient (pinned
+there, so the two traversals of one `case` line cannot drift apart; its `echo ";" b)`
+row pins the *literal walk's* indices, not the rc). Pins: `parse/case_clause/tests.rs`
+(the `esac`-closed clause's shape, the missing-paren/empty-pattern verdicts that
+stayed, the `((` production word), `parse/case_clause/stray/tests.rs` (every gate,
+called on a token region directly) plus `stray/verdict/tests.rs` (the classification
+arms, the place gate, the seed), `parse/tests.rs::case_*`,
+`parse/case_block/tests.rs`, `parse/case_block/literal/tests.rs` and `tests/case.rs`
+(the bash-parity table; runnable rows byte for byte; the accepted leniencies —
+`case x in a) ; esac`, the `&` and `;&` closers, the closer-shaped word in an arm,
+the quoted-backslash arms; the refused family is
+`a_paren_the_arm_command_list_cannot_take_is_refused`). The open rows of the family
+are tasks #418, #420, #421, #316, #422. **Follow-up:** when `(` becomes an operator
+token (task #316), the two **byte readers** of `stray.rs` — the `((` region rule and
+the `opens_groups` **depth counter** (mid-word `(` bytes included) — move to the
+token list, so a subshell's `(`/`)` pair becomes operators there and `(w`/`f(`/`m=(1`
+stop being word bytes; the classification reads the token-level machine already.
 ## A definer word makes its body brace a group opener for the cond layer
 `f() { echo a && echo b; }; f` split at the body's `&&` because the cond-list
 group counter (`cond/boundary.rs`) judged the brace by the *run* rule alone:
@@ -4590,10 +4575,11 @@ pattern fdshell joins (`case "a b" in a b)` matches, the inserted space is a
 literal byte) where bash is a syntax error — the "Operators are recognized at
 word starts" leniency family, pinned as `multi_token_case_pattern_is_accepted`
 beside `case_pattern_leading_paren_shapes_bash_rejects_are_accepted`, which
-pins the strip's rc-2 shapes with their owners: **#419** (a `(`/bare `)` in the
-arm's command position), **#421** (a closer glued behind the pattern's `)`),
-**#469** (a `(` glued behind `in`), **#470** (a `(` in the `case` **word**); the
-`(a*)"b"` row rides on fdshell's own not-found rc 1 where bash is 127.
+pins the strip's rc-2 shapes with their owners: **#421** (a closer glued behind
+the pattern's `)`), **#469** (a `(` glued behind `in`), **#470** (a `(` in the
+`case` **word**); the `(a*)"b"` row rides on fdshell's own not-found rc 1 where
+bash is 127. The arm-command-position `(`/bare-`)` rows are refused now —
+LESSONS: "A `case` arm is a command list"
 
 ## A guard the window invariant makes unreachable is recorded, not chased (task #311, `scan/heredoc/regions.rs`)
 

@@ -572,9 +572,7 @@ gate's.
 
 The pinned divergences are the owners' own, not this rule's: the bare path
 redirect of a quoted separator word (`echo x > ";"` — bash writes the file `;` at
-rc 0, fdshell answers `invalid redirect syntax`, task **#475**); a `)` behind an
-**argument** is arm text here, where bash rejects the clause with rc 2 (task
-**#419**'s family, e.g. `case x in a) echo a ";" b) ;; esac`); the definer word
+rc 0, fdshell answers `invalid redirect syntax`, task **#475**); the definer word
 that **carries a region** (task **#368**) — the production needs the word's own
 last byte, so a word whose region supplies one is not a definer, and a region word
 that lands in the production's name slot (`$( echo f )() { :; }`) is reported as a

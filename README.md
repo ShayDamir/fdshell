@@ -1181,10 +1181,15 @@ a clause written without it is a parse error: the next clause's pattern paren is
 a token the arm's command list cannot take, so `case x in a) b) ;; esac`,
 `case x in a) *) esac` and `case x in a) echo hi; b) ;; esac` run **nothing** at
 rc 1 with `case: missing ';;' between clauses` (bash stops at rc 2). A `)` that
-closes nothing the arm opened, and that no word in command position precedes,
-stays arm text, as it always was — measured to parse at rc 0: a quoted `")"` and
+closes nothing the arm opened is judged (task **#419**): only a word-list place
+passes, and a depth-0 paren behind an argument (`a) echo hi) ;;`,
+`a) echo a[b) ;;`, `a) echo (b) ;;`), behind an operator token
+(`a) echo hi; ) ;;`) or with no word before it at all (`a) ) ;;`) is a paren the
+command list cannot take — rc 1, bash rc 2. What stays arm text, as it always
+was — measured to parse at rc 0: a quoted `")"` and
 an escaped `\)` are word text, `a) ((1)) ;;` and an arithmetic
-`for ((i=0;i<2;i++)); do …; done` clause are arithmetic data, and the paren of a
+`for ((i=0;i<2;i++)); do …; done` clause are arithmetic data (the `((` word owns
+**two** closers), and the paren of a
 group **the arm itself opened** closes that group: a function definition
 (`case x in x) f() { echo y; }; f ;; esac` prints `y` in bash and here, rc 0,
 and the same holds for a definition behind a `;` or inside the arm's
@@ -1195,11 +1200,12 @@ carries its group's `(` **mid-word** — the tokenizer's word for `m=(1)` is `m=
 at rc 0 as bash does; fdshell has no array runtime, so the assignment itself
 dispatches the literal's `)` as a command at run time, exactly as it does at top
 level (task #422) — the parse is the gate here. The paren test reads a word's
-bytes **with its quote mask**, so a quoted `(` (`a) echo "x(" b) ;;`) and an
+bytes **with its quote mask** and asks the counter only in **command position**,
+so a quoted `(` (`a) echo "x(" b) ;;`) and an
 escaped one (`a) echo x\() ;;`, where the mask marks the pair unquoted and only
-the backslash says it is escaped) open no group. Shapes that stay open: a `)`
-written after an argument inside an arm (task #419), bash's `;&`/`;;&`
-terminators (task #420), a subshell arm that
+the backslash says it is escaped) open no group, and the `)` written behind them
+is then the arm's stray paren — rc 1. Shapes that stay open: bash's `;&`/`;;&`
+terminators themselves (task #420), a subshell arm that
 **runs** (task #316), and a closer glued behind a pattern's `)`
 (`case x in a) echo hi;;b)esac`, task #421). Pinned in `safe/fdshell/tests/case.rs`.
 
