@@ -71,6 +71,20 @@ pub(crate) fn ensure_before_closer(
     Ok(())
 }
 
+/// The `;` **byte** behind a `;` **token** — the byte test that separates bash's
+/// two spellings, with one owner here. The tokenizer emits a `;` token for a `;`
+/// byte, a newline and `)` alike ([`crate::parse::token`]), and bash
+/// distinguishes them: `do echo a & ; done` is a syntax error while
+/// `do echo a &\ndone` is valid (task #355), and the `case` clause list of task
+/// #415 is the same split — POSIX #2.9.1 makes that slot a `newline_list`, so a
+/// newline may stand in it but a real `;` may not. Both words go through
+/// [`span_word`], so a quoted `";"` is word data and never the byte (task #336).
+/// Read by [`amp_semi`] and by the clause-list guard `parse/case_block.rs`.
+pub(crate) fn semi_byte(tok: &Token, line: &[u8]) -> bool {
+    let (_t, start, _, _, _, _) = tok;
+    span_word(tok, b";") && line.get(*start) == Some(&b';')
+}
+
 /// The `;` **token** at `idx` of `tokens` is glued right behind a plain `&`
 /// when `tokens[idx-1]` is the `&` and the byte the token points at in `line`
 /// is a real `;`. The byte test is the whole rule: the tokenizer emits a `;`
@@ -81,10 +95,10 @@ pub(crate) fn ensure_before_closer(
 /// Both words of the pair go through [`span_word`], so a quoted `";"` glued
 /// behind a quoted `"&"` is word data and no glue (task #336).
 pub(crate) fn amp_semi(tokens: &[Token], line: &[u8], idx: usize) -> bool {
-    let Some(tok @ (_t, start, _, _, _, _)) = tokens.get(idx) else {
+    let Some(tok) = tokens.get(idx) else {
         return false;
     };
-    if !span_word(tok, b";") || line.get(*start) != Some(&b';') {
+    if !semi_byte(tok, line) {
         return false;
     }
     let Some(prev) = idx.checked_sub(1) else {

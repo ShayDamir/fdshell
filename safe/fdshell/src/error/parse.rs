@@ -26,6 +26,10 @@ pub(crate) enum ParseError {
     CaseMissingCloseParen,
     /// case: missing ';;' between clauses
     CaseMissingSemiSemi,
+    /// case: empty word
+    CaseEmptyWord,
+    /// case: ';' before an empty clause list
+    CaseEmptyClauseList,
     /// internal invariant violated
     Never,
     /// not a valid octal number

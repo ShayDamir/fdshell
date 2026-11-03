@@ -4,14 +4,14 @@ pub(crate) use literal::literal_indices;
 
 use super::Token;
 use super::case_clause;
-use super::semi::{List, list_closing_keyword_index, trim_semi, try_join_masked};
+use super::semi::{List, list_closing_keyword_index, semi_byte, trim_semi, try_join_masked};
 use super::word_quoted::keyword_word;
 use crate::error::parse::ParseError;
 use crate::keywords::Closer;
 use crate::mask::MaskBit;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt, ensure};
+use error_stack::{Report, ResultExt, bail, ensure};
 use sys::ScriptText;
 use sys::ShortCStr;
 
@@ -66,11 +66,31 @@ pub(crate) fn tokens_to_case(
     let redirects =
         crate::parse::block_tail::redirects(b"esac", tokens.get(esac_idx..).unwrap_or(&[]), text)?;
 
-    let (word, word_mask, word_span) = try_join_masked(trim_semi(
-        closed.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?,
-    ));
+    // POSIX #2.9.1's `case_clause` production requires a `word` between `case`
+    // and `in`, so an all-separator (or empty) word slot has none — bash rejects
+    // every spelling of it (`case;`, `case ; ;`, `case` + newline, a comment-only
+    // word) at rc 2, fdshell at its own rc 1 (task #415). The test is on the
+    // **trimmed** slice (LESSONS: "An empty block arm body is a parser rule"); a
+    // quoted empty pair or a quoted `";"` is a **token**, so those words stay.
+    let word_tokens = trim_semi(closed.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?);
+    ensure!(!word_tokens.is_empty(), ParseError::CaseEmptyWord);
+
+    let (word, word_mask, word_span) = try_join_masked(word_tokens);
 
     let clauses = case_clause::parse_clauses(closed, in_idx + 1, esac_idx, text)?;
+    // The slot after `in` may stay empty (`case x in esac`, bash rc 0), but POSIX
+    // spells it a `newline_list`: a real `;` **byte** in it is the grammar
+    // violation while the newline that tokenizes as a `;` token is not
+    // (task #415, LESSONS: "A `;` token is a newline in disguise"). Only the
+    // **empty** slot is guarded — the walk's own verdicts stay in charge of every
+    // slot it turned into a clause, and the leading-`;`-before-a-clause leniency
+    // (task #300) stays as measured.
+    if clauses.is_empty() {
+        let slot = closed.get(in_idx + 1..esac_idx).unwrap_or(&[]);
+        if slot.iter().any(|tok| semi_byte(tok, line)) {
+            bail!(ParseError::CaseEmptyClauseList);
+        }
+    }
 
     Ok(CaseBlock {
         word,
