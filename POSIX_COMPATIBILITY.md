@@ -230,7 +230,9 @@ A **keyword block's closing keyword** is the one place the glue is read the way
 bash reads it: a closer glued to a redirection operator is recognized as the
 closer, and the operator redirects the whole block — `while :; do :; done>f`,
 `if :; then :; fi>f`, `case x in x) :;; esac>f` all file the block's output in
-`f`, as bash does. The keyword side of a word start is a boundary check, not a
+`f`, as bash does, **quoted operand included** (`done>"f"`, `fi>"f"`,
+`done>>"f"`: the quotes belong to the operand, never to the keyword, task #413).
+The keyword side of a word start is a boundary check, not a
 word split, so nothing is split off; the *operand* side keeps the no-split rule,
 so `done>f>g` opens the single file `f>g` where bash opens `f` and then `g`.
 

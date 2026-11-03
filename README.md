@@ -418,7 +418,8 @@ A **keyword block** takes a redirection written after its closing keyword and
 applies it to the whole block: `while :; do echo a; break; done > f` files the
 loop's output in `f`, and so does `until … done > f`, `if … fi > f`,
 `for … done > f`, `for ((…)); do …; done > f` and `case … esac > f` — the glued
-spelling `done>f`, `fi>f`, `esac>f` included. The scope opens **before** the
+spelling `done>f`, `fi>f`, `esac>f` included, and a glued closer takes a **quoted**
+operand too (`done>"f"`, task #413). The scope opens **before** the
 block's own word list or condition runs, so a target that fails to open stops
 the block before its first command expands anything (`for x in $(touch m; echo
 a); do :; done > /nope/x` leaves no `m`; the rc-1 abort is task #179's), and it

@@ -503,7 +503,27 @@ The tokenizer stores a word as its unquoted bytes plus a per-byte quote mask par
 
 ## A keyword word is gated on its raw span, and the span scan stops at the word break
 
-POSIX §2.9.1 recognizes a reserved word only when it is unquoted, and fdshell's gate is `keywords::quoted::quoted_word(line, word_end)`: the quote bytes of the word's own raw span. It is **called**, never re-derived — `keyword_delta` opens with it (byte level: block-depth scan, closers) and the token level reaches it through `parse::word_quoted::keyword_word` (dispatch openers, the `in` searches, the definer, braces), because a byte-identical private duplicate of a quoting rule is what drifts (task #323). The per-byte mask and `fq` are **not** the gate: `""if`/`''if` carry no mask bit on the keyword bytes and are command words in bash (rc 127); `i"f"` is quoted but not fully quoted (bash: `if: command not found`). A `\if` word needs no arm: its text is `\if`.
+POSIX §2.9.1 recognizes a reserved word only when it is unquoted, and fdshell's
+gate is `keywords::quoted::quoted_word(line, word_end)`: the quote bytes of the
+word's own raw span. It is **called**, never re-derived — keyword recognition
+opens with it through `keywords::quoted::keyword_is_quoted` (byte level:
+block-depth scan, closers) and the token level reaches it through
+`parse::word_quoted::keyword_word` (dispatch openers, the `in` searches, the
+definer, braces), because a byte-identical private duplicate of a quoting rule is
+what drifts (task #323). **The gate measures the keyword's own bytes** (task
+#413): a word carrying a byte that breaks it is a keyword *glued* to an operand,
+the row's matched literal prefix proves those bytes carry no quote byte, and what
+sits behind the breaking byte is the operand's — bash splits the word there, so
+`done>f` and `done>f"f"` are one keyword word either way. Only a word that is
+nothing but its keyword is measured on the span. Pin both answers:
+`keywords/kind/tests.rs::closers_carry_their_block_closer` (glue, quoted operand,
+`>>`/`>&`), `keywords/kind/tests.rs::a_glued_opener_with_a_quoted_operand_is_scored`,
+e2e `tests/block_redirect.rs::a_glued_closer_takes_its_redirection`; the non-glue
+answer stays pinned by
+`keywords/kind/tests.rs::non_keywords_and_the_time_prefix`. The per-byte mask and
+`fq` are **not** the gate: `""if`/`''if` carry no mask bit on the keyword bytes
+and are command words in bash (rc 127); `i"f"` is quoted but not fully quoted
+(bash: `if: command not found`). A `\if` word needs no arm: its text is `\if`.
 
 The span scan stops at the byte that breaks a word, and that set includes `(` and `)`. Consequence: the **POSIX definer token carries its trailing `(`** (`f'oo'()` tokenizes as `foo(`), so a scan from the token's end breaks on that `(`, never reaches the quote bytes before it, and `quoted_word(line, end)` calls a quoted word unquoted. Both granularities need a fix: `is_definer` pairs the span test `word_quoted` (span longer than the text ⇔ quotes *or* the glued `(`) with `quoted_word`; at byte level `keywords::function::function_def_name` measures the **name's own bytes** (head minus its `(`, or the name word's end in the keyword form), since that rule is the recognizer the quote-removal rewrites feed — ungated, `function 'f'() { … }` defined `f`. Pin both: `f'oo'() { :; }` kills only the token level, `function 'f' { … }` only the byte level.
 
@@ -5370,11 +5390,12 @@ byte is recorded at the index it opens at, in the **word's own** text (task
 #321) — must shift by that same `kw.len()`. `envassign::value_spans` looks alike
 and is off by one, it steps past the `=` as well. A text assertion cannot see
 the shift: the target text is driven by the mask, so an emptied, unshifted, or
-divided span list prints the same text; and the statement level cannot see it
-either, since a glued closer with a *quoted* operand is rejected at the byte
-scan (**#413**). The module's own test has to compare the whole `RedirectDef`
-with the spaced spelling's **and** name the exact span values, or the shift
-ships untested.
+divided span list prints the same text. The statement level runs the shape now
+that the gate reads a glued keyword's own bytes (**#413**) — pinned end to end in
+`tests/block_redirect.rs::a_glued_closer_takes_its_redirection` — but it can only
+assert the file's contents, so the module's own test has to compare the whole
+`RedirectDef` with the spaced spelling's **and** name the exact span values, or
+the shift ships untested.
 
 The same module lost a `||` to the same lens: stopping the walk at a `<<`-shaped
 token needs the token test alone (`<<T`, `<<<hi`), because `parse_redirect` never
