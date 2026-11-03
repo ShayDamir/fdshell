@@ -426,11 +426,14 @@ is undone at the block's end, so an `exec > z` inside the body dies with the
 block. The tail follows the simple-command rules: several redirections apply in
 order and the last one on a descriptor wins (`done > f > g` leaves `f` empty and
 `g` the output), a word glued to an operator is one word — `done>f>g` opens the
-file `f>g`, fdshell never splitting a word at an operator byte, as above. What
-the tail deliberately does **not** read is a plain word behind the closer
-(`done x`, task #405), a here-doc or here-string on it (`done <<T`, `done
-<<<hi`, task #408) and the `&>` family there (`done &> f`, task #409): each
-keeps the behavior its own pins record.
+file `f>g`, fdshell never splitting a word at an operator byte, as above. A plain
+**word** behind the closer is a parse error, the way `group: unexpected word after
+'}'` is one for `{ …; }`: bash demands a separator after a closing keyword, so
+`done x`, `fi x#y` and `esac "c"` report it at fdshell's rc 1 (bash: rc 2) and
+nothing of the block runs. What the tail still
+deliberately does **not** read is a here-doc or here-string on the closer
+(`done <<T`, `done <<<hi`, task #408) and the `&>` family there (`done &> f`, task
+#409): each keeps the behavior its own pins record.
 
 ### Here-documents
 
