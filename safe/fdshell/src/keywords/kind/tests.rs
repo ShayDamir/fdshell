@@ -45,7 +45,9 @@ fn openers_carry_their_block_closer() {
 }
 
 /// Every closer row, and the glued redirect form (`fi>f`) that closes the block
-/// and leaves the operator to `parse::block_tail`.
+/// and leaves the operator to `parse::block_tail` — with a **quoted** operand
+/// too (task #413): the gate reads the keyword's own bytes, and the bytes behind
+/// the word break are the operand's, exactly as bash splits the word.
 #[test]
 fn closers_carry_their_block_closer() {
     assert_eq!(
@@ -72,6 +74,68 @@ fn closers_carry_their_block_closer() {
         keyword_kind(b"esac|", b"esac|", 5),
         Some(Keyword::Closes(Closer::Esac))
     );
+    // Glued to a **quoted** operand the closer is still the closer (task #413):
+    // the gate reads the keyword's own bytes, what sits behind the breaking byte
+    // is the operand's, so the tail module takes the redirection — bash's split.
+    assert_eq!(
+        keyword_kind(b"done>\"f\"", b"done>\"f\"", 8),
+        Some(Keyword::Closes(Closer::Done))
+    );
+    assert_eq!(
+        keyword_kind(b"fi>\"f\"", b"fi>\"f\"", 6),
+        Some(Keyword::Closes(Closer::Fi))
+    );
+    assert_eq!(
+        keyword_kind(b"esac>\"f\"", b"esac>\"f\"", 9),
+        Some(Keyword::Closes(Closer::Esac))
+    );
+    assert_eq!(
+        keyword_kind(b"done>>\"f\"", b"done>>\"f\"", 10),
+        Some(Keyword::Closes(Closer::Done))
+    );
+    assert_eq!(
+        keyword_kind(b"done>&\"f\"", b"done>&\"f\"", 10),
+        Some(Keyword::Closes(Closer::Done))
+    );
+    assert_eq!(
+        keyword_kind(b"done>&2", b"done>&2", 7),
+        Some(Keyword::Closes(Closer::Done))
+    );
+    // The quotes must be the keyword's **own** bytes for the gate to fire: a
+    // quoted keyword glued to an operand is a command word, not a closer.
+    assert_eq!(keyword_kind(b"\"fi\">f", b"\"fi\">f", 6), None);
+}
+
+/// Openers glued to a quoted operand are scored by the same gate (task #413) —
+/// one gate, both granularities, so the byte scan and the token scan cannot
+/// disagree. What the whole shell then does is pinned e2e in
+/// `safe/fdshell/tests/block_redirect.rs::a_glued_opener_with_a_quoted_operand_keeps_its_measured_answer`.
+#[test]
+fn a_glued_opener_with_a_quoted_operand_is_scored() {
+    assert_eq!(
+        keyword_kind(b"if>\"x\"", b"if>\"x\"; then :; fi", 6),
+        Some(Keyword::Opens(Closer::Fi))
+    );
+    assert_eq!(
+        keyword_kind(b"while>\"x\"", b"while>\"x\"; do :; break; done", 10),
+        Some(Keyword::Opens(Closer::Done))
+    );
+    assert_eq!(
+        keyword_kind(b"case>\"x\"", b"case>\"x\" in x) :;; esac", 8),
+        Some(Keyword::Opens(Closer::Esac))
+    );
+    assert_eq!(
+        keyword_kind(b"for((\"x\")", b"for((\"x\") :; do :; done", 9),
+        Some(Keyword::Opens(Closer::Done))
+    );
+    // Behind a `&&` the same spelling is an argument word with a redirection
+    // (`a && if >x"y"` in bash), and the row's own boundary rule scores it.
+    assert_eq!(
+        keyword_kind(b"if>x\"y\"", b"a&&if>x\"y\"; then :; fi", 11),
+        Some(Keyword::Opens(Closer::Fi))
+    );
+    // The gate still fires when the quote bytes are the keyword's own.
+    assert_eq!(keyword_kind(b"\"if\"", b"\"if\"; then :; fi", 4), None);
 }
 
 /// A word that is no keyword is `None`, not a `0`-delta keyword: a quoted

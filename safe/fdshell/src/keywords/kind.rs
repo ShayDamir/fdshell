@@ -9,12 +9,13 @@
 //! a closer closes *its own* block, a closer of another kind written in a body
 //! is word data.
 //!
-//! The rows are `keyword_delta`'s, verbatim: the [`quoted_word`] gate, the
-//! `time [-p]` prefix strip, the **one word-break set**
-//! ([`crate::bytes::word_break`], task #396) shared with the tokenizer's
-//! keyword split, the [`wait_opens_block`] disambiguation of the event-`wait`
-//! block from the POSIX builtin, and the group's `{`/`}` predicates from
-//! [`crate::segment::group::{opens, closes}`]. The glued `done>f` closer
+//! The rows are `keyword_delta`'s, verbatim: the [`keyword_is_quoted`] gate (the
+//! span rule `crate::keywords::quoted::quoted_word` behind it, for a word that is
+//! nothing but its keyword), the `time [-p]` prefix strip, the **one
+//! word-break set** ([`crate::bytes::word_break`], task #396) shared with the
+//! tokenizer's keyword split, the [`wait_opens_block`] disambiguation of the
+//! event-`wait` block from the POSIX builtin, and the group's `{`/`}` predicates
+//! from [`crate::segment::group::{opens, closes}`]. The glued `done>f` closer
 //! (whose token-side twin is `parse::block_tail::is_closer`) and the glued
 //! `for((…))` opener (whose token-side twin is
 //! `parse::token::step::keyword`) are answered by the one boundary rule. The
@@ -25,7 +26,7 @@
 
 pub(crate) mod arith_for;
 
-use super::{quoted_word, time_prefix_len, wait_opens_block};
+use super::{keyword_is_quoted, time_prefix_len, wait_opens_block};
 use crate::bytes::word_break;
 use crate::segment::group::{closes, opens};
 
@@ -61,15 +62,17 @@ fn boundary(word: &[u8], len: usize) -> bool {
 }
 
 /// The block keyword a scored word is, `None` for a word that is no keyword:
-/// a quoted word ([`quoted_word`] — bash reads a quoted keyword as data), a
+/// a quoted word ([`keyword_is_quoted`] — bash reads a quoted keyword as data), a
 /// prefix like `ifconfig`/`donec`, the POSIX builtin `wait`, and every
 /// ordinary word. A word glued to a metacharacter — the `for((…))` head
 /// (task #396) or the `done>f` closer — **is** scored, on the one boundary
-/// rule. A `time [-p]` word is a *prefix*, not a keyword of its own:
-/// the keyword behind it is scored on the rest of the word, which keeps such a
-/// statement one segment for the `time` parse hook.
+/// rule, and the operand behind the glue may be **quoted** (`done>f"f"` is
+/// bash's closer with bash's redirection, task #413: the quotes belong to the
+/// operand, never to the keyword). A `time [-p]` word is a *prefix*, not a
+/// keyword of its own: the keyword behind it is scored on the rest of the word,
+/// which keeps such a statement one segment for the `time` parse hook.
 pub(crate) fn keyword_kind(word: &[u8], line: &[u8], word_end: usize) -> Option<Keyword> {
-    if quoted_word(line, word_end) {
+    if keyword_is_quoted(word, line, word_end) {
         return None;
     }
     if let Some(p) = time_prefix_len(word) {

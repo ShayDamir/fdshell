@@ -7,7 +7,7 @@ mod quoted;
 mod reserved;
 mod wait;
 
-pub(crate) use quoted::quoted_word;
+pub(crate) use quoted::{keyword_is_quoted, quoted_word};
 pub(crate) use reserved::reserved_word;
 
 pub(crate) use function::{carries_region, definer_len, function_def_name, leading_ws, name_len};
