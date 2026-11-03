@@ -11,7 +11,7 @@ use crate::bytes::word_break;
 use crate::error::parse::ParseError;
 use crate::parse::Token;
 use crate::scan::heredoc::terminator_spans;
-use error_stack::{Report, bail};
+use error_stack::{Report, ResultExt, bail};
 use sys::ShortCStr;
 
 /// Judge the token the tail walk stopped at: `Ok(())` when it is a shape the walk
@@ -21,10 +21,9 @@ pub(crate) fn judge(kw: &[u8], tok: &Token, line: &[u8]) -> Result<(), Report<Pa
         return Ok(());
     }
     // A NUL in a closer keyword is an invariant breach (the callers pass the
-    // keyword literals), so it answers `Never` (STYLE §4.10), never a relabel.
-    let closer = ShortCStr::from_vec(kw.to_vec())
-        .ok()
-        .ok_or(ParseError::Never)?;
+    // keyword literals), so it answers `Never` (STYLE §4.10) — reached through the
+    // cross-crate `.change_context()` (STYLE §4.5), keeping the chain.
+    let closer = ShortCStr::from_vec(kw.to_vec()).change_context(ParseError::Never)?;
     bail!(ParseError::BlockTrailingWord { closer });
 }
 
