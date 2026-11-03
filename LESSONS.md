@@ -6513,3 +6513,50 @@ those reports, this rule never reaches them) are in `tests/pipeline.rs`, the int
 the report fires on the line-initial line and the session reads on to the REPL's own
 end-of-input answer — in `tests/repl.rs`, and README "Pipelines and lists" plus
 POSIX_COMPATIBILITY's newline paragraph state the rule.
+
+## An optional grammar slot is not the empty one (task #416)
+
+POSIX #2.9.1 writes the `for` clause as `for name [in compound-list] [newline_list]
+do …`, and bash implements the brackets: a clause with no `in` iterates the
+**positional parameters** — one word per parameter, verbatim, exactly the words
+`"$@"` expands to, and **no word at all** when none are set (measured 2026-11-03
+against bash 5.3.9). The empty list written right next to it, `for name in; do`,
+iterates **zero** times, and that neighbour is what makes the rule: both rows reach
+the run layer with an empty `words`, so the distinction cannot live in the word
+list. The parse carries it as a field of the block
+(`parse/for_block.rs::words_default_to_positional`, read by
+`for_run.rs::positional_words`), per LESSONS: "A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)".
+
+Synthesizing a `"$@"` word into the parse tree was rejected: it fabricates a word
+with a fabricated per-byte mask and span list — the invention #269/#321/#336 keep
+honest for words that *are* in the source text — for a word no script ever wrote,
+and every word-form pin would then assert data nobody typed. The run arm is one
+clause: clone the deque **out** of the cell, so no borrow is held across the body
+run (LESSONS: "Never hold a ForkCell borrow across a recursive call that re-borrows").
+
+The clause shape belongs to `parse/for_block/head.rs`, which owns the head and its
+three errors and answers **before** the closer/body validators (task #360's
+gate-order doctrine): a clause with no `in` is `for name` only when the slot behind
+the name holds the clause terminator — the same span-gated `;` test
+`parse/semi/preceded.rs`'s `Term::Semi` arm makes — so the newline spelling before
+`do` is the same clause, and every **word** there (`for i 1 2`, `for i "in"`,
+`for i &`, a quoted `";"`) stays `ExpectedIn`. `for i do …`, with no terminator at
+all, is task #521's row.
+
+The keyword-name family rides the scan's existing rule that nothing behind `for`
+scores (task #306): `for in;`, `for fi;`, `for do;`, `for then;` name the variable
+and iterate the parameters, at bash parity. The one member that does not is the
+block's **own** closer — the closing-keyword walk walks the token list from index 1,
+so a name written `done` scores as the closer and another module answers; both
+spellings are pinned at their current message and task #522 owns the decision.
+
+Pins: `parse/for_block/tests.rs::a_clause_without_in_has_no_words_and_the_default_flag`,
+`parse/for_block/tests.rs::a_word_where_the_optional_in_belongs_stays_the_heads_error`,
+`parse/for_block/tests.rs::the_in_form_still_distinguishes_an_empty_list`,
+`parse/for_block/tests.rs::the_closer_shaped_name_is_pinned_at_its_current_message`,
+`for_run/tests.rs::a_for_clause_without_in_takes_the_positional_parameters` and its
+four neighbours (`for_run/tests.rs::an_empty_in_list_still_iterates_zero_times` is
+the flag's `false` side and the mutation killer for a flag flipped either way), and
+`tests/loops.rs::for_clause_without_in_iterates_the_positional_parameters` with
+`tests/loops.rs::the_default_for_list_is_quoted_dollar_at`. README
+"Conditionals and loops" states the rule for users.

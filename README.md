@@ -1046,6 +1046,7 @@ else
 fi
 
 for name in a b c; do echo "$name"; done
+for name; do echo "$name"; done
 for ((i = 0; i < 3; i++)); do :; done
 while read line; do echo "$line"; done
 until [ -e ready ]; do sleep 1; done
@@ -1097,6 +1098,17 @@ parse error (rc 1 here, rc 2 in bash, task #360), while `"&"`, `'&'` and `\&`
 stay words; the glued family above is the surviving divergence (owner #496).
 A missing `in` stays fdshell's own rc 1:
 `for i 1 2` is `expected 'in'`, bash rc 2.
+
+The `in word-list` of a `for` clause is **optional** (POSIX #2.9.1), and a clause
+without it — `for name; do …`, or the same clause with a newline before `do` —
+iterates the **positional parameters**: one word per parameter, verbatim (no IFS
+split, no pathname expansion), exactly the words `"$@"` expands to, and no word
+at all when none are set. The empty list right beside it is a **different** row —
+`for name in; do` iterates zero times — so the parse keeps the two apart as a
+field of the block. A keyword written in the name slot is the name, and bash
+iterates the parameters there too (`for in; do`, `for fi; do`, `for then; do`);
+only the block's **own** closer stays fdshell's parse error, bash rc 0
+(task #522).
 
 A block's **closing keyword** needs a command-list terminator in front of it —
 POSIX #2.9's `;` (a newline is one) or the plain `&` — with the one exception
