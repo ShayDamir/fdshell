@@ -13,8 +13,9 @@ use error_stack::{Report, bail, ensure};
 /// The words the pattern list **owns** as its own separators: the `|` that
 /// separates patterns, the optional leading `(` (POSIX 2.9.4.3, task #334), the `)`
 /// that closes the list, and the `;` whose pair separates clauses — `;;`, `;&` and
-/// `;;&` are the same rows spelled by two tokens, and task **#420** owns that family
-/// in the **clause-terminator** position. The empty word is quoted word data
+/// `;;&` are the same rows spelled by two tokens, and the **clause-terminator**
+/// position decides them in `terminator::kind_at` (task #420), which is the scan and
+/// the kind of one glued pair. The empty word is quoted word data
 /// (task #336's gate). What the ONE predicate is left with is `&`, `&&` and `||`:
 /// an operator word in a pattern slot, which bash rejects (task #495) — and the
 /// pattern it leaves is empty, so [`ParseError::CaseEmptyPattern`] answers.

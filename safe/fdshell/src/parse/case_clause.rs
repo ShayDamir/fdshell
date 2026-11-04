@@ -2,6 +2,7 @@ pub(crate) mod extract;
 pub(crate) mod pattern;
 mod patterns;
 pub(crate) mod stray;
+pub(crate) mod terminator;
 
 use super::Token;
 use super::word_quoted::span_word;
@@ -14,6 +15,10 @@ pub struct CaseClause {
     /// The clause's `|`-separated patterns, each with its own quote mask.
     pub patterns: Vec<pattern::Pattern>,
     pub body: ScriptText,
+    /// What the clause's terminator says happens after this clause ran
+    /// ([`terminator`]: `;;` stops, `;&` runs the next clause, `;;&` tests the
+    /// next clause's patterns against the same word).
+    pub terminator: terminator::Terminator,
 }
 pub fn parse_clauses(
     tokens: &[Token],
@@ -30,8 +35,12 @@ pub fn parse_clauses(
             continue;
         }
         let patterns = patterns::collect_patterns(tokens, line, &mut pos, esac_idx)?;
-        let (body, next_pos) = extract::body(tokens, text, pos, esac_idx)?;
-        clauses.push(CaseClause { patterns, body });
+        let (body, terminator, next_pos) = extract::body(tokens, text, pos, esac_idx)?;
+        clauses.push(CaseClause {
+            patterns,
+            body,
+            terminator,
+        });
         pos = next_pos;
     }
     Ok(clauses)

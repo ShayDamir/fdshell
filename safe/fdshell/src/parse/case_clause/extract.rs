@@ -1,16 +1,16 @@
 use super::Token;
 use super::stray;
+use super::terminator;
 use crate::error::parse::{ParseError, report_case_arm_close_paren};
 use crate::keywords::Closer;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{List, amp_semi, trim_body, walk_until};
-use crate::parse::word_quoted::span_word;
 use error_stack::{Report, ResultExt, bail};
 use sys::ScriptText;
 
-/// Extract one clause body starting at `body_start`, up to the `;;`
-/// clause separator or `esac_idx`. Returns the body text and the
-/// position to resume clause scanning from.
+/// Extract one clause body starting at `body_start`, up to the clause terminator
+/// ([`terminator`]: `;;`, `;&` or `;;&`) or `esac_idx`. Returns the body text, the
+/// terminator found there, and the position to resume clause scanning from.
 ///
 /// The text is the slice's verbatim span with the heredoc body regions its own
 /// `<<` operators claim attached (`part_text`): in a single-line `case` those
@@ -18,9 +18,10 @@ use sys::ScriptText;
 /// where `part_text`'s extension mode returns the slice's verbatim span
 /// unchanged.
 ///
-/// Both arms of the window are [`span_word`]'s ([`window`]), so a quoted `";"`
-/// pair is body data and ends no clause (task #336; the glue test `h.2 == t.1` is
-/// the pair's own rule, #355). The search accepts a window only **at the arm's
+/// Every arm of the window goes through `span_word`, and the pair's **head** must
+/// also be a real `;` byte — [`terminator::kind_at`], whose `;&`/`;;&` arms are
+/// **glued-only** ([`terminator::glued`]), so a quoted `";"` pair is body data and ends
+/// no clause (task #336; the glue test `h.2 == t.1` is the pair's own rule, #355). The search accepts a window only **at the arm's
 /// own level** ([`walk_until`], task #418): the region is walked with the `case`
 /// block's seed and the `case` word-list rule — the shared state machine of
 /// LESSONS "One clause rule, three scorers" — so a `;;` written inside a nested
@@ -43,7 +44,7 @@ pub(crate) fn body(
     text: &ScriptText,
     body_start: usize,
     esac_idx: usize,
-) -> Result<(ScriptText, usize), Report<ParseError>> {
+) -> Result<(ScriptText, terminator::Terminator, usize), Report<ParseError>> {
     let line = text.as_bytes().change_context(ParseError::Never)?;
     let body_slice = tokens.get(body_start..esac_idx).unwrap_or(&[]);
     let end = walk_until(
@@ -52,7 +53,7 @@ pub(crate) fn body(
         Some(Closer::Esac),
         List::Case,
         0,
-        &|i, depth, seed| depth == seed && window(body_slice, i),
+        &|i, depth, seed| depth == seed && terminator::kind_at(body_slice, line, i).is_some(),
     )
     .map(|i| body_start + i);
     // The bound is the window's index **in the region**, so the next clause's
@@ -73,39 +74,33 @@ pub(crate) fn body(
     }
     match end {
         Some(end) => {
-            // A `;` glued behind a plain `&` is the statement terminator, not
-            // the `;;` clause separator (task #355): keep the pair's head in
-            // the body so the arm's own scan reports the `& ;` split (bash
-            // rc 2); a glued `;;` pair is the separator itself, and the
-            // resume stays past the pair — the leftover tail of a non-glued
-            // pair is absorbed by `parse_clauses`' leading-`;` skip.
+            // The window's own kind ([`terminator`]) decides the resume step, and
+            // the body ends where the terminator starts. A `;` glued behind a
+            // plain `&` is the statement terminator, not the `;;` clause separator
+            // (task #355): keep the pair's head in the body so the arm's own scan
+            // reports the `& ;` split (bash rc 2); a glued `;;` pair is the
+            // separator itself, and the resume stays past the pair — the leftover
+            // tail of a non-glued pair is absorbed by `parse_clauses`' leading-`;`
+            // skip.
+            let kind =
+                terminator::kind_at(body_slice, line, end - body_start).ok_or(ParseError::Never)?;
             let head_glued = tokens
                 .get(end)
                 .zip(tokens.get(end + 1))
-                .is_some_and(|(h, t)| h.2 == t.1);
+                .is_some_and(|(h, t)| terminator::glued(h, t));
             let keep = usize::from(!head_glued && amp_semi(body_slice, line, end - body_start));
             let b = part_text(
                 text,
                 trim_body(tokens.get(body_start..end + keep).unwrap_or(&[]), line),
             )?;
-            Ok((b, end + 2))
+            Ok((b, kind, end + terminator::tokens(kind)))
         }
         None => {
             let b = part_text(
                 text,
                 trim_body(tokens.get(body_start..esac_idx).unwrap_or(&[]), line),
             )?;
-            Ok((b, esac_idx))
+            Ok((b, terminator::Terminator::Stop, esac_idx))
         }
     }
-}
-
-/// Is token `i` of the arm region the first `;` of a `;;` window? Both arms are
-/// [`span_word`]'s, so a quoted `";"` pair is body data and ends no clause (task
-/// #336); the pair's second `;` may sit past the region's end, which is no window.
-fn window(region: &[Token], i: usize) -> bool {
-    region
-        .get(i)
-        .zip(region.get(i + 1))
-        .is_some_and(|(a, b)| span_word(a, b";") && span_word(b, b";"))
 }

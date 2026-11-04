@@ -45,7 +45,10 @@ pub(super) fn next_arm(
         trim_semi(tokens.get(pos..pat_end).unwrap_or(&[])),
         text.start,
     )?;
-    let (body, next) = extract::body(tokens, text, pat_end + 1, done_idx)?;
+    // The terminator kind is the `case` walk's answer (task #420); a `wait` arm
+    // keeps the plain `;;` split it always had (an fdshell-only construct, no bash
+    // twin), so the walk's answer is not this site's decision.
+    let (body, _terminator, next) = extract::body(tokens, text, pat_end + 1, done_idx)?;
     Ok(Some((
         WaitArm {
             pattern,
