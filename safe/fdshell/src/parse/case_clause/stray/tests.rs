@@ -303,6 +303,44 @@ fn a_paren_with_no_word_before_it_is_a_stray_close_paren() {
     assert_eq!(verdict_of(b"case b in b)", None), None);
 }
 
+/// The bound is the `;;` **window**, and task #418 made the window the arm's own
+/// level — so the region the walk reads now spans a nested block. Up to that
+/// window a nested pattern paren is still not a clause paren (the word behind
+/// `in` is a word-list word), and the region's last window decides where the walk
+/// stops; past it, the nested clause's `)` in command position is seen. The second
+/// line is the nested clause list with a **second** clause: its pattern sits in
+/// command position (the nested `;;` restarted it), so this rule answers
+/// `case: missing ';;' between clauses` where bash rc 0 runs both clauses — the
+/// divergence the plan's pin list calls parity, pinned as measured in
+/// `tests/case.rs::a_nested_block_in_an_arm_keeps_its_semi_semi`. The limits are
+/// the helper's, so they index the **whole** token list of each line: the outer
+/// `;;` pair sits at index 15 of the first line and 21 of the second, the nested
+/// clause's own window at index 12 of both.
+#[test]
+fn the_window_test_reads_the_region_it_now_spans() {
+    // One nested clause: nothing in the region is a pattern paren.
+    let line = b"case a in a) case b in b) echo y;; esac;; esac";
+    // The window is the outer `;;` pair: token index 15 (the nested `case`'s own
+    // window, at index 12, belongs to the nested clause).
+    assert_eq!(verdict_of(line, Some(15)), None);
+    assert_eq!(
+        verdict_of(line, Some(12)),
+        None,
+        "up to the nested clause's own window"
+    );
+
+    // The two-clause nested list: the walk to the outer window (index 21) crosses
+    // the nested second clause's pattern paren, and its word sits in command
+    // position — the rule fires.
+    let line = b"case a in a) case b in x) echo n;; *) echo inner;; esac;; esac";
+    assert_eq!(verdict_of(line, Some(21)), Some(Stray::ClausePattern));
+    assert_eq!(
+        verdict_of(line, Some(12)),
+        None,
+        "the nested clause's own window bounds a walk that never reaches the `*)`"
+    );
+}
+
 /// The operator tokens the scan reads as predecessors: a `)` behind the `;;`
 /// pair, behind a pipeline `|`, or behind a `&` is never a *pattern* paren — it
 /// is a paren the command list cannot take (task #419 closed the row; bash rc 2
