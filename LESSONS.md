@@ -3914,7 +3914,9 @@ comes out of that one place (measured against bash 5.3.9):
   token is the clause pattern paren of the missing `;;` (`case x in a) b) ;; esac`
   answers `case: missing ';;' between clauses` — task #300's arm, no caret);
   **everything else at depth 0** — behind an **argument** (`a) echo hi) ;;`), behind
-  an **operator token** (`| )`, `& )`, `;& )`) or with **no word before it at all**
+  an **operator token** (`| )`, `& )`; the `;& )` row is **gone** — task **#420** made
+  the `;&` behind the arm's `)` the terminator, so the paren is past the window and
+  the verdict comes from the next clause's empty pattern list) or with **no word before it at all**
   (`a) ) ;;`) — is a paren the command list cannot take (bash rc 2): fdshell rc 1,
   `case arm: unexpected ')' — a command list cannot take a paren` — task #419's arm,
   pinned by **text**, riding with a caret at the judged token's span start (the
@@ -3976,10 +3978,15 @@ called on a token region directly) plus `stray/verdict/tests.rs` (the classifica
 arms, the place gate, the seed), `parse/tests.rs::case_*`,
 `parse/case_block/tests.rs`, `parse/case_block/literal/tests.rs` and `tests/case.rs`
 (the bash-parity table; runnable rows byte for byte; the accepted leniencies —
-`case x in a) ; esac`, the `&` and `;&` closers, the closer-shaped word in an arm,
-the quoted-backslash arms; the refused family is
-`a_paren_the_arm_command_list_cannot_take_is_refused`). The open rows of the family
-are tasks #418, #420, #421, #316, #422. **Follow-up:** when `(` becomes an operator
+`case x in a) ; esac`, the `&` closer, the closer-shaped word in an arm, the
+quoted-backslash arms; the refused family is
+`a_paren_the_arm_command_list_cannot_take_is_refused`). The `;&` closer and the
+`;& )` rows are not here any more: the clause-terminator family finished in task
+**#420** and they are pinned there
+(`tests/case.rs::the_semi_and_ampersand_clause_terminators_run_the_next_clause`,
+`tests/case.rs::the_glued_only_boundary_stays_as_measured`,
+`parse/case_clause/terminator/tests.rs`). The open rows of the family
+are tasks #418, #421, #316, #422. **Follow-up:** when `(` becomes an operator
 token (task #316), the two **byte readers** of `stray.rs` — the `((` region rule and
 the `opens_groups` **depth counter** (mid-word `(` bytes included) — move to the
 token list, so a subshell's `(`/`)` pair becomes operators there and `(w`/`f(`/`m=(1`
@@ -6648,8 +6655,34 @@ Both directions of `owned` are pinned at each site: a parameter that never chang
 answer is an equivalent mutant, per
 LESSONS: "A shared parser must gate the flag only one builtin honors".
 
+Task **#420** finished the `case` half of this rule, on the **clause-terminator** side
+only: the family is `;;` stops, `;&` runs the next clause's body, `;;&` tests the next
+clause's patterns against the same word, and it is **glued-only** — the tokenizer emits
+a token for `;` alone and `&` is an ordinary word byte, so `;&` and `;;&` arrive as two
+and three tokens and the raw span **is** the rule. `; &`, `; ;&` and `;; &` stay body
+data with the answers they already had, and the scan that finds the window and the kind
+it assigns are one predicate (`parse/case_clause/terminator.rs`: `kind_at` plus the
+resume step), because "which window" and "which kind" are the same decision
+(STYLE 2.1/2.6). The **pattern-slot** rows are untouched and stay this site's own
+answer: `collect_patterns` runs first and never lets an operator word into a word slot,
+so `case a in a;& b) echo B;;` and `case x in 1 ;& ) echo hit;;` answer
+`case: empty pattern` (fdshell rc 1, bash rc 2).
+
+One cost is pinned: a terminator's **head must be a real `;` byte**. The
+tokenizer's newline-as-`;` token is bash's *list* separator, not the terminator's head
+(see
+LESSONS: "A `;` token is a newline in disguise: the body-slice rule must read the token's byte (task #355)"),
+and that is exactly what makes bash's accepted `echo A` + newline + `;& b)` answer the
+chain's `A`,`B`: the newline ends the list and the real bytes behind it are the
+terminator. The price is the mirror row `echo A;;` + newline + `& b)`, which bash stops
+at rc 2 and fdshell answers through the plain `;;` and the pattern-slot error — pinned
+as measured, not fixed.
+
 Pins: `parse/word_quoted/tests.rs::operator_word_reads_the_gate_and_the_owners_set`,
-`parse/for_block/tests.rs::an_operator_word_in_the_word_list_is_a_parse_error`,
+`parse/case_clause/terminator/tests.rs`,
+`tests/case.rs::the_semi_and_ampersand_clause_terminators_run_the_next_clause`,
+`tests/case.rs::the_glued_only_boundary_stays_as_measured`,
+`parse/for_block/tests.rs::an_operator_word_in_the_word_list_is_a_parse_error,
 `parse/case_clause/tests.rs::an_operator_word_in_a_pattern_slot_reports_the_empty_pattern`,
 `tests/loops.rs::a_standalone_operator_word_in_a_for_word_list_is_a_parse_error`,
 `tests/loops.rs::the_parens_of_a_for_word_list_stay_words`,

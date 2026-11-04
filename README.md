@@ -1212,10 +1212,25 @@ bytes **with its quote mask** and asks the counter only in **command position**,
 so a quoted `(` (`a) echo "x(" b) ;;`) and an
 escaped one (`a) echo x\() ;;`, where the mask marks the pair unquoted and only
 the backslash says it is escaped) open no group, and the `)` written behind them
-is then the arm's stray paren — rc 1. Shapes that stay open: bash's `;&`/`;;&`
-terminators themselves (task #420), a subshell arm that
+is then the arm's stray paren — rc 1. Shapes that stay open: a subshell arm that
 **runs** (task #316), and a closer glued behind a pattern's `)`
 (`case x in a) echo hi;;b)esac`, task #421). Pinned in `safe/fdshell/tests/case.rs`.
+
+bash's extended clause terminators are not open any more (task **#420**): `;;` stops,
+`;&` runs the next clause's body, `;;&` tests the next clause's patterns against the
+same word. The tokenizer emits a token for `;` alone and `&` is a word byte, so `;&` and
+`;;&` arrive as two and three tokens and only a **glued** pair is the terminator — `; &`,
+`; ;&` and `;; &` stay body data, and a plain `&` written in front of a glued terminator
+stays the job marker of tasks #354/#355. A `;&`-forced clause never tests — so never
+expands — its patterns; a `;;&` retest does. `exit`, `set -e` and loop control raised in
+any body of the chain propagate whole, and the status of the last run body owns the
+result. The pattern-list rows stay parse errors of their own position (task #524):
+`case a in a;& b) echo B;;` and `case x in 1 ;& ) echo hit;;` answer
+`case: empty pattern` (rc 1, bash rc 2). Two rows stay divergent by rule, pinned as
+measured: `;&esac` (a non-keyword word keeps its whole word, so the block never closes)
+and bash's `;;` + newline + `&` — the newline is the list separator, and a
+terminator's head is a real `;` byte. Pinned in `safe/fdshell/tests/case.rs` and
+`safe/fdshell/src/parse/case_clause/terminator/tests.rs`.
 
 A `;;` written inside a block **nested in an arm** belongs to that block: the
 clause walk's `;;` search accepts a window only at the arm's **own level** — the

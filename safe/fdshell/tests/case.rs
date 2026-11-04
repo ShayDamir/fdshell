@@ -56,6 +56,36 @@ fn scratch_dir() -> Scratch {
     Scratch(dir)
 }
 
+/// Run with a bounded child (the loop rows must end on their own; a hung child is
+/// killed and the shape fails with rc 124 — the harness of
+/// `tests/glued_pair.rs` / `tests/cond_blocks.rs`, with this file's `unwrap` style
+/// (the crate denies `expect_used`).
+fn run_bounded(script: &str) -> (String, String, i32) {
+    let mut child = Command::new(BIN)
+        .args(["-c", script])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let started = std::time::Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if started.elapsed() > std::time::Duration::from_secs(5) {
+            let _ = Command::new("kill")
+                .args(["-KILL", &child.id().to_string()])
+                .status();
+            let _ = child.wait();
+            return (String::new(), String::new(), 124);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let output = child.wait_with_output().unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 fn run_in(dir: &Path, script: &str) -> (String, String, i32) {
     let output = Command::new(BIN)
         .current_dir(dir)
@@ -884,8 +914,11 @@ fn ampersand_in_an_arm_keeps_the_clause_rules() {
 /// operator, and bash fails the parse there. The pattern the operator leaves behind
 /// is the empty one, so the existing message answers at fdshell's house rc 1 where
 /// bash stops at rc 2 — including the `||` row, which reaches the walk as two `|`
-/// tokens and keeps its verdict, and the `;&` spelled *inside* a pattern list, which
-/// is a `;` and a `&` token and converges on bash here.
+/// tokens and keeps its verdict, and the `;&` spelled *inside* a pattern list: it stays
+/// the operator here because `collect_patterns` runs first and never lets an operator
+/// word into a word slot — task #420's clause-terminator predicate owns the glued
+/// pair written *behind a pattern list's* `)`, so both spellings land on this
+/// position's answer (rc 1 where bash stops at rc 2).
 ///
 /// The rows the position owns stay word data, and they are the parity rows: the
 /// quoted `"&"` and the escaped `\&` (the gate is the raw span), the leading `(` of
@@ -903,6 +936,10 @@ fn an_operator_word_in_the_pattern_list_is_a_parse_error() {
         "case x in a && b) echo m;; esac",
         "case x in a || b) echo m;; esac",
         "case x in 1 ;& ) echo hit;; esac",
+        // Task #420 moved this row here from [`a_paren_the_arm_command_list_cannot_take_is_refused`]:
+        // the `;&` behind the arm's `)` is the terminator, so the paren is past the
+        // window and the verdict is the next clause's empty pattern list.
+        "case x in x) echo hi ;& ) ;; esac",
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
@@ -916,6 +953,225 @@ fn an_operator_word_in_the_pattern_list_is_a_parse_error() {
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
+    }
+}
+
+// --- bash's extended clause terminators: `;&` and `;;&` (task #420) ----------
+//
+// A clause's terminator says what happens **after the clause ran**: `;;` stops,
+// `;&` runs the next clause's body, `;;&` tests the next clause's patterns against
+// the same word. The tokenizer emits a token only for `;`, so `;&` and `;;&` reach
+// the parser as two and three tokens and the **raw span** is what tells them from
+// `; &` — only a glued pair is the terminator (the predicate is
+// `parse::case_clause::terminator`, the runtime loop `case_exec.rs`; one rule, two
+// halves). A `;&`-forced clause never tests — so never expands — its patterns; a
+// `;;&` retest does (both pinned below). Every bash column below is a 5.3.9
+// measurement of 2026-11-04, and every row here is at bash's answer.
+
+#[test]
+fn the_semi_and_ampersand_clause_terminators_run_the_next_clause() {
+    for (script, want_out, want_rc) in [
+        // The three kinds, one clause each.
+        ("case a in a) echo y;& esac", "y\n", 0),
+        ("case a in a) echo y;;& a) echo m;; esac", "y\nm\n", 0),
+        ("case b in a) echo y;;& b) echo m;; esac", "m\n", 0),
+        // Nothing matches, so the terminator starts nothing: rc 0, no output (the
+        // row [`the_semi_family_around_an_arm_stays_as_measured`] used to carry).
+        ("case x in a) echo hi;& esac", "", 0),
+        // The chain: every clause of a `;&` chain runs; the last one's `;;` stops.
+        (
+            "case a in a) echo one;& b) echo two;& c) echo three;; esac",
+            "one\ntwo\nthree\n",
+            0,
+        ),
+        // A `;&` behind a clause that did not run starts nothing: the walk begins at
+        // the matching clause, and "nothing ran" is status 0 (the row above).
+        (
+            "case c in a) echo one;& b) echo two;& c) echo three;; esac",
+            "three\n",
+            0,
+        ),
+        // A forced clause's patterns are not tested, so `b|c` runs whatever it is.
+        (r"case a in a) echo A;& b\|c) echo B;; esac", "A\nB\n", 0),
+        // The forced clause's empty body runs.
+        ("case a in a) echo A;& b) ;; esac", "A\n", 0),
+        // `;&` runs the next body whatever the last body's status was.
+        ("case a in a) false;& b) echo two;; esac", "two\n", 0),
+        // The status is the **last run body**'s: `false` ran, the retest matched
+        // nothing, and bash reports 1 — the `set_last_exit(0)` arm belongs to
+        // "nothing ran" only.
+        ("case a in a) false;;& b) nope;; esac", "", 1),
+        ("case a in a) false;;& a) echo B;; esac", "B\n", 0),
+        // A terminator with no clause behind it runs nothing more.
+        ("case a in a) echo A;& esac", "A\n", 0),
+        ("case a in a) echo A;& b) echo B;& esac", "A\nB\n", 0),
+        // The multi-line spellings. The tokenizer's `;` token doubles as a newline,
+        // and a terminator's head is a real `;` byte, so the newline in `A\n;&` is
+        // bash's list separator and the glued `;&` behind it is the terminator —
+        // which is how bash reads it, and the answer is the chain's.
+        ("case a in a) echo A;&\nb) echo B;;\nesac", "A\nB\n", 0),
+        ("case a in a) echo A\n;& b) echo B;;\nesac", "A\nB\n", 0),
+        ("case a in a) echo A\n;;& b) echo B;;\nesac", "A\n", 0),
+        ("case a in a) echo A;& b) echo B;;\nesac", "A\nB\n", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want_out, want_rc), "{script}: {err}");
+    }
+}
+
+/// `exit`, `set -e` and loop control raised **inside the chain** propagate whole:
+/// `case` is a transparent level (LESSONS "A cond-list run returns loop control…"),
+/// and the status of the last run body survives. The loop rows run under a bounded
+/// child: they must end on their own (the harness of `tests/glued_pair.rs`).
+#[test]
+fn control_flow_from_a_terminated_clause_propagates_whole() {
+    let (out, err, code) = run("case a in a) echo A;& b) exit 3;; esac\necho tail");
+    assert_eq!((out.as_str(), code), ("A\n", 3), "stderr={err}");
+    let (out, err, code) = run("set -e; case a in a) false;& b) echo two;; esac; echo tail");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
+    for (control, want_out) in [("break", "one\ntwo\n"), ("continue", "one\ntwo\n")] {
+        let script = format!(
+            "for i in 1; do case a in a) echo one;& b) echo two; {control};; esac; echo tail; done"
+        );
+        let (out, err, code) = run_bounded(&script);
+        assert_eq!((out.as_str(), code), (want_out, 0), "{script}: {err}");
+    }
+}
+
+/// A plain `&` written **in front of** a glued terminator stays the job marker of
+/// tasks #354/#355 — `&;&` is a background job plus the terminator, not one token.
+/// The pin is the two jobs' files plus `wait`, never stdout order (LESSONS, #326).
+#[test]
+fn a_background_job_and_a_terminator_are_two_things() {
+    let dir = scratch_dir();
+    let f = dir.join("job.txt").to_str().unwrap().to_string();
+    let g = dir.join("next.txt").to_str().unwrap().to_string();
+    let script =
+        format!("case a in a) builtin echo X >{f} &;& b) builtin echo B >{g};; esac\nwait");
+    let (out, err, code) = run_in(&dir, &script);
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
+    assert_eq!(std::fs::read_to_string(&f).unwrap_or_default(), "X\n");
+    assert_eq!(std::fs::read_to_string(&g).unwrap_or_default(), "B\n");
+}
+
+/// A `;&`-forced clause's patterns are **never tested**, so never expanded; a
+/// `;;&` retest does expand and test them (POSIX 2.9.4.3, the `$(touch …)` pins of
+/// task #280's laziness, one level up).
+#[test]
+fn a_forced_clause_does_not_expand_its_patterns_a_retest_does() {
+    let dir = scratch_dir();
+    let (out, err, code) = run_in(
+        &dir,
+        "case a in a) echo A;& $(touch f; echo b)) echo B;; esac",
+    );
+    assert_eq!((out.as_str(), code), ("A\nB\n", 0), "stderr={err}");
+    assert_eq!(
+        std::fs::read_dir(&*dir).unwrap().count(),
+        0,
+        "forced: bash creates no file"
+    );
+
+    let dir = scratch_dir();
+    let (out, err, code) = run_in(&dir, "case a in a) :;;& $(touch g; echo a)) echo B;; esac");
+    assert_eq!((out.as_str(), code), ("B\n", 0), "stderr={err}");
+    assert!(dir.join("g").is_file(), "retest: bash creates the file");
+}
+
+/// A heredoc **body** written in a terminated clause is body text and rides with the
+/// clause that owns the `<<` (LESSONS, #311) — including the clause the terminator
+/// reaches. bash 5.3.9 measurements.
+#[test]
+fn a_heredoc_body_rides_with_the_clause_that_owns_it() {
+    let (out, err, code) = run("case a in a) cat <<T;;& b) echo B;; esac\nbody\nT");
+    assert_eq!((out.as_str(), code), ("body\n", 0), "stderr={err}");
+    let (out, err, code) = run("case a in a) cat <<T;& b) echo B;; esac\nbody\nT");
+    assert_eq!((out.as_str(), code), ("body\nB\n", 0), "stderr={err}");
+}
+
+/// The redirection written after `esac` belongs to the whole block (task #298) and
+/// covers every body the chain runs — here the one the `;;&` retest reaches: bash
+/// writes `A` to the file.
+#[test]
+fn the_block_redirect_covers_every_body_the_chain_runs() {
+    let dir = scratch_dir();
+    let f = dir.join("block.txt").to_str().unwrap().to_string();
+    let (out, err, code) = run_in(
+        &dir,
+        &format!("case a in a) echo A;;& b) echo B;; esac >{f}"),
+    );
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("block.txt")).unwrap_or_default(),
+        "A\n"
+    );
+}
+
+/// The glued-only boundary, pinned **as measured** — every one of these rows answers
+/// what it answered before task #420, and they are the reason the new arms are
+/// glued-only (decision D2) and the pattern-list position keeps its own answers
+/// (decision D3, task #524's). `tools/complexity.py` and the review both call this
+/// the killable part of the rule: each row answers through a different half of it.
+#[test]
+fn the_glued_only_boundary_stays_as_measured() {
+    for (script, want_out, want_rc, needle) in [
+        // A pattern-slot `;&` is the operator, not the terminator (#524's position).
+        (
+            "case a in a;& b) echo B;; esac",
+            "",
+            1,
+            "case: empty pattern",
+        ),
+        (
+            "case x in 1 ;& ) echo hit;; esac",
+            "",
+            1,
+            "case: empty pattern",
+        ),
+        (
+            "case x in x) echo hi ;& ) ;; esac",
+            "",
+            1,
+            "case: empty pattern",
+        ),
+        (
+            "case a in a) echo A;& ) echo B;; esac",
+            "",
+            1,
+            "case: empty pattern",
+        ),
+        // A spaced `;` is not the glued pair: the plain `;;` window owns the row.
+        (
+            "case a in a) builtin echo X ; ;& b) echo B;; esac",
+            "",
+            1,
+            "case: empty pattern",
+        ),
+        // A `;` glued to nothing, and a `&` glued to nothing, are body data — the
+        // accepted `&` family (bash rc 2 on both).
+        ("case x in a) echo a ; & esac", "", 0, ""),
+        // A non-keyword word keeps its whole word: `;&esac` is one word, so the
+        // block never closes (the general word-break rule is #316/#470/#422/#499's).
+        (
+            "case a in a) echo y;&esac",
+            "",
+            1,
+            "'case' is missing its closing 'esac'",
+        ),
+        // The price of decision D1: bash reads `;;` then a newline then `&` as a
+        // syntax error, fdshell reads the plain `;;` and answers the `&` in the next
+        // clause's pattern slot.
+        (
+            "case a in a) echo A;;\n& b) echo B;;\nesac",
+            "",
+            1,
+            "case: empty pattern",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want_out, want_rc), "{script}: {err}");
+        if !needle.is_empty() {
+            assert!(err.contains(needle), "{script}: {err}");
+        }
     }
 }
 
@@ -1095,8 +1351,8 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
 }
 
 /// The `;`/`;;`/`&` family around an arm, pinned **as measured**: the accepted
-/// leniencies (a lone `;`, a trailing `&`, the `;&` closer, a closer-shaped word
-/// in the arm, the glued `;;b)esac` of task **#421**), and the rejects that stay
+/// leniencies (a lone `;`, a trailing `&`, a closer-shaped word in the arm, the
+/// glued `;;b)esac` of task **#421**), and the rejects that stay
 /// rc 1 where bash is rc 2. `case x in a) ; esac` is the accepted leniency this
 /// task deliberately does not tighten (the plan's open question 2). A `)` with
 /// no word before it is no longer here: task **#419** closed it, pinned in
@@ -1106,7 +1362,9 @@ fn the_semi_family_around_an_arm_stays_as_measured() {
     for script in [
         "case x in a) echo hi; esac",
         "case x in a) echo hi & esac",
-        "case x in a) echo hi;& esac",
+        // The `;&` closer of the same shape is the terminator family's row now
+        // (task #420): [`the_semi_and_ampersand_clause_terminators_run_the_next_clause`]
+        // carries it with the stdout assertion this loop could only leave out.
         "case x in a) echo esac;; esac",
         "case x in a) ; esac",
     ] {
@@ -1135,9 +1393,11 @@ fn the_semi_family_around_an_arm_stays_as_measured() {
 /// text, never by a frame — LESSONS). Task **#419** closed this family: the
 /// depth-0 parens behind an argument, behind an operator token, or with no word
 /// before it at all. The rows with a **matching** arm answer at the parse gate,
-/// not at the runtime the shape used to reach. `;&` itself stays task **#420**'s
-/// (the terminator is bash-equal); it is the operator predecessor here that
-/// this task's depth rule closes.
+/// not at the runtime the shape used to reach. The `;& )` row is **gone** (task
+/// **#420**): the `;&` behind the arm's `)` is the terminator, the paren is past the
+/// window, and the verdict comes from the next clause's empty pattern list — pinned
+/// in [`an_operator_word_in_the_pattern_list_is_a_parse_error`]. The `& )` and `| )`
+/// operator-predecessor rows are what this task's depth rule closes.
 #[test]
 fn a_paren_the_arm_command_list_cannot_take_is_refused() {
     const NEEDLE: &str = "case arm: unexpected ')' — a command list cannot take a paren";
@@ -1181,7 +1441,6 @@ fn a_paren_the_arm_command_list_cannot_take_is_refused() {
         // rule stays clean here), and the arm's command list cannot take it.
         "case x in x) echo hi | ) ;; esac",
         "case x in x) echo hi & ) ;; esac",
-        "case x in x) echo hi ;& ) ;; esac",
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 1), "{script}: {err}");
