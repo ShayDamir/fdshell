@@ -30,6 +30,10 @@ pub enum AppError {
     /// script file contains NUL bytes; strip them and run it again
     ScriptNul,
     /// impossible
+    // Truly never: `cli.rs`'s `as_bytes()` is ShortCStr bookkeeping (only BadState) on
+    // argv words, and `repl/line/reader.rs` keeps `pos <= len` by its own invariant, so
+    // `get(pos..len)` and the `get(..i)` fed by `position()` on that same slice stay in
+    // range. Chore #516: excluded from later respawns.
     Never,
 }
 

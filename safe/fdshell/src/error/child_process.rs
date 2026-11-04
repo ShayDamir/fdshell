@@ -39,6 +39,10 @@ pub(crate) enum ChildProcessError {
     /// user function in a pipeline stage failed
     UserFunctionFailed,
     /// impossible error state (should never occur)
+    // Truly never: `replacer.rs` folds word text that the parser keeps NUL-free, and
+    // `child/error.rs`'s §4.17 arm only relabels `BuiltinError::Never`, whose sites all
+    // sit in the proven classes (ShortCStr bookkeeping, same-function bounds, complete
+    // dispatch predicates). Chore #516: excluded from later respawns.
     Never,
 }
 

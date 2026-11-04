@@ -32,6 +32,12 @@ pub enum RecvFdError {
     /// control data truncated by kernel (MSG_CTRUNC)
     CtrlTruncated,
     /// impossible
+    // Truly never: `recv_fd.rs`'s cmsg guard needs a short SCM_CREDENTIALS payload,
+    // and the kernel rejects a truncated one at send time
+    // (tests/shellfd.rs::test_recv_fd_truncated_creds); its close() arm is §4.4's
+    // propagation of a kernel-delivered fd's error, and no such fd fails close
+    // (tests/shellfd.rs::test_recv_fd_keeps_first_closes_rest).
+    // Chore #516: excluded from later respawns.
     Never,
     /// no SCM_RIGHTS fd in message
     NoFd,

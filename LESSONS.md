@@ -100,6 +100,15 @@ an argument-parsing entry point is a domain error too — `signalfd --flags
 0x<non-UTF-8>` answers `SignalfdBadFlag`, because the word is the user's and
 the printed message can name it.
 
+Two more classes join this adjudication. **Command-substitution output** is an
+ingestion point too, and it does answer a domain variant: `v=$(printf 'a\0b'); echo
+"$v"` reports `ResolveError::NulByte` — the *wording* naming a variable name while
+the NUL came from substituted data is a §4.7 wording fix for its own task, not a
+`Never`. And the **fork path is not an escape hatch** for the RefCell class:
+`fork_pidfd_cell` calls `reset_after_fork()` in the child, so a `ForkCellError`
+needs a borrow *held* across a nested borrow of the same cell — see
+LESSONS: "Never hold a ForkCell borrow across a recursive call that re-borrows".
+
 Pins: the printed-words row
 `tests/cli_args.rs::script_file_with_a_nul_byte_names_the_nul_and_not_an_impossible_state`
 — the rc alone cannot tell these paths apart, every one of them exits 1 — beside

@@ -11,6 +11,10 @@ pub(crate) enum CaptureError {
     // §4.2 prefers plain variants; counts required for actionable message (§4.7).
     Incomplete { expected: usize, received: usize },
     /// internal invariant violated
+    // Truly never: the only producer is `capture/slot.rs`'s `finish`, which
+    // `do_captures` runs only after every slot passes `satisfied()`, and a slot with
+    // no cap satisfies only through a non-empty `entries`. Chore #516: excluded from
+    // later respawns.
     Never,
 }
 

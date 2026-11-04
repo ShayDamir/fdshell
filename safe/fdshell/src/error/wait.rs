@@ -22,6 +22,11 @@ pub(crate) enum WaitError {
     /// reaping a background task failed
     Reap,
     /// impossible error state (should never occur)
+    // Truly never: all eight sites are ForkCell borrows, and a clash needs a borrow
+    // held across a nested borrow of the same cell — the tree keeps that rule, and the
+    // fork child cannot inherit a stale count (`reset_after_fork`).
+    // Chore #516: excluded from later respawns.
+    // LESSONS: "Never hold a ForkCell borrow across a recursive call"
     Never,
 }
 

@@ -12,6 +12,10 @@ pub(crate) enum CmdSubstError {
     /// command substitution output exceeds the capture limit; produce less output or write to a file
     OutputTooLarge,
     /// impossible error state (should never occur)
+    // Truly never: its only producer runs inside `nest::deeper`, which rejects a
+    // borrow held from the caller before its body runs (that case bails as
+    // `NestingTooDeep`), so the cell is free when this borrow runs.
+    // Chore #516: excluded from later respawns.
     Never,
 }
 

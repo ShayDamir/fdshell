@@ -18,6 +18,10 @@ pub(crate) enum LaunchError {
     /// failed to receive the last argument from the child
     LastArg,
     /// impossible error state (should never occur)
+    // Truly never: `last_arg.rs`'s tag check only ever sees the child's own `$_`
+    // message — it is the first message on the socket, a builtin sending captures
+    // runs only after the exec — and its `get(..n)` bound is a read count bounded by
+    // the buffer (§4.11). Chore #516: excluded from later respawns.
     Never,
 }
 
