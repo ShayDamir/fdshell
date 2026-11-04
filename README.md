@@ -721,6 +721,17 @@ silent no-op. The operand is never an option here: `-f` and `-v` are read as nam
 [POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md) by task #387). The rule is pinned
 in `tests/unset.rs::a_bare_unset_names_a_variable_first_and_a_function_second`.
 
+`name=(words)` is a **string array** assignment (task #422): each word inside the
+parentheses is one element, on its own through the ordinary word pipeline
+(substitution, `IFS` splitting, glob), so `a=($(echo 1 2))` has two elements and
+`a=("*")` has one. `name+=(words)` appends, `name[idx]=value` writes one element,
+and `unset name` takes the whole store entry. One name is one namespace: a plain
+write to a name the store holds replaces element 0, and a scalar answers index 0
+(`a=hello; echo "${a[0]}"` is `hello`), so the two writers cannot drift.
+`local name` and `declare` do not scope the store yet, and the `%` namespace
+stays fdshell's fd form (`echo "[%a]"` prints `%a`, never the array). Pinned in
+`tests/arrays.rs`.
+
 ### Parameter expansion
 
 | Form | Result |
@@ -734,6 +745,18 @@ in `tests/unset.rs::a_bare_unset_names_a_variable_first_and_a_function_second`.
 | `${name%pat}` / `${name%%pat}` | remove the shortest/longest matching suffix |
 | `${#name}` | length of the value |
 | `${!name}` | value of the variable whose name is `name`'s value |
+| `${name[idx]}` | the element of a string array (a mere scalar answers index 0) |
+| `${name[@]}` / `${name[*]}` | the elements as separate words / joined with the first `IFS` byte |
+| `${#name[@]}` / `${#name[idx]}` | the element count / the length of one element |
+
+The array reads obey the same two join rules as the positional ones (LESSONS:
+"$@ has two join rules, selected by the trigger byte's quote bit") — a fully
+quoted `[@]` keeps every element a field of its own, a fully quoted `[*]` joins
+them into one, and an embedded arm agrees with the whole-word one; the empty
+array keeps the positional contract of task #219 (`"${a[@]}"` yields no field at
+all, `"${a[*]}"` one empty field). `[@]`/`[*]` never bail under `set -u` (an
+unset name gives nothing), an unresolved `[idx]` does. Pinned in
+`tests/arrays.rs`.
 
 The positional and special parameters are also available: `$1`, `$2`, … are
 the arguments, `$#` the argument count, `$0` the program name, `$?` the last
@@ -1211,9 +1234,10 @@ and the same holds for a definition behind a `;` or inside the arm's
 `a) echo hi | (cat) ;;`, `a) g() ( : ) ;;`). An **array-literal assignment**
 carries its group's `(` **mid-word** — the tokenizer's word for `m=(1)` is `m=(1`
 — so `case x in a) m=(1) ;; esac`, `a) x=(1) y=2 ;;` and `a) arr=("$@") ;;` parse
-at rc 0 as bash does; fdshell has no array runtime, so the assignment itself
-dispatches the literal's `)` as a command at run time, exactly as it does at top
-level (task #422) — the parse is the gate here. The paren test reads a word's
+at rc 0 as bash does; the parse is the gate here, and since task #422 assembles
+the literal at the token level the run is an assignment too —
+`case x in x) m=(1); echo done ;; esac` prints `done` at rc 0 with clean stderr
+(bash). The paren test reads a word's
 bytes **with its quote mask** and asks the counter only in **command position**,
 so a quoted `(` (`a) echo "x(" b) ;;`) and an
 escaped one (`a) echo x\() ;;`, where the mask marks the pair unquoted and only

@@ -1276,7 +1276,8 @@ fn case_clauses_without_a_semi_separator_are_a_parse_error() {
 /// position), a subshell the arm wrote (`(cat)`, `echo hi | (cat)`,
 /// `g() ( : )`, `(true) && …`), and an **array-literal assignment**, whose group
 /// `(` sits mid-word in the tokenizer's word (`m=(1`, so `a) m=(1) ;;` and the
-/// assignments inside the arm's bodies parse; running one is task **#422**).
+/// assignments inside the arm's bodies parse; task **#422** has since landed the
+/// run, so a matching arm's `m=(1)` is an assignment and files nothing).
 /// bash parses all of these inside the arm, rc 0, and fdshell must parse them —
 /// the arm's own paren nesting decides it, not the neighbouring word (`( : )`
 /// closes its subshell behind a command-position word) and not the word's two
@@ -1308,8 +1309,9 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
         // mid-word: the tokenizer's word is `m=(1` and the array's `)` is a token
         // of its own, so only a scan over the word's whole byte range sees the
         // group. The arm's pattern never matches, so these pin the **parse** —
-        // fdshell has no array runtime (task #422) and the literal's `)` runs as a
-        // command at top level exactly as it does here.
+        // task #422 has landed the run (the elements live in
+        // `state/shell_arrays.rs`), and an arm that never runs files nothing
+        // here either.
         "case x in a) m=(1) ;; esac",
         "case x in a) x=(1) y=2 ;; esac",
         "case x in a) echo hi; x=(1) ;; esac",
@@ -1342,12 +1344,13 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
     // it (bash prints `y`).
     let (out, err, code) = run("case x in x) f() { builtin echo y; }; f ;; esac");
     assert_eq!((out.as_str(), code), ("y\n", 0), "stderr={err}");
-    // The arm that **matches** runs past its array literal (bash prints `done`).
-    // fdshell has no arrays, so the literal's `)` is reported as a command on
-    // stderr — byte for byte what the same assignment does at top level, and
-    // task #422's runtime half. The pin here is the parse and the arm running.
+    // The arm that **matches** runs past its array literal, and task #422 closed
+    // the run: the literal is stored and nothing is dispatched, so the arm prints
+    // `done` at rc 0 with nothing on stderr (bash). The store and the reads are
+    // pinned in `tests/arrays.rs`.
     let (out, err, code) = run("case x in x) m=(1); echo done ;; esac");
     assert_eq!((out.as_str(), code), ("done\n", 0), "stderr={err}");
+    assert_eq!(err, "", "the stored literal must report nothing");
 }
 
 /// The `;`/`;;`/`&` family around an arm, pinned **as measured**: the accepted

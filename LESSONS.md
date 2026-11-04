@@ -3959,9 +3959,11 @@ and skipping the pair one byte at a time lands on the same byte as one jump of t
 the kill is a direct call on the counter with a hand-written mask
 (`[Quoted, Unquoted, Unquoted]` — `MaskBit::from_quoted`): a quoted `\` consumes
 nothing behind it, an unquoted escape pair consumes its second byte. Running an array
-assignment is task **#422**'s word-model half (fdshell has no arrays; the arm
-dispatches the literal's `)` as a command, as at top level); the **parse** gate is
-this rule's.
+assignment was task **#422**'s word-model half and **landed** there (the region is
+assembled at the token level in `parse/array_literal.rs`, the elements live in
+`state/shell_arrays.rs`, the reads are `substitute/array_fields.rs` — the arm's
+`m=(1)` is an assignment, nothing dispatches the literal's `)`); the **parse** gate
+is this rule's.
 
 Two layer facts. **A heredoc body is never in the region**:
 `parse/token/statement.rs::tokenize_statement` blanks it, so `case x in x) cat <<T`
@@ -3999,7 +4001,9 @@ quoted-backslash arms; the refused family is
 (`tests/case.rs::the_semi_and_ampersand_clause_terminators_run_the_next_clause`,
 `tests/case.rs::the_glued_only_boundary_stays_as_measured`,
 `parse/case_clause/terminator/tests.rs`). The open rows of the family
-are tasks #418, #316, #422. **Follow-up:** when `(` becomes an operator
+are tasks #418, #316 (task #422's word-model half landed: the arm's `m=(1)` is an
+assignment and a matching arm runs it silently, pinned in `tests/arrays.rs`).
+**Follow-up:** when `(` becomes an operator
 token (task #316), the two **byte readers** of `stray.rs` — the `((` region rule and
 the `opens_groups` **depth counter** (mid-word `(` bytes included) — move to the
 token list, so a subshell's `(`/`)` pair becomes operators there and `(w`/`f(`/`m=(1`
