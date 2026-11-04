@@ -13,9 +13,11 @@
 /// same shape is `parse::heredoc::operator_indices`, which starts its scan at
 /// index 0 and so reads the first word of every stage (task #345).
 pub(super) fn precedes_pipe(line: &[u8], i: usize) -> bool {
-    let mut k = i;
-    while k > 0 {
-        k -= 1;
+    // The walk's own byte tests terminate it, including the read at index 0;
+    // the old `k > 0` bound was a shield no input could reach with a
+    // non-matching byte behind it, so its mutants were invisible (rule 18,
+    // task #513) — the exact range carries no operators.
+    for k in (0..i).rev() {
         match line.get(k) {
             Some(&b' ') | Some(b'\t') => continue,
             Some(b'|') => return crate::parse::pipeline_pipe(line, k),

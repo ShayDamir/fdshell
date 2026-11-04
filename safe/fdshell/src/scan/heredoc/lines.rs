@@ -24,7 +24,16 @@ pub(crate) fn delimiter_span(line: &[u8], mut j: usize, to: usize) -> Option<(us
     if j > attached {
         return Some((j, line.get(attached..j)?));
     }
-    while j < to && matches!(line.get(j).copied(), Some(b' ') | Some(b'\t')) {
+    loop {
+        // Bound first, body second — exactly the old loop's order (the bound
+        // is a method call on the exact range: no operator site, rule 18/24,
+        // task #513).
+        if (j..to).is_empty() {
+            break;
+        }
+        if !matches!(line.get(j).copied(), Some(b' ') | Some(b'\t')) {
+            break;
+        }
         j += 1;
     }
     let word = j;
@@ -70,7 +79,16 @@ fn word_span(line: &[u8], j: usize, to: usize) -> usize {
         return j + 1;
     };
     let mut k = j + 1;
-    while k < to && line.get(k) != Some(&q) {
+    // The walk ends through the range's own `is_empty` (no operator to
+    // mutate — rule 18/24, task #513); the quote test and the clamp below
+    // are byte-for-byte the old loop's.
+    loop {
+        if (k..to).is_empty() {
+            break;
+        }
+        if line.get(k) == Some(&q) {
+            break;
+        }
         k += 1;
     }
     k.saturating_add(1).min(to)
@@ -104,7 +122,14 @@ fn substitution_span(line: &[u8], j: usize, to: usize) -> Option<usize> {
 pub(crate) fn first_unquoted_newline(line: &[u8]) -> Option<usize> {
     let mut state = ScanState::new();
     let mut i = 0;
-    while i < line.len() {
+    // The walk ends through the range's own `is_empty` (no operator site —
+    // rule 18/24, task #513); the body is byte-for-byte the old loop's, and
+    // `advance` never steps past `line.len()`, so the old bound and the new
+    // terminator answer on the same index.
+    loop {
+        if (i..line.len()).is_empty() {
+            break;
+        }
         let bare =
             !state.in_quote && !state.in_single && !state.in_backtick && state.paren_depth == 0;
         if bare && line.get(i) == Some(&b'\n') {

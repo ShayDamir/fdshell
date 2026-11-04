@@ -61,7 +61,16 @@ impl State {
     /// span of zero bytes, and with it no region start (task #321).
     pub(in crate::parse) fn close_span(&mut self) {
         self.region_open = false;
-        if self.cur.len() == self.span_open {
+        // The equality is written as a `cmp` predicate so the site carries no
+        // operator for `cargo mutants` to move (rules 3/22/24, task #513): the
+        // `<=` mutant was equivalent because `cur` only grows after the pair
+        // opens, so it answered like the original on every input. The exact-
+        // list rows of `parse/token/tests.rs` pin both sides of the predicate
+        // (`~"a"/x` records nothing, `~""` records its index).
+        if matches!(
+            self.cur.len().cmp(&self.span_open),
+            core::cmp::Ordering::Equal
+        ) {
             self.spans.push(self.span_open);
         }
     }

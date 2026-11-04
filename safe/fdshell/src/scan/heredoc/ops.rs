@@ -121,7 +121,15 @@ pub(crate) fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
             found.push(Site { op: i, dash, fd });
             let tail = if dash { i + 3 } else { i + 2 };
             let next = delimiter_span(line, tail, to).map_or(tail, |(next, _)| next);
-            while i < next {
+            // The walk is driven by its own arrival at `next` (rule 18, task
+            // #513): the byte at the word end is a word-break byte the outer
+            // loop would feed to the same `advance`, so a bound that allowed
+            // one extra step changed nothing the answer could see — the range
+            // test is a method call and carries no mutant.
+            loop {
+                if (i..next).is_empty() {
+                    break;
+                }
                 i = state.advance(line, i);
             }
             continue;
