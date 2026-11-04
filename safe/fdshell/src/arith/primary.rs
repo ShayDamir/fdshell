@@ -8,12 +8,13 @@ use super::ast::Ast;
 use super::expr::{R, parse_expr, peek_op};
 use super::lex::Tok;
 use super::op::Op;
+use crate::depth::guarded;
 use crate::error::resolve::ResolveError;
 
 /// The `**` precedence; unary binds tighter (bash: `-2**2` = `(-2)**2` = 4).
 const POW_PREC: u8 = 11;
 
-pub(super) fn parse_unary(toks: &[Tok], pos: &mut usize) -> R {
+pub(super) fn parse_unary(toks: &[Tok], pos: &mut usize, depth: u32) -> R {
     // The operand parses above `**`, so `-2**2` is `(-2)**2` = 4 (bash).
     let operand_prec = POW_PREC + 1;
     let make: Option<fn(Box<Ast>) -> Ast> = match peek_op(toks, *pos) {
@@ -26,13 +27,27 @@ pub(super) fn parse_unary(toks: &[Tok], pos: &mut usize) -> R {
         _ => None,
     };
     let Some(make) = make else {
-        return parse_primary(toks, pos);
+        return parse_primary(toks, pos, depth);
     };
     *pos += 1;
-    Ok(make(Box::new(parse_expr(toks, pos, operand_prec)?)))
+    Ok(make(Box::new(parse_expr(
+        toks,
+        pos,
+        operand_prec,
+        depth + 1,
+    )?)))
 }
 
-fn parse_primary(toks: &[Tok], pos: &mut usize) -> R {
+/// The primary layer's entry, guarded like `expr.rs`'s: it caps the paren-group
+/// cycle (`parse_primary` → `parse_comma` → … → `parse_primary`), one level per
+/// group.
+fn parse_primary(toks: &[Tok], pos: &mut usize, depth: u32) -> R {
+    guarded(depth, ResolveError::ArithTooDeep, || {
+        parse_primary_at(toks, pos, depth)
+    })
+}
+
+fn parse_primary_at(toks: &[Tok], pos: &mut usize, depth: u32) -> R {
     let Some(tok) = toks.get(*pos).cloned() else {
         bail!(ResolveError::ArithSyntax);
     };
@@ -44,7 +59,7 @@ fn parse_primary(toks: &[Tok], pos: &mut usize) -> R {
         Tok::LastBg => Ok(Ast::LastBg),
         Tok::LParen => {
             // A paren group takes the comma level, so `(1,2)+3` is `2+3` = 5.
-            let inner = super::parse::parse_comma(toks, pos)?;
+            let inner = super::parse::parse_comma(toks, pos, depth + 1)?;
             match toks.get(*pos) {
                 Some(Tok::RParen) => {
                     *pos += 1;

@@ -786,3 +786,56 @@ fn quoted_dollar_at_in_let_glues_the_positionals() {
     assert!(guard.status.success());
     assert_eq!(str::from_utf8(&guard.stdout).unwrap().trim(), "7");
 }
+
+/// Deep **data** reaching the evaluator is capped by the shared guard
+/// (`depth.rs`): the flat chain's depth is the AST walk's, so 1 000 operators
+/// compute as bash computes them and one operator past the cap is a clean
+/// report at rc 1 — the script answers instead of aborting on a stack overflow.
+#[test]
+fn arith_flat_chain_from_data_is_capped() {
+    let script = |ops: usize| format!("d='{}1'; let \"$d\"; echo AFTER", "1+".repeat(ops));
+    for (ops, want_after, want_rc) in [(900, "AFTER\n", 0), (1000, "AFTER\n", 0), (1001, "", 1)] {
+        let out = run(&script(ops));
+        assert_eq!(
+            str::from_utf8(&out.stdout).unwrap(),
+            want_after,
+            "{ops} operators"
+        );
+        assert_eq!(out.status.code(), Some(want_rc), "{ops} operators");
+        let err = str::from_utf8(&out.stderr).unwrap();
+        assert!(!err.contains("stack overflow"), "{err}");
+        if want_rc == 0 {
+            assert!(err.is_empty(), "{err}");
+        } else {
+            assert!(err.contains("nested too deeply"), "{err}");
+        }
+    }
+}
+
+/// The other shape of the same source: nested parens make the **parse**
+/// recursion linear. The parse guard counts the parser's own entry, so its
+/// boundary sits one input level earlier than the eval one.
+#[test]
+fn arith_paren_nesting_is_capped() {
+    let script = |levels: usize| {
+        format!(
+            "echo $(( {}1{} ))",
+            "( ".repeat(levels),
+            " )".repeat(levels)
+        )
+    };
+    for (levels, want, want_rc) in [(900, "1\n", 0), (999, "1\n", 0), (1000, "", 1)] {
+        let out = run(&script(levels));
+        assert_eq!(
+            str::from_utf8(&out.stdout).unwrap(),
+            want,
+            "{levels} levels"
+        );
+        assert_eq!(out.status.code(), Some(want_rc), "{levels} levels");
+        let err = str::from_utf8(&out.stderr).unwrap();
+        assert!(!err.contains("stack overflow"), "{err}");
+        if want_rc == 1 {
+            assert!(err.contains("nested too deeply"), "{err}");
+        }
+    }
+}

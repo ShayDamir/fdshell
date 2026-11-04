@@ -33,14 +33,15 @@ pub(crate) fn eval(body: &[u8], cell: &ForkCell<ShellState>) -> Result<i64, Repo
 }
 
 /// Recursive entry: re-evaluate a variable's value as an expression; `depth`
-/// counts the variable-reference chain (capped to catch `x=x`).
+/// is the shared evaluation nesting — the variable-reference chain (capped to
+/// catch `x=x`) and the parse/eval recursion, both via `depth.rs`.
 pub(crate) fn eval_body(
     body: &[u8],
     cell: &ForkCell<ShellState>,
     depth: u32,
 ) -> Result<i64, Report<ResolveError>> {
     let toks = lex::lex(body)?;
-    let ast = parse::parse(&toks)?;
+    let ast = parse::parse(&toks, depth)?;
     eval::eval_ast(&ast, cell, depth)
 }
 
