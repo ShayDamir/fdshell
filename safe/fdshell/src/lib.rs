@@ -21,6 +21,7 @@ mod command_word;
 mod comment;
 mod cond;
 mod debug;
+mod depth;
 mod envfilter;
 mod error;
 mod exec;
