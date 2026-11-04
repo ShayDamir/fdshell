@@ -10,9 +10,14 @@ use builtins::error::BuiltinError;
 use core::ffi::CStr;
 use error_stack::{Report, bail};
 
-pub(super) fn parse_primary(expr: &[&CStr], pos: &mut usize) -> Result<Expr, Report<BuiltinError>> {
+pub(super) fn parse_primary(
+    expr: &[&CStr],
+    pos: &mut usize,
+    depth: u32,
+) -> Result<Expr, Report<BuiltinError>> {
     if peek(expr, *pos).is_some_and(|t| t.to_bytes() == b"(") {
-        return parse_group(expr, pos);
+        // Entering a group is the nesting level the parent's guard counts.
+        return parse_group(expr, pos, depth + 1);
     }
     let Some(tok) = peek(expr, *pos) else {
         bail!(BuiltinError::TestUsage)
@@ -35,9 +40,9 @@ pub(super) fn parse_primary(expr: &[&CStr], pos: &mut usize) -> Result<Expr, Rep
     Ok(Expr::Single(lhs))
 }
 
-fn parse_group(expr: &[&CStr], pos: &mut usize) -> Result<Expr, Report<BuiltinError>> {
+fn parse_group(expr: &[&CStr], pos: &mut usize, depth: u32) -> Result<Expr, Report<BuiltinError>> {
     next(expr, pos)?; // the `(` we just matched
-    let inner = parse_or(expr, pos)?;
+    let inner = parse_or(expr, pos, depth)?;
     if peek(expr, *pos).is_none_or(|c| c.to_bytes() != b")") {
         bail!(BuiltinError::TestUsage)
     }

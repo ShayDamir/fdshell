@@ -9,14 +9,14 @@ use error_stack::{Report, bail};
 
 /// Split the amble on top-level commas and expand each element recursively,
 /// concatenating the results (bash's `expand_amble`).
-pub(super) fn expand_amble(amble: &[u8]) -> Result<Vec<Vec<u8>>, Report<ParseError>> {
+pub(super) fn expand_amble(amble: &[u8], depth: u32) -> Result<Vec<Vec<u8>>, Report<ParseError>> {
     let mut out: Vec<Vec<u8>> = Vec::new();
     let mut start = 0usize;
     let mut i = 0usize;
     while i <= amble.len() {
         let (ci, found, _) = gobble(amble, i, b',');
         let element = amble.get(start..ci).ok_or(ParseError::Never)?;
-        match super::expand_word(element)? {
+        match super::expand_word(element, depth)? {
             Some(words) => out.extend(words),
             None => out.push(element.to_vec()),
         }

@@ -434,3 +434,55 @@ fn test_malformed_logical_expressions_exit_2() {
         assert!(err.contains("test"), "stderr={err:?}");
     }
 }
+
+/// Both shapes that the `test` parser recurses on per input level — a `( … )`
+/// group and a `!` prefix — ride the shared cap (`depth.rs`, task #523). Inside
+/// it the answer is bash's; past it the builtin reports and the script keeps
+/// running: the status is the usage status and the line after the failing `test`
+/// still runs, which is what a stack overflow used to steal.
+#[test]
+fn nested_groups_and_negation_chains_are_capped() {
+    fn group(body: &str) -> String {
+        format!("( {body} )")
+    }
+
+    fn negation(body: &str) -> String {
+        format!("! {body}")
+    }
+
+    for nest in [group as fn(&str) -> String, negation] {
+        let script = |levels: usize| {
+            let mut data = String::from("x");
+            for _ in 0..levels {
+                data = nest(&data);
+            }
+            // The nesting arrives as data: an unquoted expansion splits it into
+            // the words the parser sees (the path a filename takes).
+            format!("d='{data}'; test $d; echo $?")
+        };
+        for (levels, want_status, want_report) in [
+            (
+                900, "0
+", false,
+            ),
+            (
+                1000, "0
+", false,
+            ),
+            (
+                1001, "2
+", true,
+            ),
+        ] {
+            let (out, err, code) = run(&script(levels));
+            assert_eq!(code, 0, "{levels} levels: the script survives");
+            assert_eq!(out, want_status, "{levels} levels");
+            assert!(!err.contains("stack overflow"), "{err}");
+            if want_report {
+                assert!(err.contains("nested too deeply"), "{err}");
+            } else {
+                assert!(err.is_empty(), "{err}");
+            }
+        }
+    }
+}

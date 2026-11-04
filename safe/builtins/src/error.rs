@@ -40,6 +40,8 @@ pub enum BuiltinError {
     TestNonInteger,
     /// test: missing closing ']'
     TestMissingCloseBracket,
+    /// test: expression nested too deeply; reduce the nesting of `( )` groups and `!`
+    TestNestedTooDeep,
     /// impossible error state (should never occur)
     Never,
 }

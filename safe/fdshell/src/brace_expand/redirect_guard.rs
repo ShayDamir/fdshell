@@ -32,7 +32,7 @@ pub(super) fn guard(tokens: &[Token], i: usize, span: &[u8]) -> Result<(), Repor
     let Some(region) = span.get(off..) else {
         return Ok(());
     };
-    let Some(words) = expand_word(region).change_context(CmdError::Parse)? else {
+    let Some(words) = expand_word(region, 0).change_context(CmdError::Parse)? else {
         return Ok(());
     };
     let non_empty = words.iter().filter(|w| !w.is_empty()).count();

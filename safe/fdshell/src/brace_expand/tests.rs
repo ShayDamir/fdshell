@@ -41,7 +41,7 @@ fn assert_too_many_words(line: &str) {
 }
 
 fn words(word: &str) -> Option<Vec<Vec<u8>>> {
-    expand_word(word.as_bytes()).unwrap()
+    expand_word(word.as_bytes(), 0).unwrap()
 }
 
 fn seq(start: i64, end: i64, incr: i64) -> SeqSpec {
@@ -444,7 +444,7 @@ fn cross_product_cap() {
     // 257 x 257 = 66_049 > MAX_WORDS: error (pins the boundary).
     assert!(cross_total(257, 257).is_err());
     // End-to-end: an over-cap cross surfaces as a parse error.
-    assert!(expand_word(b"{1..300}{1..300}").is_err());
+    assert!(expand_word(b"{1..300}{1..300}", 0).is_err());
 }
 
 #[test]
@@ -480,7 +480,7 @@ fn count_overflow_is_over_cap() {
         Some(ParseError::BraceExpansionTooManyWords)
     ));
     // End-to-end: the same range through a word is a clean error.
-    assert!(expand_word(b"{0..9223372036854775807}").is_err());
+    assert!(expand_word(b"{0..9223372036854775807}", 0).is_err());
     // A usize product overflow also errors.
     assert!(cross_total(usize::MAX, 2).is_err());
 }

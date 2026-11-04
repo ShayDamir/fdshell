@@ -486,3 +486,26 @@ fn brace_expanded_words_glued_to_a_paren_split_at_the_boundary() {
     let (out, err, code) = run("echo {if,fi}(x)");
     assert_eq!((out.as_str(), code), ("if (x fi (x )\n", 0), "{err:?}");
 }
+
+/// The shape that recurses per level (`expand_word` ↔ `expand_amble`): nesting
+/// with one comma each, so the word count — 902, 1 001 — stays far below
+/// `MAX_WORDS` (65 536) and cannot be what answers. The shared depth cap
+/// (`depth.rs`, task #523) is; and it answers with the same clean report the
+/// word-count cap gives, at the script's own status, not a stack-overflow abort.
+#[test]
+fn deep_nesting_reports_the_depth_cap() {
+    let word = |levels: usize| format!("{}{{p,q}}{}", "{a,".repeat(levels), "}".repeat(levels));
+    for (levels, words, past) in [(900usize, 902, false), (999, 1001, false), (1000, 0, true)] {
+        let (out, err, code) = run(&format!("echo {}", word(levels)));
+        assert!(!err.contains("stack overflow"), "{err}");
+        if past {
+            assert_eq!(code, 1, "{levels} levels is past the cap");
+            assert_eq!(out, "", "{levels} levels");
+            assert!(err.contains("nested too deeply"), "{err}");
+        } else {
+            assert_eq!(code, 0, "{levels} levels");
+            assert_eq!(out.split_whitespace().count(), words, "{levels} levels");
+            assert!(err.is_empty(), "{err}");
+        }
+    }
+}

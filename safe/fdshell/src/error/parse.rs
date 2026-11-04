@@ -42,6 +42,8 @@ pub(crate) enum ParseError {
     InvalidRedirect,
     /// brace expansion produced too many words
     BraceExpansionTooManyWords,
+    /// brace expansion nested too deeply; reduce the nesting of brace groups
+    BraceExpansionTooDeep,
     /// break takes at most one argument (a positive loop count)
     BreakTakesAtMostOneArgument,
     /// continue takes at most one argument (a positive loop count)

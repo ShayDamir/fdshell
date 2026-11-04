@@ -4,6 +4,7 @@ pub(super) mod concat;
 
 use super::gobbler::{GroupType, gobble};
 use super::seq::{expand_seqterm, valid_seqterm};
+use crate::depth::guarded;
 use crate::error::parse::ParseError;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -40,7 +41,19 @@ fn find_group(text: &[u8]) -> Option<(usize, usize, GroupType)> {
 }
 
 /// Brace-expand one raw token span; `Ok(None)` when the word is unchanged.
-pub(super) fn expand_word(text: &[u8]) -> Result<Option<Vec<Vec<u8>>>, Report<ParseError>> {
+/// The entry is guarded by the shared cap (`depth.rs`): a brace group descended
+/// is one level, so nesting that arrives as data answers with the
+/// `ParseError` the word-count cap answers with, instead of a stack overflow.
+pub(super) fn expand_word(
+    text: &[u8],
+    depth: u32,
+) -> Result<Option<Vec<Vec<u8>>>, Report<ParseError>> {
+    guarded(depth, ParseError::BraceExpansionTooDeep, || {
+        expand_word_at(text, depth)
+    })
+}
+
+fn expand_word_at(text: &[u8], depth: u32) -> Result<Option<Vec<Vec<u8>>>, Report<ParseError>> {
     let Some((gi, close, t)) = find_group(text) else {
         return Ok(None);
     };
@@ -52,19 +65,21 @@ pub(super) fn expand_word(text: &[u8]) -> Result<Option<Vec<Vec<u8>>>, Report<Pa
     let postamble = text.get(close + 1..).ok_or(ParseError::Never)?;
 
     let amble_words = match t {
-        GroupType::Comma => expand_amble(amble)?,
+        GroupType::Comma => expand_amble(amble, depth + 1)?,
         GroupType::Seq => match expand_seqterm(amble) {
             Some(spec) => match spec.mkseq()? {
                 Some(words) => words,
-                None => return seq_literal(preamble, group, postamble),
+                None => return seq_literal(preamble, group, postamble, depth),
             },
-            None => return seq_literal(preamble, group, postamble),
+            None => return seq_literal(preamble, group, postamble, depth),
         },
     };
 
     let mut result = cross(vec![preamble.to_vec()], amble_words)?;
     if !postamble.is_empty() {
-        let post_words = match expand_word(postamble)? {
+        // A trailing group is a sibling, not a level: its word count is what
+        // caps this chain (`seq.rs::MAX_WORDS`), so the depth does not grow.
+        let post_words = match expand_word(postamble, depth)? {
             Some(words) => words,
             None => vec![postamble.to_vec()],
         };
@@ -80,12 +95,13 @@ fn seq_literal(
     preamble: &[u8],
     group: &[u8],
     postamble: &[u8],
+    depth: u32,
 ) -> Result<Option<Vec<Vec<u8>>>, Report<ParseError>> {
     if postamble.is_empty() {
         return Ok(None);
     }
     let base = cross(vec![preamble.to_vec()], vec![group.to_vec()])?;
-    let post_words = match expand_word(postamble)? {
+    let post_words = match expand_word(postamble, depth)? {
         Some(words) => words,
         None => vec![postamble.to_vec()],
     };

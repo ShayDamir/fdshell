@@ -50,7 +50,7 @@ fn rebuild(line: &[u8], tokens: &[Token]) -> Result<ShortCStr, Report<CmdError>>
         }
         if protected.contains(&i) || !span.contains(&b'{') {
             out.extend_from_slice(span);
-        } else if let Some(words) = word::expand_word(span).change_context(CmdError::Parse)? {
+        } else if let Some(words) = word::expand_word(span, 0).change_context(CmdError::Parse)? {
             // A redirect word is bash's `worddef` subject: an operand that
             // expands to a number of non-empty words other than one is
             // `ambiguous redirect`, decided here so the command opens nothing.

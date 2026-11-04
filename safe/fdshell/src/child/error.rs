@@ -24,7 +24,8 @@ pub(crate) fn handle_builtin_error(
         }
         BuiltinError::TestUsage
         | BuiltinError::TestNonInteger
-        | BuiltinError::TestMissingCloseBracket => {
+        | BuiltinError::TestMissingCloseBracket
+        | BuiltinError::TestNestedTooDeep => {
             let _ = writeln!(crate::io::Stderr, "{report:?}");
             Ok(2)
         }
