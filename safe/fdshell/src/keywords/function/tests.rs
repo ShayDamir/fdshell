@@ -33,6 +33,10 @@ fn name_len_rejects_non_definers() {
     // Whitespace splits tokens, so a definer word never holds it.
     assert_eq!(name_len(b"a b"), None);
     assert_eq!(name_len(b"a\tb"), None);
+    // An `=` makes the word an assignment, not a definer: bash reads `a=() …`
+    // as an array assignment (task #422) and rejects `a=b() { … }` outright.
+    assert_eq!(name_len(b"a="), None);
+    assert_eq!(name_len(b"a=b"), None);
 }
 
 /// The four accepted keyword shapes, plus the POSIX form.

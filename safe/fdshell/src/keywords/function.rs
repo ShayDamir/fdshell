@@ -8,8 +8,12 @@ use super::quoted_word;
 use walk::{region_end, skip_word};
 
 /// The definer name length in a definer word: non-empty, no whitespace, `{`,
-/// `}` or `)`, and no `(` except as the last byte (the POSIX opener's `(`,
+/// `}`, `=` or `)`, and no `(` except as the last byte (the POSIX opener's `(`,
 /// whose `)` is the next word). `None` = not a definer word.
+///
+/// An `=` in the word makes it an assignment, never a definer: bash reads
+/// `a=() …` as an array assignment and rejects `a=b() { … }` outright
+/// (task #422), so `a=` and `a=b` name no function.
 ///
 /// A word carrying a `$( … )` region is never a definer word: the region's own
 /// `(` is never the word's last byte ([`walk::word_end`] hands such a word over whole,
@@ -23,7 +27,7 @@ pub(crate) fn name_len(word: &[u8]) -> Option<usize> {
     if len == 0
         || word
             .iter()
-            .any(|&b| b.is_ascii_whitespace() || matches!(b, b'{' | b'}' | b')'))
+            .any(|&b| b.is_ascii_whitespace() || matches!(b, b'{' | b'}' | b')' | b'='))
     {
         return None;
     }
