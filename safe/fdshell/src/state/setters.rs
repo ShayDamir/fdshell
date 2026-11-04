@@ -61,7 +61,8 @@ impl ShellState {
     }
 
     /// Remove a **shell** variable from every store that holds it: the string
-    /// table, the export attribute, and the inherited `environ` row. bash 5.3.9
+    /// table, the array store (task #422), the export attribute, and the
+    /// inherited `environ` row. bash 5.3.9
     /// (measured, task #290) takes the name away from `$name`, from `${name:-x}`
     /// and from the child environment at once, so the `environ` half is what
     /// makes `unset HOME` clear the fallback `substitute::resolve::var_value`
@@ -78,6 +79,7 @@ impl ShellState {
             self.ifs = Self::default_ifs();
         }
         let _ = self.strings.remove(name);
+        self.remove_str_array(name);
         let _ = self.exports.remove(name);
         self.environ.retain(|(k, _)| k != name);
     }

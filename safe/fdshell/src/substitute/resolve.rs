@@ -10,7 +10,18 @@ mod param_value;
 impl ShellState {
     /// Value of `name` in the shell's strings, then the inherited environment.
     /// `crate::arith` resolves arithmetic variables through the same lookup.
+    /// A name the array store holds at index 0 answers with that element
+    /// (task #422: `a=(1 2); echo "$a"` → `1`) — the one place every plain-name
+    /// read (arithmetic, tilde, `cd`/`HOME`, the bare-`$` path, the indirect
+    /// arms) meets the array store, so none of them can drift.
     pub(crate) fn var_value(&self, name: &ShortCStr) -> Option<&ShortCStr> {
+        self.str_element(name, 0)
+            .or_else(|| self.scalar_value(name))
+    }
+
+    /// The scalar lookup the array bridge reads through: the string store, then
+    /// the inherited environment — never the array store (task #422).
+    pub(crate) fn scalar_value(&self, name: &ShortCStr) -> Option<&ShortCStr> {
         self.strings
             .get(name)
             .map(|v| &v.value)

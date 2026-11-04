@@ -61,6 +61,7 @@ pub(crate) fn build() -> ShellState {
     ShellState {
         fds: HashMap::new(),
         arrays: HashMap::new(),
+        str_arrays: HashMap::new(),
         jobs: Jobs::new(),
         strings: seeded_strings(),
         exports: HashMap::new(),

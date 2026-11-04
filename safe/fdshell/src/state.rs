@@ -1,4 +1,4 @@
-use alloc::collections::VecDeque;
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 
@@ -16,6 +16,11 @@ pub use fds::{FdArrayEntry, FdVar};
 pub struct ShellState {
     pub(crate) fds: HashMap<ShortCStr, FdVar>,
     pub(crate) arrays: HashMap<ShortCStr, Vec<FdArrayEntry>>,
+    /// Shell string arrays: `name=(w1 w2 …)`'s elements, sparse and sorted by
+    /// index (bash's `a=(); a[5]=x` answers `${a[@]}` = `x`, `${#a[@]}` = `1`).
+    /// Unprefixed names, so the `strings` namespace; the `%` fd arrays are the
+    /// store above (task #422).
+    pub(crate) str_arrays: HashMap<ShortCStr, BTreeMap<usize, ImportedStr>>,
     /// The background jobs: named (pidvar) + nameless (plain `&`) — see [`Jobs`].
     pub(crate) jobs: Jobs,
     pub(crate) strings: HashMap<ShortCStr, ImportedStr>,
@@ -88,6 +93,7 @@ mod functions;
 pub(crate) mod jobs;
 mod options;
 mod setters;
+mod shell_arrays;
 
 #[cfg(test)]
 mod tests;
