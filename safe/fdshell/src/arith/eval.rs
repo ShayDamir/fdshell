@@ -13,6 +13,9 @@ use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 
+mod short;
+mod update;
+
 /// An arithmetic evaluation result.
 type E = Result<i64, Report<ResolveError>>;
 
@@ -41,10 +44,10 @@ fn eval_node(node: &Ast, cell: &ForkCell<ShellState>, depth: u32) -> E {
         Ast::Pos(a) => eval_ast(a, cell, depth + 1),
         Ast::Not(a) => Ok(i64::from(eval_ast(a, cell, depth + 1)? == 0)),
         Ast::BitNot(a) => Ok(!eval_ast(a, cell, depth + 1)?),
-        Ast::PreInc(a) => update(a, 1, true, cell, depth + 1),
-        Ast::PostInc(a) => update(a, 1, false, cell, depth + 1),
-        Ast::PreDec(a) => update(a, -1, true, cell, depth + 1),
-        Ast::PostDec(a) => update(a, -1, false, cell, depth + 1),
+        Ast::PreInc(a) => update::update(a, 1, true, cell, depth + 1),
+        Ast::PostInc(a) => update::update(a, 1, false, cell, depth + 1),
+        Ast::PreDec(a) => update::update(a, -1, true, cell, depth + 1),
+        Ast::PostDec(a) => update::update(a, -1, false, cell, depth + 1),
         // The comma evaluates its left operand for the side effect only and
         // yields the right operand; the left-to-right order is the same as `Bin`.
         Ast::Comma(l, r) => {
@@ -53,22 +56,8 @@ fn eval_node(node: &Ast, cell: &ForkCell<ShellState>, depth: u32) -> E {
         }
         // `&&`/`||` are boolean like in C: the result is 0 or 1, not the
         // operand's value (bash: `1&&2` is 1, not 2).
-        Ast::Bin(Op::AndAnd, l, r) => {
-            let lv = eval_ast(l, cell, depth + 1)?;
-            if lv == 0 {
-                Ok(0)
-            } else {
-                Ok(i64::from(eval_ast(r, cell, depth + 1)? != 0))
-            }
-        }
-        Ast::Bin(Op::OrOr, l, r) => {
-            let lv = eval_ast(l, cell, depth + 1)?;
-            if lv != 0 {
-                Ok(1)
-            } else {
-                Ok(i64::from(eval_ast(r, cell, depth + 1)? != 0))
-            }
-        }
+        Ast::Bin(Op::AndAnd, l, r) => short::short_circuit(Op::AndAnd, l, r, cell, depth + 1),
+        Ast::Bin(Op::OrOr, l, r) => short::short_circuit(Op::OrOr, l, r, cell, depth + 1),
         Ast::Bin(op, l, r) => binop::binop(
             *op,
             eval_ast(l, cell, depth + 1)?,
@@ -91,17 +80,4 @@ fn eval_node(node: &Ast, cell: &ForkCell<ShellState>, depth: u32) -> E {
             Ok(value)
         }
     }
-}
-
-/// `++`/`--` on an operand: evaluate it, and write the new value back when the
-/// operand is a variable. `pre` yields the new value, `post` the old one.
-/// A non-variable operand is just evaluated with no side effect, which is
-/// bash's rule (`++1` is `1`, `++(1+2)` is `3`).
-fn update(operand: &Ast, delta: i64, pre: bool, cell: &ForkCell<ShellState>, depth: u32) -> E {
-    let old = eval_ast(operand, cell, depth)?;
-    let new = old.wrapping_add(delta);
-    if let Ast::Var(name) = operand {
-        var::set_var(name, new, cell)?;
-    }
-    Ok(if pre { new } else { old })
 }
