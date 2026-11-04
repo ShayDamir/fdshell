@@ -5097,7 +5097,8 @@ rule: `case` patterns, the `case` word and the `for` word list keep the plain
 `trim_semi`, because there the `&` is no slice boundary at all. In the `for`
 word list a plain `&` **is** bash's async operator, and the rule at that
 granularity is a **token gate at the builder** (task #360, it flipped the
-pin-as-measured): `for_block/words.rs::plain_amp` reads the list's tokens and
+pin-as-measured): `for_block/words.rs::rejects_operator_word` reads the list's
+tokens through the ONE predicate of task #524, and
 `for_block.rs::tokens_to_for` bails with the `do` expectation, so the slice
 `trim_semi` owns never carries a plain `&`. Three facts of that gate: bash
 reports the **earliest** offending token, so the gate precedes the closer and
@@ -5107,7 +5108,8 @@ empty-body validators (`for i in 1 & ; do; done` says `expected 'do'`, not
 and the rule is **parse-time**, so a `&` that expansion produces
 (`for i in $(echo '&')`) stays a word, as in bash. Quoting is the span gate's,
 not a byte compare — `"&"`, `'&'`, `\&` (the pair stays in the word text),
-`x&` and `&&` stay words —
+`x&` and `x&&` stay words; the **standalone** `&&`, `||` and `|` are operator words
+and the whole set is read through ONE predicate now (task #524) —
 LESSONS: "A separator-shaped word needs the span gate"
 The rule has **one granularity** and no scan-side twin: the run layer never
 re-derives a word list, unlike the closer/opener scoring of task #306, whose
@@ -5748,7 +5750,8 @@ divergence (`…_until_310`,
 grows accepted-divergent in the same direction: a closer-shaped list word
 glued to an operator (`for x in done>f; do echo A; done>f2`) is word data, so
 fdshell runs at rc 0 what bash rejects at rc 2 — measured and pinned beside
-`tests/cond_blocks.rs::for_list_with_and_is_an_accepted_divergence`; rejecting
+`tests/cond_blocks.rs::for_list_with_and_is_a_parse_error` (task #524 flipped
+that row to parity); rejecting
 them instead would have kept every parity row broken.
 
 **Mechanics notes.** Budget the 90 LoC of a shared machine **before** writing

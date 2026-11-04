@@ -305,14 +305,16 @@ fn errexit_behavior_around_blocks_is_unchanged() {
     }
 }
 
-/// Accepted divergence, documented in README: `for i in a && b` is a bash
-/// syntax error (rc 2); here the `&&` is a literal word of the `in` list and the
-/// loop runs over `a`, `&&`, `b` (the `break` ends it in the first iteration).
+/// Task #524 flips the divergence this test used to name (and README with it):
+/// `for i in a && b` is a bash syntax error (rc 2) and the `&&` is a **standalone**
+/// operator word, so the word list ends at it and the `do` expectation fails —
+/// fdshell's own rc 1 message. Only the quoted, escaped and glued spellings stay
+/// word data (`tests/loops.rs::a_quoted_ampersand_in_a_for_word_list_stays_a_word`).
 #[test]
-fn for_list_with_and_is_an_accepted_divergence() {
-    let (out, _err, code) = run("for i in a && b; do echo hi; break; done; echo after");
-    assert_eq!(code, 0);
-    assert_eq!(out, "hi\nafter\n");
+fn for_list_with_and_is_a_parse_error() {
+    let (out, err, code) = run("for i in a && b; do echo hi; break; done; echo after");
+    assert_eq!((out.as_str(), code), ("", 1), "bash rc 2: {err}");
+    assert!(err.contains("expected 'do'"), "{err}");
 }
 
 /// Task #234: a heredoc-carrying block text is opaque to the cond split too —

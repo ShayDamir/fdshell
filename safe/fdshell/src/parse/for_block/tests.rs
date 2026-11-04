@@ -393,6 +393,34 @@ fn a_quoted_ampersand_in_the_word_list_stays_a_word() {
     }
 }
 
+/// Task #524 extended that gate to the whole operator-word set, read through the
+/// ONE predicate `parse::word_quoted::operator_word`: `&&`, the pipeline `|` (and
+/// the `||` that the tokenizer spells as two `|` tokens) and a `;` that is not the
+/// list's own terminator before the `do` all end the list, and the builder answers
+/// with the `do` expectation where bash stops at rc 2.
+///
+/// The owners' half of the rule is the parens: they are task **#470**'s to decide,
+/// so this position owns them and `(a` stays a word — the row that keeps the owned
+/// set from being decorative.
+#[test]
+fn an_operator_word_in_the_word_list_is_a_parse_error() {
+    for line in [
+        b"for i in 1 && ; do echo x; done".as_slice(),
+        b"for i in 1 | ; do echo x; done".as_slice(),
+        b"for i in 1 || 2; do echo x; done".as_slice(),
+        b"for i in 1 ; 2; do echo x; done".as_slice(),
+        b"for i in ; 1; do echo x; done".as_slice(),
+    ] {
+        assert_eq!(parse_err(line), "expected 'do'", "{line:?}: bash rc 2");
+    }
+    let ParsedLine::For(fb) =
+        crate::parse::parse(&stext(b"for i in (a); do echo x; done")).unwrap()
+    else {
+        panic!("expected For")
+    };
+    assert_eq!(fb.words, vec![c"(a".into(), c")".into()]);
+}
+
 /// bash's `for_action` ends with a compound list, so a group opener written behind
 /// the region is the loop's **body** (task #394). The group parse answers it — its
 /// terminator rule, its emptiness rule and its trailing redirections are the group's

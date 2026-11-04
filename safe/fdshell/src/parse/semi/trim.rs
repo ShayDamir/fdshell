@@ -64,8 +64,8 @@ pub(crate) fn trim_body<'a>(tokens: &'a [Token], line: &[u8]) -> &'a [Token] {
 /// `case` pattern, the `case` word, a `wait` arm's patterns — the `& ;` glue
 /// is statement text, and a word list is not (task #355). A plain `&` in the
 /// `for` list is no divergence to trim for: the builder rejects the list
-/// outright (`for_block/words.rs::plain_amp`, task #360), so the slice this
-/// trim owns never carries one.
+/// outright (`for_block/words.rs::rejects_operator_word`, task #360), so the
+/// slice this trim owns never carries one.
 pub(crate) fn trim_semi(tokens: &[Token]) -> &[Token] {
     let start = tokens.iter().take_while(|t| is_semi(t)).count();
     let end = tokens.iter().rev().take_while(|t| is_semi(t)).count();

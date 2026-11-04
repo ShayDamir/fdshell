@@ -55,19 +55,22 @@ pub(crate) fn tokens_to_for(
     // `trim_semi` yields the empty list (the invariant `head.rs` guards).
     let anchor = in_pos.unwrap_or(1);
 
-    // The `for` word list takes no list terminator **and** no plain `&` word:
-    // its `do` is searched with `;` alone, and a `&` in the list is rejected
-    // below (`for i in 1 & do`, `for i in 1 & ; do` are bash syntax errors).
+    // The `for` word list takes no list terminator **and** no operator word it
+    // does not own: its `do` is searched with `;` alone, and an operator word in
+    // the list is rejected below (`for i in 1 & do`, `for i in 1 & ; do`,
+    // `for i in 1 && ; do`, `for i in 1 | ; do` are bash syntax errors).
     let do_idx =
         find_preceded_by(tokens, anchor, b"do", line, Term::Semi).ok_or(ParseError::ExpectedDo)?;
 
-    // A plain `&` is the async operator, not a word: bash's word list ends at it
-    // and its `do`-expectation fails there (task #360). The `;`-terminated shape
-    // is the one that reached the list as a word until #360 flipped it. The gate
-    // runs **before** the closer/body validators because bash reports the
-    // earliest offending token: `for i in 1 & ; do; done` says `expected 'do'`,
-    // not `'do' body is empty`.
-    if words::plain_amp(tokens.get(anchor + 1..do_idx).unwrap_or(&[])) {
+    // An operator word is the async/cond/pipeline operator, not a word: bash's word
+    // list ends at it and its `do`-expectation fails there (task #360 lands the plain
+    // `&`, task #496 the rest of the set). The gate is the ONE predicate
+    // `parse::word_quoted::operator_word`, read through the list's owned set, so a
+    // quoted `"&"` / `"&&"`, an escaped `\&` and a glued `x&` stay word data. The gate
+    // runs **before** the closer/body validators because bash reports the earliest
+    // offending token: `for i in 1 & ; do; done` says `expected 'do'`, not `'do' body
+    // is empty`.
+    if words::rejects_operator_word(tokens.get(anchor + 1..do_idx).unwrap_or(&[]), line) {
         bail!(ParseError::ExpectedDo);
     }
 

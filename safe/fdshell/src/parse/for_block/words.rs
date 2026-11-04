@@ -1,11 +1,12 @@
 //! The `for` block's word list: the `in` words with their quote masks and
-//! per-word quoted flags.
+//! per-word quoted flags, and the ONE operator-word rule that decides which of
+//! them are words at all (task #524).
 
 use super::super::Token;
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
 use crate::parse::semi::trim_semi;
-use crate::parse::word_quoted::{self, span_word};
+use crate::parse::word_quoted::{self, operator_word};
 use alloc::vec::Vec;
 use error_stack::Report;
 use sys::ShortCStr;
@@ -21,18 +22,32 @@ pub(super) struct ForWords {
     pub(super) words_quoted: Vec<bool>,
 }
 
-/// The plain `&` word of a `for` word list: bash's list ends at the async
-/// operator and its parser fails the `do` expectation there (task #360), so a
-/// list that carries one is not a word list. The gate is [`span_word`]'s raw
-/// span, so a quoted `"&"` / `'&'`, an escaped `\&` (the tokenizer keeps the
-/// pair in the word text) and a glued `x&` / `&&` are word **data** — measured:
-/// bash prints `&` for the quoted and escaped forms, and the glued rows are the
-/// accepted divergences of task #496.
+/// The words the `for` word list **owns** as its own separator: the parens are
+/// task **#470**'s (an operator word in a word slot is that task's decision), and
+/// the `;`/newline that terminates the list before `do` is the list's own, so the
+/// caller's slice ends with it and it is never rejected. Everything else in the ONE
+/// set that lands in a word slot is the operator word bash ends its word list at —
+/// which is exactly what tasks #495/#496 measured.
+fn owns(w: &[u8]) -> bool {
+    matches!(w, b"(" | b")")
+}
+
+/// Whether a `for` word list carries an operator word it does not own: bash's word
+/// list accepts **words only**, every operator token ends it, and its parser fails
+/// the `do` expectation there (task #360 lands the plain `&`, task #496 the rest).
+/// The gate is the ONE predicate [`operator_word`], so a quoted `"&"` / `'&'` /
+/// `"&&"`, an escaped `\&` (the tokenizer keeps the pair in the word text) and a
+/// glued `x&` / `x&&` are word **data** — measured: bash prints `&` for the quoted
+/// and escaped forms, and the glued rows stay.
 ///
 /// Parse-time rule: a `&` that *expansion* produces (`for i in $(echo '&')`)
 /// stays a word, as in bash.
-pub(super) fn plain_amp(tokens: &[Token]) -> bool {
-    tokens.iter().any(|tok| span_word(tok, b"&"))
+pub(super) fn rejects_operator_word(tokens: &[Token], line: &[u8]) -> bool {
+    // The trailing `;`/newline is the list's own terminator — the token the `do`
+    // is preceded by — so the list proper is everything before it.
+    let list = tokens.get(..tokens.len().saturating_sub(1)).unwrap_or(&[]);
+    list.iter()
+        .any(|tok| operator_word(tok, line, &owns).is_some())
 }
 
 /// The word list of a `for` block (the `in` words up to `do`).

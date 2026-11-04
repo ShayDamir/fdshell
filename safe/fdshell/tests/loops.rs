@@ -1238,7 +1238,7 @@ fn a_loop_control_keyword_with_the_ampersand_in_a_condition_runs_the_body() {
 /// The `;`-terminated spellings are the point: `;` is the **list** separator, so
 /// the `&` used to ride into the list as a word. A word list is not statement
 /// text, so the body-slice rule of #355 cannot reach it; the rule there is a
-/// token gate on the raw span (`parse/for_block/words.rs::plain_amp`).
+/// token gate on the raw span (`parse/for_block/words.rs::rejects_operator_word`).
 /// LESSONS: "A `;` token is a newline in disguise: the body-slice rule must read
 /// the token's byte (task #355)"
 #[test]
@@ -1327,26 +1327,66 @@ fn a_quoted_ampersand_in_a_for_word_list_stays_a_word() {
     }
 }
 
-/// Every **other** operator word of the list stays a word, pin-as-measured with
-/// bash's rc 2 named: owner task **#496** (the glued `x&`, the `&&` family
-/// README documents, the `|`, the leading-`;` leniency). The `for i in ; 1;`
-/// row is the **text** half of the gate: a `b"&"`→`b";"` mutant of the span gate
-/// would reject its leading `;` and fail here.
+/// Every operator word the span gate keeps is word data: the glued `x&` / `x&&`,
+/// the escaped `\&&` (bash stops at rc 2 for those three — #496's surviving
+/// divergence family, which task #524 left alone) and the quoted `"&&"` / `"|"` /
+/// `"||"` (bash parity, rc 0). The glued rows are the **text** half of the gate: a
+/// `b"&"`→`b";"` mutant of the span gate would reject them and fail here.
 #[test]
 fn other_operator_words_in_a_for_word_list_stay_words() {
-    for (script, want) in [
-        (r#"for i in ; 1; do echo "[$i]"; done"#, "[1]\n"),
-        ("for i in 1 && ; do echo x; done", "x\nx\n"),
-        ("for i in 1 | ; do echo x; done", "x\nx\n"),
-        (r#"for i in x& ; do echo "[$i]"; done"#, "[x&]\n"),
+    for (script, want, bash_rc) in [
+        (r#"for i in x& ; do echo "[$i]"; done"#, "[x&]\n", 2),
+        (r#"for i in x&& ; do echo "[$i]"; done"#, "[x&&]\n", 2),
+        (r#"for i in \&& ; do echo "[$i]"; done"#, "[&&]\n", 2),
+        (r#"for i in "&&" ; do echo "[$i]"; done"#, "[&&]\n", 0),
+        (r#"for i in "|" ; do echo "[$i]"; done"#, "[|]\n", 0),
+        (r#"for i in "||" ; do echo "[$i]"; done"#, "[||]\n", 0),
     ] {
         let (out, err, rc) = run(script);
         assert_eq!(
             (out.as_str(), rc),
             (want, 0),
-            "{script}: bash rc 2, #496: {err}"
+            "{script}: bash rc {bash_rc}, #496: {err}"
         );
     }
+}
+
+/// The rows of #496's table, now read through the ONE operator-word predicate
+/// (task #524): bash's `for` word list accepts **words only**, every standalone
+/// operator token ends it, and its parser fails the `do` expectation there — so
+/// `&&`, `||`, the pipeline `|`, the `;;` that is two `;` tokens and a `;` that is
+/// not the list's own terminator before `do` are all parse errors here. fdshell
+/// answers rc 1 where bash stops at rc 2 (the accepted rc asymmetry), and the
+/// `trim_semi` leniency that used to drop the leading `;` is gone with them. The
+/// quoted, escaped and glued spellings stay words in
+/// `a_quoted_ampersand_in_a_for_word_list_stays_a_word` and
+/// `other_operator_words_in_a_for_word_list_stay_words`; the brace-expanded row
+/// that already converged keeps its own pin.
+#[test]
+fn a_standalone_operator_word_in_a_for_word_list_is_a_parse_error() {
+    for script in [
+        "for i in 1 && ; do echo x; done",
+        "for i in 1 &&; do echo x; done",
+        "for i in a && b; do echo hi; break; done",
+        "for i in 1 | ; do echo x; done",
+        "for i in 1 ;; 2; do echo \"[$i]\"; done",
+        "for i in 1 ; 2; do echo \"[$i]\"; done",
+        "for i in ; 1; do echo \"[$i]\"; done",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2: {err}");
+        assert!(err.contains("expected 'do'"), "{script}: {err}");
+    }
+}
+
+/// The parens are the `for` list's own: they are task **#470**'s to decide, so
+/// the ONE predicate's owned set keeps them and `for i in (a); do` runs at rc 0
+/// where bash stops at rc 2 (measured) — the one row of the operator set that
+/// task #524 leaves to its owner.
+#[test]
+fn the_parens_of_a_for_word_list_stay_words() {
+    let (out, err, rc) = run(r#"for i in (a); do echo x; break; done"#);
+    assert_eq!((out.as_str(), rc), ("x\n", 0), "bash rc 2, #470: {err}");
 }
 
 /// A brace-expanded list row that carries `&` is a plain `&` **token** by the

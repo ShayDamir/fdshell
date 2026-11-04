@@ -556,11 +556,14 @@ fn the_restore_undoes_an_exec_in_the_body() {
 /// redirection on the block — glued closer included: the body's `echo done` and
 /// a `done` pattern are words, not the closer. The `for` **word list** is word
 /// data too (task #306), and a list word **glued to an operator** (`done>f`,
-/// `done|cat`, `done&&true`) is word data here: bash rejects those spellings
+/// `done&&true`) is word data here: bash rejects those spellings
 /// outright (rc 2), fdshell runs the statement — the accepted divergence family
-/// `tests/cond_blocks.rs::for_list_with_and_is_an_accepted_divergence`
-/// (`for i in a && b`) already belongs to, and the rows below are its measured
-/// values, not bash's.
+/// `tests/cond_blocks.rs::for_list_with_and_is_a_parse_error`
+/// (`for i in a && b`) belonged to, and the rows below are its measured
+/// values, not bash's. The `done|cat` row is not glued: `|` is a word-break byte
+/// (`bytes::word_break`), so the list is the words `done`, `|`, `cat` and the `|`
+/// is a **standalone** operator word — the ONE predicate's row, which task #524
+/// now rejects, so that row reaches bash's side (rc 1 where bash says rc 2).
 #[test]
 fn closer_shaped_words_stay_word_data() {
     let dir = Scratch::new();
@@ -608,7 +611,6 @@ fn closer_shaped_words_stay_word_data() {
     // bash parity: the closer's redirect files the list word the loop iterated.
     for (script, want, want_f) in [
         ("for x in done>f; do echo A; done", "A\nA\n", None),
-        ("for x in done|cat; do echo A; break; done", "A\n", None),
         ("for x in done&&true; do echo A; break; done", "A\n", None),
         ("for x in >f; do echo A; break; done", "A\n", None),
         ("for x in 2>/dev/null; do echo A; break; done", "A\n", None),
@@ -630,6 +632,14 @@ fn closer_shaped_words_stay_word_data() {
         );
         assert_eq!(file(&dir, "f"), want_f, "{script}");
     }
+
+    // The `|` breaks the word, so `done|cat` is three words and the middle one is
+    // the standalone pipeline operator: the ONE predicate's row, rejected by the
+    // word-list rule (task #524) — bash's rc 2 side, at fdshell's house rc 1.
+    let dir = Scratch::new();
+    let o = run(&dir, "for x in done|cat; do echo A; break; done");
+    assert_eq!((out(&o), rc(&o)), ("", Some(1)), "stderr={}", err(&o));
+    assert!(err(&o).contains("expected 'do'"), "{}", err(&o));
 
     // The closer is the **last** token the closer rule matches (that is what
     // makes the `echo done` body above a word), so in the fdshell-only event
