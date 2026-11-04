@@ -50,7 +50,7 @@ pub(super) struct Book<'a> {
     /// (POSIX #2.9, task #492) since the last flush, in scan order — recorded by the
     /// `Join` arm of the loop, never by the comment arm (a comment's own newline ends
     /// comment text, so it stays a newline). Each one falls inside the bytes of the run
-    /// of the flush it belongs to; [`crate::segment::line::flush_line`] hands it to that
+    /// of the flush it belongs to; [`crate::segment::line::flush::flush_line`] hands it to that
     /// run's segment, and the runner writes it as a space
     /// (`script/merge/chain.rs`).
     pub(super) sep_joins: Vec<usize>,

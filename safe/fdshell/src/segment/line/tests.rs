@@ -2,7 +2,7 @@
 
 #![allow(clippy::indexing_slicing)]
 
-use super::flush_line;
+use super::flush::flush_line;
 use crate::segment::Segment;
 use crate::segment::book::{Book, Run};
 use alloc::vec;

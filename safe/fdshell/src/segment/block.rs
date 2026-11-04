@@ -23,7 +23,7 @@ use crate::segment::line;
 pub(super) fn open<'a>(line: &'a [u8], raw: &[u8], book: &mut Book<'a>) {
     let (start, line_start) = (book.start, book.line_start);
     let part = raw.trim_ascii();
-    let pre_resume = line::flush_line(book, line, line_start, start + raw.len());
+    let pre_resume = line::flush::flush_line(book, line, line_start, start + raw.len());
     let (segment, resume, floor, new_start) =
         open_block(line, raw, part, start, &book.state, pre_resume, line_start);
     book.segments.push(segment);

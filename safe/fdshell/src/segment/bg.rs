@@ -7,7 +7,7 @@
 
 use super::Segment;
 use super::book::Book;
-use super::line::flush_line;
+use super::line::flush::flush_line;
 use crate::scan::heredoc;
 
 pub(super) mod split;
