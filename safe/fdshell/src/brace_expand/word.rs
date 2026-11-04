@@ -1,9 +1,10 @@
 //! Per-word brace expansion (port of bash's `brace_expand`).
 
 pub(super) mod concat;
+pub(super) mod find;
 
-use super::gobbler::{GroupType, gobble};
-use super::seq::{expand_seqterm, valid_seqterm};
+use super::gobbler::GroupType;
+use super::seq::expand_seqterm;
 use crate::depth::guarded;
 use crate::error::parse::ParseError;
 use alloc::vec;
@@ -11,34 +12,7 @@ use alloc::vec::Vec;
 use concat::cross;
 use concat::expand_amble;
 use error_stack::Report;
-
-/// The first valid brace group in `text` as `(open, close, type)`. The
-/// gobbler reports an `etype` only when the closing `}` was found, so one
-/// check covers both.
-fn find_group(text: &[u8]) -> Option<(usize, usize, GroupType)> {
-    let mut i = 0usize;
-    loop {
-        let (gi, found_open, _) = gobble(text, i, b'{');
-        if !found_open {
-            return None;
-        }
-        let (close, t) = match gobble(text, gi + 1, b'}') {
-            (close, true, Some(t)) => (close, t),
-            _ => {
-                i = gi + 1;
-                continue;
-            }
-        };
-        if t == GroupType::Seq {
-            let amble = text.get(gi + 1..close)?;
-            if !valid_seqterm(amble) {
-                i = gi + 1;
-                continue;
-            }
-        }
-        return Some((gi, close, t));
-    }
-}
+use find::find_group;
 
 /// Brace-expand one raw token span; `Ok(None)` when the word is unchanged.
 /// The entry is guarded by the shared cap (`depth.rs`): a brace group descended
