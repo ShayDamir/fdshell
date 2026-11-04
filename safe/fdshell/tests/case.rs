@@ -1351,12 +1351,13 @@ fn a_paren_in_a_case_arm_stays_arm_text() {
 }
 
 /// The `;`/`;;`/`&` family around an arm, pinned **as measured**: the accepted
-/// leniencies (a lone `;`, a trailing `&`, a closer-shaped word in the arm, the
-/// glued `;;b)esac` of task **#421**), and the rejects that stay
-/// rc 1 where bash is rc 2. `case x in a) ; esac` is the accepted leniency this
-/// task deliberately does not tighten (the plan's open question 2). A `)` with
-/// no word before it is no longer here: task **#419** closed it, pinned in
-/// [`a_paren_the_arm_command_list_cannot_take_is_refused`].
+/// leniencies (a lone `;`, a trailing `&`, a closer-shaped word in the arm), and
+/// the rejects that stay rc 1 where bash is rc 2. `case x in a) ; esac` is the
+/// accepted leniency this task deliberately does not tighten (the plan's open
+/// question 2). A `)` with no word before it is no longer here: task **#419**
+/// closed it, pinned in [`a_paren_the_arm_command_list_cannot_take_is_refused`].
+/// The glued `;;b)esac` row is bash parity now (task **#421**), pinned in
+/// [`a_closer_glued_behind_a_pattern_paren_closes_the_block`].
 #[test]
 fn the_semi_family_around_an_arm_stays_as_measured() {
     for script in [
@@ -1378,13 +1379,78 @@ fn the_semi_family_around_an_arm_stays_as_measured() {
         "case x in a) echo one;; *) echo two esac",
         // A closer-shaped pattern with no `;;` at all (bash rc 2).
         "case x in a) esac ;; esac",
-        // The closer glued behind a pattern's `)` is never found by the block
-        // scan (bash rc 0, task #421 owns the shape).
-        "case x in a) echo hi;;b)esac",
     ] {
         let (_out, err, code) = run(script);
         assert_eq!(code, 1, "{script}: {err}");
     }
+}
+
+/// A `case` closer glued behind a pattern's `)` is the block's closing keyword —
+/// the byte scan is the layer that reads it, because the tokenizer already splits
+/// these words (which is why the spaced spelling always parsed); README's
+/// closing-keyword rule, the same doctrine as the glued `esac>f`. Task **#421**,
+/// every row measured against bash 5.3.9 — including the two accepted divergences
+/// the rule leaves standing: the closer-shaped **pattern** word of
+/// [`the_semi_family_around_an_arm_stays_as_measured`]'s family, and a plain word
+/// behind the closer, which reports its own message at fdshell's rc 1.
+#[test]
+fn a_closer_glued_behind_a_pattern_paren_closes_the_block() {
+    for (script, want) in [
+        ("case x in a)esac", ""),
+        ("case x in a) echo hi;;b)esac", ""),
+        ("case x in a) builtin echo y;;b)esac", ""),
+        // The last clause closed straight at `esac`, and the glued spelling of the
+        // leading-`(` pattern whose strip's own rows live in
+        // [`case_pattern_leading_paren_shapes_bash_rejects_are_accepted`].
+        ("case x in b)esac", ""),
+        ("case abc in (a*)esac", ""),
+        // A space before the closer was already enough; kept as the rule's control.
+        ("case x in a) echo hi;;b) echo z;;esac", ""),
+        // The multi-line spelling: the closer is glued in the run behind a `;;`.
+        ("case x in\na) echo hi;;\nb)esac\n", ""),
+        // Nested blocks: the glued closer pops the `case` it belongs to, the outer
+        // block reaches its own keyword (task #309's pairing).
+        ("if :; then case x in a)esac; fi; echo after", "after\n"),
+        (
+            "while :; do case x in done)esac; break; done; echo after",
+            "after\n",
+        ),
+        ("case x in a)esac; echo after", "after\n"),
+        ("true && case x in a)esac", ""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
+    }
+    // The arm that **matches** runs, and the glued closer ends the clause list.
+    let (out, err, code) = run("case a in a) echo A;;b)esac");
+    assert_eq!((out.as_str(), code), ("A\n", 0), "stderr={err}");
+    // The block-redirect tail: the glued closer keeps its redirection operand
+    // (task #413's rule) and the scope opens for the whole block, so `f` is there
+    // and empty — nothing of the body reaches it (`x` matches no pattern).
+    let dir = scratch_dir();
+    let f = dir.join("f");
+    let script = format!("case x in a) echo hi;;b)esac>{}", f.to_str().unwrap());
+    let (out, err, code) = run_in(&dir, &script);
+    assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");
+    assert!(f.exists(), "the glued closer's operand is a target");
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap_or_default(),
+        "",
+        "the body writes nothing to the block's redirect"
+    );
+    // A closer-shaped **pattern** word glued to a closer: bash rejects it with rc
+    // 2 and fdshell answers its own rc 0 — the word-list rule's row (task #306's
+    // `case x in done) echo p;; esac` neighbour), pinned as measured.
+    let (out, err, code) = run("case x in esac)esac");
+    assert_eq!((out.as_str(), code), ("", 0), "bash rc 2: {err}");
+    // A plain **word** behind the glued closer is that rule's own report, at
+    // fdshell's rc 1 where bash stops at rc 2 (README, the closing-keyword rule).
+    let (_out, err, code) = run("case x in a)esac echo y");
+    assert_eq!(code, 1, "bash rc 2: {err}");
+    assert!(
+        err.contains("'esac' must be followed by a separator"),
+        "{err}"
+    );
 }
 
 /// An unquoted `)` inside an arm region that no inner construct consumes is a
@@ -1538,6 +1604,9 @@ fn case_pattern_leading_paren_stays_text_when_quoted_or_escaped() {
 /// Accepted divergences of the "fdshell parses what bash rejects with rc 2"
 /// family (`multi_token_case_pattern_is_accepted`): every row is pinned **as
 /// measured**, with the task that owns the shape named. Do not "fix" them here.
+/// The closer-glued-behind-`)` row of this family is bash parity now (task
+/// **#421**), pinned in
+/// [`a_closer_glued_behind_a_pattern_paren_closes_the_block`].
 #[test]
 fn case_pattern_leading_paren_shapes_bash_rejects_are_accepted() {
     // The `(` is the whole token, so taking it off leaves the clause with no
@@ -1587,11 +1656,6 @@ fn case_pattern_leading_paren_shapes_bash_rejects_are_accepted() {
     let (out, err, code) = run(r#"case abc in (a*)"b" echo m;; esac"#);
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
     assert!(err.contains("\"b\" not found"), "stderr={err}");
-    // The closer glued behind a pattern's `)` is invisible to the block scan —
-    // task **#421** (bash rc 0).
-    let (out, err, code) = run(r"case abc in (a*)esac");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
-    assert!(err.contains("missing its closing 'esac'"), "stderr={err}");
     // A `(` glued right behind the `in` keyword ends the keyword word (task
     // **#396**, the boundary rule): the words split into `in` and `(a*)`, and
     // the parenthesized clause pattern matches — **bash parity** (task **#469**

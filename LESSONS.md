@@ -3966,27 +3966,40 @@ this rule's.
 Two layer facts. **A heredoc body is never in the region**:
 `parse/token/statement.rs::tokenize_statement` blanks it, so `case x in x) cat <<T`
 newline `x)` newline `T` newline `esac` prints `x)` verbatim at rc 0. **The scan
-layer is a separate traversal**: `case x in a) echo hi;;b)esac` (a closer glued
-behind a pattern's `)`) is refused by `script/unclosed.rs`, not by the clause walk —
-fdshell rc 1 where bash is rc 0, tracked as task #421; the lenient brace-protection
-walk of `case_block/literal.rs` already accepted the shape and stays lenient (pinned
-there, so the two traversals of one `case` line cannot drift apart; its `echo ";" b)`
-row pins the *literal walk's* indices, not the rc). Pins: `parse/case_clause/tests.rs`
-(the `esac`-closed clause's shape, the missing-paren/empty-pattern verdicts that
-stayed, the `((` production word), `parse/case_clause/stray/tests.rs` (every gate,
-called on a token region directly) plus `stray/verdict/tests.rs` (the classification
-arms, the place gate, the seed), `parse/tests.rs::case_*`,
+layer is a separate traversal**, so a shape is answered by the layer whose word
+unit holds it: the tokenizer splits `b` `)` `esac`, so the clause walk reads the
+spaced spelling, while the byte run gets `b)esac` whole and reads the closer from
+the word's **interior** — the inside-word payload of
+`keywords/position/paren.rs`, consumed by
+`comment/depth_delta.rs::word_step` beside the cond pair's, scored at the word's
+own place so the place, kind and stray-closer gates keep firing, one score per
+word with the word-start row winning, and the arithmetic region's `)` still
+region bytes (task #396). Bash parity follows for every glued-closer spelling,
+and the word-list half keeps its own rows: a closer-shaped **pattern** stays word
+data (`case x in done) echo p;; esac` matches the word `done`) and
+`case x in esac)esac` keeps its measured rc — the two granularities of
+LESSONS: "A word-list rule lives at **two granularities**". The lenient
+brace-protection walk of `case_block/literal.rs` already accepted the shape and
+stays lenient (pinned there, so the two traversals of one `case` line cannot
+drift apart; its `echo ";" b)` row pins the *literal walk's* indices, not the
+rc). Pins: `parse/case_clause/tests.rs` (the `esac`-closed clause's shape,
+the missing-paren/empty-pattern verdicts that stayed, the `((` production word),
+`parse/case_clause/stray/tests.rs` (every gate, called on a token region
+directly) plus `stray/verdict/tests.rs` (the classification arms, the place
+gate, the seed), `keywords/position/paren/tests.rs` and `comment/tests.rs` (the
+closer payload, its gates, the one-score guard), `parse/tests.rs::case_*`,
 `parse/case_block/tests.rs`, `parse/case_block/literal/tests.rs` and `tests/case.rs`
 (the bash-parity table; runnable rows byte for byte; the accepted leniencies —
 `case x in a) ; esac`, the `&` closer, the closer-shaped word in an arm, the
 quoted-backslash arms; the refused family is
-`a_paren_the_arm_command_list_cannot_take_is_refused`). The `;&` closer and the
+`a_paren_the_arm_command_list_cannot_take_is_refused`, the glued closer is
+`a_closer_glued_behind_a_pattern_paren_closes_the_block`). The `;&` closer and the
 `;& )` rows are not here any more: the clause-terminator family finished in task
 **#420** and they are pinned there
 (`tests/case.rs::the_semi_and_ampersand_clause_terminators_run_the_next_clause`,
 `tests/case.rs::the_glued_only_boundary_stays_as_measured`,
 `parse/case_clause/terminator/tests.rs`). The open rows of the family
-are tasks #418, #421, #316, #422. **Follow-up:** when `(` becomes an operator
+are tasks #418, #316, #422. **Follow-up:** when `(` becomes an operator
 token (task #316), the two **byte readers** of `stray.rs` — the `((` region rule and
 the `opens_groups` **depth counter** (mid-word `(` bytes included) — move to the
 token list, so a subshell's `(`/`)` pair becomes operators there and `(w`/`f(`/`m=(1`
@@ -4591,10 +4604,10 @@ pattern fdshell joins (`case "a b" in a b)` matches, the inserted space is a
 literal byte) where bash is a syntax error — the "Operators are recognized at
 word starts" leniency family, pinned as `multi_token_case_pattern_is_accepted`
 beside `case_pattern_leading_paren_shapes_bash_rejects_are_accepted`, which
-pins the strip's rc-2 shapes with their owners: **#421** (a closer glued behind
-the pattern's `)`), **#469** (a `(` glued behind `in`), **#470** (a `(` in the
-`case` **word**); the `(a*)"b"` row rides on fdshell's own not-found rc 1 where
-bash is 127. The arm-command-position `(`/bare-`)` rows are refused now —
+pins the strip's rc-2 shapes with their owners: **#469** (a `(` glued behind
+`in`) and **#470** (a `(` in the `case` **word**); the `(a*)"b"` row rides on
+fdshell's own not-found rc 1 where bash is 127. The arm-command-position
+`(`/bare-`)` rows are refused now —
 LESSONS: "A `case` arm is a command list"
 
 ## A guard the window invariant makes unreachable is recorded, not chased (task #311, `scan/heredoc/regions.rs`)

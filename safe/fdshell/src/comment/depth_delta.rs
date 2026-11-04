@@ -1,7 +1,7 @@
 //! Block-depth deltas of the keywords in a word run.
 
 use crate::bytes::SQUOTE;
-use crate::keywords::{Glue, Pairing, Place, after, pair_payload, scores};
+use crate::keywords::{Glue, Pairing, Place, after, closer_payload, pair_payload, scores};
 use crate::scan::Quotes;
 use alloc::vec::Vec;
 
@@ -47,11 +47,26 @@ fn word_step(
             0
         }
     });
+    // The glued-`)` closer payload (task #421): the closer behind a `case`
+    // pattern word's `)` (`b)esac`, `b)esac>f`) — a block's closing keyword is
+    // the one place the glue is read the way bash reads it, and this run scorer
+    // is the one whose word unit is coarser than the tokenizer's. It is scored
+    // at the fragment's place through the same gates as the cond-pair payload
+    // above, so the place gate, the kind gate and the stray-closer clamp keep
+    // firing. **One score per word:** the word-start row owns a word it
+    // recognizes, so the payload is read only for a word that row leaves word
+    // data — what pins `case x in esac) …` as the word-list rule's.
+    let closer_delta = match (delta, closer_payload(frag)) {
+        (0, Some(payload)) if scores(payload, line, word_end, *place) => {
+            pairing.apply(payload, line, word_end)
+        }
+        _ => 0,
+    };
     // The fragment is the run's *whitespace* unit: a glued pair is one
     // fragment, never a bare tail byte, so the fragment is never in a pair
     // ([`Glue::None`]).
     *place = after(frag, line, word_end, *place, Glue::None, top);
-    delta + payload_delta
+    delta + payload_delta + closer_delta
 }
 
 /// Sum the block-depth deltas of the keywords in a space-separated word run.

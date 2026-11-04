@@ -12,9 +12,15 @@
 //! transition where it starts. The two flags are [`place`]; the payload
 //! preprocessing they feed — the glue bytes, the `time [-p]` prefix, the rows a
 //! payload's shape decides — is [`payload`], which hands the surviving word to
-//! the rows of [`after`]. The payload's keyword rows live in
-//! [`clause`], the one keyword set shared with the cond-boundary scan's
-//! clause/body mode stack, so the two rules cannot drift apart. The two
+//! the rows of [`after`]. Two payloads are read from *inside* a whole word,
+//! because a scorer whose word unit is coarser than the tokenizer's would else
+//! never see them: the cond pair's, in [`pair`](crate::keywords::pair_payload)
+//! (task #236's S2), and the closer behind a `case` pattern word's `)`, in
+//! [`paren`] (task #421) — one score per word: the word's own start wins when it
+//! recognizes the word, and the payload is scored for a word it leaves word data.
+//! The payload's keyword rows live in [`clause`], the one keyword set shared with
+//! the cond-boundary scan's clause/body mode stack, so the two rules cannot drift
+//! apart. The two
 //! **word-list** kinds are two places: a `case` list is [`Place::Pattern`],
 //! a `for` list is [`Place::Words`], whose rule and gate live in [`list`]
 //! (task #306).
@@ -31,11 +37,13 @@ use crate::segment::group::opens;
 mod clause;
 mod glue;
 mod list;
+mod paren;
 mod payload;
 mod place;
 mod score;
 
 pub(crate) use clause::{body_keyword, clause_keyword, list_keyword, list_opener};
+pub(crate) use paren::closer_payload;
 pub(crate) use place::{Glue, Place};
 pub(crate) use score::{closer_matches, scores};
 

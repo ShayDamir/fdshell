@@ -1068,3 +1068,120 @@ fn the_heredoc_branch_records_start_past_the_delimiter_newline() {
     assert!(!r.quote);
     assert_eq!(r.start, 11, "the branch advances start to resume + 1");
 }
+
+/// [`depth_delta`] on the whole run at the place `place`, with the pairing seeded
+/// with `open` — task #309's seed: the closer of the block whose text is scanned
+/// (`None` keeps the top-level clamp the run's sum is normally read through).
+fn delta_seeded(raw: &[u8], place: Place, open: Option<Closer>) -> i32 {
+    let mut pairing = Pairing::new();
+    if let Some(closer) = open {
+        pairing.open(closer);
+    }
+    depth_delta::depth_delta(raw, raw, 0, Quotes::new(), false, place, &mut pairing)
+}
+
+/// Task #421: the byte-run scorer is the one scorer whose word unit is coarser than
+/// the tokenizer's, so the closer glued behind a `case` pattern word's `)` is read
+/// from **inside** the word (`keywords/position/paren.rs`), at the word's own place
+/// and through the existing gates. Every value is measured on the clean tree: the
+/// payload scores at a command position and at the `case` list's `Pattern` place, the
+/// `for` **word-list** place keeps it list data (task #306), a foreign-kind closer
+/// glued behind the `)` stays word data (task #309's kind gate), and a word the
+/// word-start row recognizes gets **one** score — the row owns it, so the payload
+/// adds nothing (without that rule `esac)esac` pops twice). An arithmetic word's `)`
+/// are region bytes (task #396's carve-out) and a quoted payload is answered by the
+/// recognition table's quote gate (task #413).
+#[test]
+fn a_closer_behind_a_pattern_paren_is_scored_through_the_gates() {
+    for place in [Place::Command, Place::Pattern] {
+        assert_eq!(
+            delta_seeded(b"a)esac", place, Some(Closer::Esac)),
+            -1,
+            "{place:?}"
+        );
+        assert_eq!(
+            delta_seeded(b"b)esac>f", place, Some(Closer::Esac)),
+            -1,
+            "{place:?}"
+        );
+    }
+    assert_eq!(
+        delta_seeded(b"a)esac", Place::Words, Some(Closer::Esac)),
+        0,
+        "a word of a `for` list scores nothing"
+    );
+    assert_eq!(
+        delta_seeded(b"a)fi", Place::Command, Some(Closer::Esac)),
+        0,
+        "a closer of another kind is word data"
+    );
+    assert_eq!(
+        delta_seeded(b"done)esac", Place::Pattern, Some(Closer::Esac)),
+        -1,
+        "the word-start `done` is word data here, so the payload pops the `case`"
+    );
+    assert_eq!(
+        delta_seeded(b"esac)esac", Place::Pattern, Some(Closer::Esac)),
+        -1,
+        "one score per word: the word-start row owns this word"
+    );
+    assert_eq!(
+        delta_seeded(b"((x=0;x<2;x++))esac", Place::Command, Some(Closer::Esac)),
+        0,
+        "the arithmetic region's `)` are region bytes"
+    );
+    assert_eq!(
+        delta_seeded(b"a)\"esac\"", Place::Command, Some(Closer::Esac)),
+        0,
+        "a quoted payload is data — the quotes are the operand's"
+    );
+}
+
+/// Task #421's scan-level shape: the glued closer closes the span it was seeded
+/// for, from the first run of the block's own text (the scan starts just past the
+/// opener, task #306's seed paragraph). The multi-clause spelling puts the glued
+/// closer in the run **behind** a `;;`, where every run starts at a command
+/// position again.
+#[test]
+fn a_glued_closer_closes_the_span_it_was_seeded_for() {
+    for line in [
+        b"case x in a)esac".as_slice(),
+        b"case x in a) echo hi;;b)esac",
+        b"case abc in (a*)esac",
+    ] {
+        let r = scan_open(line, 5, Closer::Esac);
+        assert!(r.closed, "{line:?} must close");
+    }
+    // The kind gate at work inside a scan: the `done)` head is word data (the
+    // innermost block wants `esac`), the glued `esac` pops the `case`, and the
+    // loop's own `done` pops the `while` — so the span reaches the loop's closer,
+    // which is the last word of the line and leaves the scan one past its end.
+    let line = b"while :; do case x in done)esac; break; done";
+    let r = scan_open(line, 6, Closer::Done);
+    assert!(r.closed, "{line:?} must close");
+    assert_eq!(
+        r.end,
+        line.len() + 1,
+        "the span runs to the loop's own `done`, the scan's last word is the closer"
+    );
+}
+
+/// One score per word, asserted where the pairing can see it: a word whose own
+/// start is a keyword that **scores** contributes a single pop
+/// (`keywords/position/paren.rs`'s guard), while a word whose word-start keyword
+/// the kind gate rejects — word data — hands its score to the glued payload.
+#[test]
+fn the_word_start_row_owns_a_word_it_recognizes() {
+    // The word-start row fires (the run starts at a command position and nothing
+    // is open, so the stray-closer clamp answers): one pop, never two.
+    assert_eq!(delta(b"esac)esac"), -1, "one score per word");
+    assert_eq!(delta(b"done)esac"), -1, "one score per word");
+    // A word the rows leave word data: the payload is its only score.
+    assert_eq!(delta(b"a)esac"), -1, "the payload is the only score");
+    assert_eq!(
+        delta(b"a)"),
+        0,
+        "a `)` that ends the word carries no payload"
+    );
+    assert_eq!(delta(b"esac"), -1, "the plain closer, unchanged");
+}

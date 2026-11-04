@@ -423,8 +423,10 @@ applies it to the whole block: `while :; do echo a; break; done > f` files the
 loop's output in `f`, and so does `until … done > f`, `if … fi > f`,
 `for … done > f`, `for ((…)); do …; done > f` and `case … esac > f` — the glued
 spelling `done>f`, `fi>f`, `esac>f` included, and a glued closer takes a **quoted**
-operand too (`done>"f"`, task #413). The scope opens **before** the
-block's own word list or condition runs, so a target that fails to open stops
+operand too (`done>"f"`, task #413) — as does a closer glued behind a `case`
+pattern word's `)` (`case x in a) echo hi;;b)esac>f` files nothing, task #421). The
+scope opens **before** the block's own word list or condition runs, so a target
+that fails to open stops
 the block before its first command expands anything (`for x in $(touch m; echo
 a); do :; done > /nope/x` leaves no `m`; the rc-1 abort is task #179's), and it
 is undone at the block's end, so an `exec > z` inside the body dies with the
@@ -1139,7 +1141,11 @@ keyword reports the missing `;` first — `if true; then fi` is
 (`if true; then; fi`). The rest of the family stays fdshell's own rc-1 parse
 error where bash stops at rc 2: `while :; do : done`, `if true; then b fi`,
 `for i in a; do echo done`, `if true; then echo a >f fi`, and a closer glued to
-a redirection (`while false; do { :; }>f done`). A `;;` written in a `then` body
+a redirection (`while false; do { :; }>f done`). The closing keyword is the one
+place the glue is read the way bash reads it: the operand behind it
+(`done>f`, `fi>f`, `esac>f`, task #413) **and** the byte in front of it — a `case`
+pattern word's `)` (`case x in a)esac`, task **#421**) — so those shapes run at
+rc 0. A `;;` written in a `then` body
 is the separator rule's, not this one's: `if true; then echo a ;; fi` prints `a`
 at rc 0 where bash stops at rc 2.
 
@@ -1213,8 +1219,15 @@ so a quoted `(` (`a) echo "x(" b) ;;`) and an
 escaped one (`a) echo x\() ;;`, where the mask marks the pair unquoted and only
 the backslash says it is escaped) open no group, and the `)` written behind them
 is then the arm's stray paren — rc 1. Shapes that stay open: a subshell arm that
-**runs** (task #316), and a closer glued behind a pattern's `)`
-(`case x in a) echo hi;;b)esac`, task #421). Pinned in `safe/fdshell/tests/case.rs`.
+**runs** (task #316). A closer glued behind a pattern's `)` is the block's closing
+keyword and is read the way bash reads it (the closing-keyword rule, the glued
+`esac>f` included): `case x in a)esac`, `case x in a) echo hi;;b)esac` and the
+last clause closed straight at `esac` all run at rc 0, and the block-redirect tail
+`case x in a) echo hi;;b)esac>f` files nothing in `f` at rc 0 too (task **#421**).
+A closer-shaped **pattern** word stays word data (`case x in done) echo p;; esac`
+matches the word `done`, task #306), and `case x in esac)esac` keeps its measured
+answer — fdshell rc 0 where bash stops at rc 2. Pinned in
+`safe/fdshell/tests/case.rs`.
 
 bash's extended clause terminators are not open any more (task **#420**): `;;` stops,
 `;&` runs the next clause's body, `;;&` tests the next clause's patterns against the
