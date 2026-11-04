@@ -1047,3 +1047,24 @@ fn substitution_depth_gates_which_spaces_split_the_run() {
         "a bare `$` is a word, so the glued payload behind it is an argument"
     );
 }
+
+/// Task #513 (rule 9): the heredoc branch of [`scan_block`] (`i = resume;
+/// *start = i + 1;`) is asserted at the exact boundary. When the run's own
+/// closer keyword closes the pairing, the loop exits right after the branch,
+/// so the assignment — not the later `else`-arm recomputation — is the final
+/// state. The entry's old equivalence proof ("the `else` arm resets
+/// `*start` … before any later run is measured") holds only while the loop
+/// keeps going; on this shape the answer is assertable, so both recorded
+/// mutants (`+`→`-`, `+`→`*`) die on the exact values below (measured on the
+/// clean tree).
+#[test]
+fn the_heredoc_branch_records_start_past_the_delimiter_newline() {
+    let r = scan(b"fi a <<X\nX\ny", 0);
+    assert_eq!(
+        r.end, 10,
+        "resume is the newline terminating the delimiter line"
+    );
+    assert!(r.closed, "the run's own `fi` closes the pairing");
+    assert!(!r.quote);
+    assert_eq!(r.start, 11, "the branch advances start to resume + 1");
+}
