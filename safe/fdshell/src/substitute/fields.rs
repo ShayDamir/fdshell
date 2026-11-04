@@ -17,6 +17,7 @@ use crate::state::ShellState;
 
 use super::Join;
 use super::arg::substitute_arg_marked;
+use super::array_fields;
 use super::borrow_state;
 use super::positional::expand_positional_word;
 use super::split::split_word;
@@ -48,6 +49,12 @@ pub(crate) fn word_fields(
         if region_len(mask, 0) >= 2 {
             return positional_fields(word.eq_bytes(b"$*"), fq, quoted, cell);
         }
+    }
+    if let Some((name, is_star)) = array_fields::whole_word(word, mask) {
+        // The whole-word array arm (task #422), the positional one's twin: it
+        // takes the same region cap, and its empty-array contract is the
+        // positional one, so the two shapes are pinned side by side.
+        return array_fields::fields(&name, is_star, fq, quoted, cell);
     }
     let (text, text_mask, origin) =
         substitute_arg_marked(word, mask, spans, Join::Args, cache, cell)?;

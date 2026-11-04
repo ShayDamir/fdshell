@@ -133,6 +133,18 @@ fn unset_takes_the_store_entry() {
 }
 
 #[test]
+fn a_name_only_in_the_store_is_a_variable_to_unset() {
+    // `unset`'s no-option rule reads `is_variable` first, and the array store is
+    // one of the stores `unset_var` owns — so `a=(1 2); unset a` (bash: `${#a[@]}`
+    // = `0`) must not fall through to the function store.
+    let mut state = ShellState::new();
+    state.set_str_array(&s(b"a"), vec![shell(b"1"), shell(b"2")]);
+    state.unset_name(&s(b"a"));
+    assert!(!state.holds_str_array(&s(b"a")));
+    assert_eq!(elements(&state, b"a"), Vec::<ShortCStr>::new());
+}
+
+#[test]
 fn a_plain_name_reads_element_zero() {
     // bash: `a=(1 2); echo "$a"` → `1`; an append to a name that holds nothing
     // starts at index 0, so the store answers the plain name too.

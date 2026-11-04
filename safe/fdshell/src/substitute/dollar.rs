@@ -62,7 +62,7 @@ pub(crate) fn dollar_subst(
                 core::write!(out, "{pid}").change_context(ResolveError::Never)?;
             }
         }
-        Some(b'{') => super::brace::handle_brace(peek, mask, start, cell, out)?,
+        Some(b'{') => super::brace::handle_brace(peek, mask, start, cell, out, quoted, origin)?,
         Some(b'#') => {
             peek.next();
             let state = super::borrow_state(cell)?;

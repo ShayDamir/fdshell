@@ -1,4 +1,5 @@
 mod arg;
+mod array_fields;
 mod backtick;
 mod brace;
 mod dollar;

@@ -13,6 +13,8 @@ pub(crate) fn handle_brace(
     start: usize,
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
+    quoted: bool,
+    origin: &mut super::origin::Origin,
 ) -> Result<(), Report<ResolveError>> {
     peek.next();
     if peek.peek().copied() == Some(b'#') {
@@ -25,6 +27,14 @@ pub(crate) fn handle_brace(
         if closed && name.is_empty() {
             out.push(c"0");
             return Ok(());
+        }
+        if closed {
+            // The array arm of `#`: the element count (`${#name[@]}`) and the
+            // element's length (`${#name[idx]}`) — task #422.
+            if let Some(len) = super::array_fields::len(&name, cell)? {
+                core::write!(out, "{len}").change_context(ResolveError::Never)?;
+                return Ok(());
+            }
         }
         match (closed, state.var_value(&name).map(|v| v.len())) {
             (true, Some(len)) => {
@@ -73,6 +83,12 @@ pub(crate) fn handle_brace(
     let state = super::borrow_state(cell)?;
     if indirect.is_some() {
         return state.resolve_indirect(&content, out);
+    }
+    if super::array_fields::braced(&content, quoted, cell, out, origin)? {
+        // `${name[@]}`, `${name[*]}`, `${name[idx]}` — the arm twin of
+        // `dollar/at_star.rs`, and it must agree with the whole-word fast path
+        // in `substitute/fields.rs` (LESSONS "`$@` has two join rules").
+        return Ok(());
     }
     state.resolve_var_name(&content, out)
 }
