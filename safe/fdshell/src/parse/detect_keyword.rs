@@ -29,7 +29,7 @@ pub(crate) fn detect_control(tokens: &[Token]) -> Result<Option<ParsedLine>, Rep
     if first.eq_bytes(b"break") {
         ensure!(
             tokens.get(2).is_none(),
-            ParseError::BreakTakesAtMostOneArgument
+            ParseError::BreakContinueTakesAtMostOneArgument
         );
         return Ok(Some(ParsedLine::Break(loop_count(tokens)?)));
     }
@@ -37,7 +37,7 @@ pub(crate) fn detect_control(tokens: &[Token]) -> Result<Option<ParsedLine>, Rep
     if first.eq_bytes(b"continue") {
         ensure!(
             tokens.get(2).is_none(),
-            ParseError::ContinueTakesAtMostOneArgument
+            ParseError::BreakContinueTakesAtMostOneArgument
         );
         return Ok(Some(ParsedLine::Continue(loop_count(tokens)?)));
     }

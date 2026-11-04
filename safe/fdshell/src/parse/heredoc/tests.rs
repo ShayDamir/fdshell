@@ -1155,7 +1155,7 @@ fn operator_at_rejects_an_io_number_that_is_not_a_descriptor() {
     let err = operator_at(line, &tokens, 1).err().unwrap();
     assert!(matches!(
         err.current_context(),
-        ParseError::InvalidHeredocFd { .. }
+        ParseError::InvalidRedirFdWord { .. }
     ));
     // A prefix that fits is an fd, and `2147483647` is the largest one.
     let line = b"cat 2147483647<<T";

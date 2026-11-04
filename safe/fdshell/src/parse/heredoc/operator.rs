@@ -94,7 +94,7 @@ pub(super) fn operator_at(
     let digits = line.get(*start..op).ok_or(ParseError::Never)?;
     let Some(fd) = io_fd(digits) else {
         let prefix = ShortCStr::from_vec(digits.to_vec()).change_context(ParseError::Never)?;
-        bail!(ParseError::InvalidHeredocFd { prefix });
+        bail!(ParseError::InvalidRedirFdWord { prefix });
     };
     let (strip, delim) = operator_delim(line, op, *end);
     if !delim.is_empty() {

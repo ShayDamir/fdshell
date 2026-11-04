@@ -4416,8 +4416,8 @@ here-string, which `io_prefix_never_reads_a_here_string` and
 count-mismatch door: the here-doc body regions would start claiming here-string
 "bodies". `heredoc_fd` is renamed `io_fd` and is the descriptor rule of all four
 operators (`N>file`, `N<file`, `N<<word`, `N<<<word`), so the fd-number
-semantics cannot drift; its `None` is `InvalidHeredocFd` at a `<<` and
-`InvalidHereStringFd` at a `<<<`. Pinned: `string_span_reports_the_chevron_and_prefix`,
+semantics cannot drift; its `None` is `InvalidRedirFdWord` at a `<<` and at
+a `<<<`. Pinned: `string_span_reports_the_chevron_and_prefix`,
 `string_span_is_none_for_word_data`, `io_fd_is_the_redirect_fd_rule`,
 `prefixed_here_string_shapes_that_are_not_digits_are_word_data` (the `<<` family's
 twin) and `io_number_prefixed_operators_carry_their_fd`.

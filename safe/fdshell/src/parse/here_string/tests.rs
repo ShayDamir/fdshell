@@ -78,7 +78,7 @@ fn parse_here_string_rejects_an_io_number_that_is_not_a_descriptor() {
     let err = parse_here_string(line, &tokens, 1).err().unwrap();
     assert!(matches!(
         err.current_context(),
-        ParseError::InvalidHereStringFd { .. }
+        ParseError::InvalidRedirFdWord { .. }
     ));
     let line = b"cat 2147483647<<<x";
     let tokens = tokenize_statement(line).unwrap();

@@ -280,7 +280,7 @@ fn break_non_numeric_is_rejected() {
 fn break_extra_arguments_aborts_rc1() {
     let (_out, err, code) = run("for a in 1 2 3; do break 2 3; done; echo end");
     assert_eq!(code, 1);
-    assert!(err.contains("break takes at most one argument"));
+    assert!(err.contains("break/continue takes at most one argument"));
 }
 
 /// Accepted divergence: the count is not expanded, so `break $n` is rejected

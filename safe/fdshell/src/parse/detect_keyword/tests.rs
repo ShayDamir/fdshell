@@ -74,10 +74,10 @@ fn non_positive_or_non_numeric_counts_are_rejected() {
 #[test]
 fn more_than_one_argument_is_rejected() {
     assert!(fails_with(b"break 2 3", |e| {
-        matches!(e, ParseError::BreakTakesAtMostOneArgument)
+        matches!(e, ParseError::BreakContinueTakesAtMostOneArgument)
     }));
     assert!(fails_with(b"continue 1 2", |e| {
-        matches!(e, ParseError::ContinueTakesAtMostOneArgument)
+        matches!(e, ParseError::BreakContinueTakesAtMostOneArgument)
     }));
 }
 

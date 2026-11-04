@@ -56,7 +56,7 @@ pub fn parse_here_string(
     let digits = line.get(*start..op).ok_or(ParseError::Never)?;
     let Some(export_to) = io_fd(digits) else {
         let prefix = ShortCStr::from_vec(digits.to_vec()).change_context(ParseError::Never)?;
-        bail!(ParseError::InvalidHereStringFd { prefix });
+        bail!(ParseError::InvalidRedirFdWord { prefix });
     };
     Ok(Some((
         RedirectDef::here_string(export_to, word, mask, spans),
