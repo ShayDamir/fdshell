@@ -1,5 +1,5 @@
-use super::Token;
-use crate::keywords::quoted_word;
+use super::{Token, pipe_token_span};
+use crate::keywords::{quoted_word, separator_shape};
 use sys::ShortCStr;
 
 /// Whether the word's raw text (the byte span `(start, end)`) contained
@@ -57,6 +57,48 @@ pub(crate) fn gated_word(tok: &Token, line: &[u8]) -> bool {
 pub(crate) fn span_word(tok: &Token, w: &[u8]) -> bool {
     let (t, start, end, _fq, _mask, _spans) = tok;
     t.eq_bytes(w) && !word_quoted(t, *start, *end)
+}
+
+/// The ONE **standalone operator word** predicate (task #524): `tok` is the
+/// operator word `w` of [`THE_SET`] when [`span_word`]'s gate passes — text
+/// equality plus the raw span — so a quoted `"&&"`, `'&'`, `\&` or glued `x&&`
+/// is word **data** and never the operator. `owned` is the per-site variation the
+/// rule takes as data: it says which of those words **this** grammar position
+/// owns as its own separator, and a word the position owns is not rejected here.
+/// `Some(word)` is the operator word a site must report.
+///
+/// Each site supplies only its own owned set — the `for` word list owns the
+/// `;`/newline that terminates it before `do`, the `case` pattern list owns the
+/// `|`, `(`, `)`, `;` its own grammar puts in a word slot — and every other
+/// operator word that lands in a word slot is rejected (tasks #495/#496: each
+/// site that listed only the words it happened to notice is one bug).
+pub(crate) fn operator_word(
+    tok: &Token,
+    line: &[u8],
+    owned: &dyn Fn(&[u8]) -> bool,
+) -> Option<&'static [u8]> {
+    THE_SET
+        .into_iter()
+        .find(|w| is_the_word(tok, line, w) && !owned(w))
+}
+
+/// The ONE set: [`separator_shape`]'s words (task #396's one set, reached through
+/// [`crate::keywords`]) plus the pipeline `|`, which stays [`pipe_token_span`]'s byte
+/// (task #261's ONE predicate). The list spells the set out so the predicate can
+/// hand back a `&'static` word; [`is_the_word`] reads each row from its owner.
+const THE_SET: [&[u8]; 8] = [b"", b";", b"&&", b"||", b"&", b"(", b")", b"|"];
+
+/// `w` is a row of [`THE_SET`] and `tok` **is** it: the row's own owner answers
+/// ([`separator_shape`], or [`pipe_token_span`] for the `|`), then [`span_word`]'s
+/// gate.
+fn is_the_word(tok: &Token, line: &[u8], w: &[u8]) -> bool {
+    let (t, start, end, _fq, _mask, _spans) = tok;
+    let in_the_set = if w == b"|" {
+        pipe_token_span(line, *start, *end)
+    } else {
+        separator_shape(w) && t.eq_bytes(w)
+    };
+    in_the_set && span_word(tok, w)
 }
 
 #[cfg(test)]

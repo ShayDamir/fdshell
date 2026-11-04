@@ -17,7 +17,7 @@ pub(crate) use pair::pair_payload;
 pub(crate) use pairing::Pairing;
 pub(crate) use position::{
     Glue, Place, after, body_keyword, clause_keyword, list_keyword, scores, separator_data,
-    word_place,
+    separator_shape, word_place,
 };
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
 

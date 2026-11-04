@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use super::{span_word, word_quoted};
+use super::{operator_word, span_word, word_quoted};
 use crate::parse::token::tokenize;
 use alloc::vec::Vec;
 use sys::ShortCStr;
@@ -161,4 +161,52 @@ fn span_word_gates_every_separator_spelling() {
     assert!(!span_word(&at(b"a ; b", 1), b"|"));
     assert!(!span_word(&at(b"a ) b", 1), b";"));
     assert!(!span_word(&at(b"a & b", 1), b";"));
+}
+
+/// `operator_word` is the ONE standalone-operator-word predicate (task #524): a
+/// token is the operator when its text is a row of the ONE set **and** it passes
+/// [`span_word`]'s gate — every quoted, escaped or glued spelling of the same
+/// bytes is word data. The `line` is the one the tokens were tokenized from,
+/// because the `|` row stays [`pipe_token_span`]'s byte test (task #261).
+///
+/// The `owned` half is the per-site data and must change the answer: the same
+/// `&&` is the operator for a list that does not own it and word data for one
+/// that does (a parameter that never changes the answer is an unkilleable mutant).
+#[test]
+fn operator_word_reads_the_gate_and_the_owners_set() {
+    let at = |line: &[u8], i: usize| tokenize(line).unwrap().get(i).cloned().unwrap();
+    let owns_nothing = |_w: &[u8]| false;
+    for (line, i, want) in [
+        // Every row of the ONE set, spelled out unquoted.
+        (b"a && b".as_slice(), 1usize, Some(b"&&".as_slice())),
+        (b"a & b".as_slice(), 1, Some(b"&".as_slice())),
+        (b"a | b".as_slice(), 1, Some(b"|".as_slice())),
+        (b"a ; b".as_slice(), 1, Some(b";".as_slice())),
+        (b"a ( b".as_slice(), 1, Some(b"(".as_slice())),
+        (b"a ) b".as_slice(), 1, Some(b")".as_slice())),
+        // The same bytes quoted, escaped or glued: the gate says word data.
+        (b"a \"\" b".as_slice(), 1, None),
+        (b"a \"&&\" b".as_slice(), 1, None),
+        (b"a '|' b".as_slice(), 1, None),
+        (b"a \\& b".as_slice(), 1, None),
+        (b"a \\| b".as_slice(), 1, None),
+        (b"ax&& b".as_slice(), 0, None),
+        // Not a row of the set at all.
+        (b"a x b".as_slice(), 1, None),
+    ] {
+        assert_eq!(
+            operator_word(&at(line, i), line, &owns_nothing),
+            want,
+            "{line:?} (token {i})"
+        );
+    }
+    // The owners' half flips the answer for the very same tokens.
+    let owns = |w: &[u8]| w == b"&&" || w == b"|";
+    assert_eq!(operator_word(&at(b"a && b", 1), b"a && b", &owns), None);
+    assert_eq!(operator_word(&at(b"a | b", 1), b"a | b", &owns), None);
+    assert_eq!(
+        operator_word(&at(b"a & b", 1), b"a & b", &owns),
+        Some(b"&".as_slice()),
+        "a word the position does not own is still the operator"
+    );
 }
