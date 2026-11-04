@@ -6614,3 +6614,49 @@ Pins: `depth/tests.rs::at_the_cap_the_closure_runs`,
 `tests/test.rs::nested_groups_and_negation_chains_are_capped`,
 `tests/brace_expand.rs::deep_nesting_reports_the_depth_cap`. README "Security"
 states the rule for users.
+
+## An operator word in a word slot is ONE predicate's answer; each position supplies only its owned set
+
+The parse layer used to test "is this token this operator word" **at every site
+separately**, and each site listed only the words it happened to notice: the `for`
+word list knew the plain `&` (task #360), the `case` pattern list only the `;` it
+skips. One missed site is exactly one bug — tasks #495 and #496 are two of them. The
+rule is now one predicate, `parse/word_quoted.rs::operator_word`: the set
+`keywords/position.rs::separator_shape` plus the pipeline `|`, which stays
+`parse/redirect/clobber/pipe.rs::pipe_token_span`'s byte, read through the span gate
+of task #396's — see
+LESSONS: "A `|` preceded by `>` is the `>|` operator byte, and the byte-level and token-level rules must call ONE predicate"
+and
+LESSONS: "The metacharacter boundary is a keyword-word rule: one byte set, one reserved list".
+A quoted `"&&"`, `'&'`, `\&` or glued `x&`/`x&&` fails the gate and is word data.
+The only per-site variation is **data**: the `owned` closure naming the words this
+position's own grammar puts in a word slot — the `for` list owns its `(`/`)` (task
+#470 decides them) and the `;`/newline terminator before `do`; the `case` pattern list
+owns `|`, `(`, `)`, `;` (`;;`, `;&` and `;;&` are two tokens each, and task #420 owns
+that family in the **clause-terminator** position). Everything a position does not own
+is reported, and each site answers with its own error: the `do` expectation at the
+`for` list, `case: empty pattern` at the pattern list, because there the operator word
+leaves the pattern empty.
+
+The owned half must be a **word**, so the `for` list's terminator cannot be decided
+inside the closure — the caller hands the predicate the list minus its trailing
+terminator token, the one the `do` is preceded by. That is why the gate reads the
+**untrimmed** slice and lands before `trim_semi`: `for i in ; 1; do` is the leniency
+flipping to bash's side, and the rule stays a builder rule, per
+LESSONS: "A word-list rule lives at **two granularities"**.
+Both directions of `owned` are pinned at each site: a parameter that never changes the
+answer is an equivalent mutant, per
+LESSONS: "A shared parser must gate the flag only one builtin honors".
+
+Pins: `parse/word_quoted/tests.rs::operator_word_reads_the_gate_and_the_owners_set`,
+`parse/for_block/tests.rs::an_operator_word_in_the_word_list_is_a_parse_error`,
+`parse/case_clause/tests.rs::an_operator_word_in_a_pattern_slot_reports_the_empty_pattern`,
+`tests/loops.rs::a_standalone_operator_word_in_a_for_word_list_is_a_parse_error`,
+`tests/loops.rs::the_parens_of_a_for_word_list_stay_words`,
+`tests/case.rs::an_operator_word_in_the_pattern_list_is_a_parse_error`; the flipped
+fences `tests/cond_blocks.rs::for_list_with_and_is_a_parse_error`,
+`tests/block_redirect.rs::closer_shaped_words_stay_word_data` (`done|cat`: the `|`
+breaks the word, so it was never glued) and
+`tests/loops.rs::other_operator_words_in_a_for_word_list_stay_words` (the glued and
+quoted spellings that stay divergences); the gate's own
+LESSONS: "A separator-shaped word needs the span gate, because the scan-back breaks on the separator byte itself".

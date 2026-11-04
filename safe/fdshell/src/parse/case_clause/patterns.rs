@@ -6,9 +6,21 @@ use crate::error::parse::ParseError;
 use crate::parse::Token;
 use crate::parse::pipe_token_span;
 use crate::parse::semi::trim_semi;
-use crate::parse::word_quoted::span_word;
+use crate::parse::word_quoted::{operator_word, span_word};
 use alloc::vec::Vec;
 use error_stack::{Report, bail, ensure};
+
+/// The words the pattern list **owns** as its own separators: the `|` that
+/// separates patterns, the optional leading `(` (POSIX 2.9.4.3, task #334), the `)`
+/// that closes the list, and the `;` whose pair separates clauses — `;;`, `;&` and
+/// `;;&` are the same rows spelled by two tokens, and task **#420** owns that family
+/// in the **clause-terminator** position. The empty word is quoted word data
+/// (task #336's gate). What the ONE predicate is left with is `&`, `&&` and `||`:
+/// an operator word in a pattern slot, which bash rejects (task #495) — and the
+/// pattern it leaves is empty, so [`ParseError::CaseEmptyPattern`] answers.
+fn owns(w: &[u8]) -> bool {
+    matches!(w, b"" | b";" | b"(" | b")" | b"|")
+}
 
 /// Collect the `|`-separated patterns of one clause, up to and including `)`.
 /// Advances `pos` past the closing paren.
@@ -31,6 +43,12 @@ use error_stack::{Report, bail, ensure};
 /// walk through the newline's `;` token), so only a pattern list that never
 /// reaches its `)` is the missing-paren shape (`case x in a esac`,
 /// `case x in echo yes;; esac`).
+///
+/// A token that **is** an operator word (task #524) is not pattern text either: the
+/// walk reads it through the ONE predicate [`operator_word`] with [`owns`] as its
+/// data, and what comes back is bash's syntax error — `case x in & ) echo hit ;; esac`
+/// and `case x in a && b) echo m;; esac` both stop at rc 2 there, at fdshell's house
+/// rc 1.
 pub(super) fn collect_patterns(
     tokens: &[Token],
     line: &[u8],
@@ -63,6 +81,12 @@ pub(super) fn collect_patterns(
             current_pattern.clear();
             *pos += 1;
         } else {
+            // An operator word this position does not own is the operator, not
+            // pattern text (task #495): bash's pattern list is words only and its
+            // parser fails at the operator word — here the `&` of `case x in & )`.
+            if operator_word(tok, line, &owns).is_some() {
+                bail!(ParseError::CaseEmptyPattern);
+            }
             current_pattern.push(tok.clone());
             *pos += 1;
         }

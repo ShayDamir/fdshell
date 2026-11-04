@@ -878,6 +878,47 @@ fn ampersand_in_an_arm_keeps_the_clause_rules() {
     }
 }
 
+/// The `case` **pattern list** is a word-list place of its own (task #306's two
+/// granularities), and task #524 gave it the ONE operator-word predicate the `for`
+/// word list already read: an operator word that lands in a pattern slot is the
+/// operator, and bash fails the parse there. The pattern the operator leaves behind
+/// is the empty one, so the existing message answers at fdshell's house rc 1 where
+/// bash stops at rc 2 — including the `||` row, which reaches the walk as two `|`
+/// tokens and keeps its verdict, and the `;&` spelled *inside* a pattern list, which
+/// is a `;` and a `&` token and converges on bash here.
+///
+/// The rows the position owns stay word data, and they are the parity rows: the
+/// quoted `"&"` and the escaped `\&` (the gate is the raw span), the leading `(` of
+/// POSIX 2.9.4.3 (task #334), the `|` that separates patterns and the `)` that
+/// closes the list. The `;&` of the **clause-terminator** position
+/// (`case x in a) echo A ;& b) echo B;; esac`) is task #420's family and keeps its
+/// measured answer.
+#[test]
+fn an_operator_word_in_the_pattern_list_is_a_parse_error() {
+    for script in [
+        "case x in & ) echo hit ;; esac",
+        "case x in 1 & ) echo hit;; esac",
+        "case x in & a) echo hit;; esac",
+        "case x in a & ) echo hit;; esac",
+        "case x in a && b) echo m;; esac",
+        "case x in a || b) echo m;; esac",
+        "case x in 1 ;& ) echo hit;; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
+        assert!(err.contains("case: empty pattern"), "{script}: {err}");
+    }
+    for (script, want) in [
+        (r#"case x in "&") echo hit;; esac"#, ""),
+        (r"case x in \&) echo hit;; esac", ""),
+        ("case x in (x) echo hit;; esac", "hit\n"),
+        ("case x in x|y) echo hit;; esac", "hit\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
+    }
+}
+
 // --- a clause closed directly by `esac`, and the missing `;;` (task #300) -----
 //
 // bash reads an arm as a **command list**, so two things follow, and fdshell

@@ -106,6 +106,41 @@ fn an_empty_pattern_reports_the_empty_pattern() {
     }
 }
 
+/// Task #524: the pattern-list walk reads the ONE operator-word predicate
+/// `parse::word_quoted::operator_word`, so an operator word that lands in a pattern
+/// slot is the operator — the `&` of `case x in & )`, the `&&`, and the `||` the
+/// tokenizer spells as two `|` tokens — and the pattern it leaves behind is empty,
+/// which is the verdict the test above already carried. The rows the position owns
+/// stay word data: the `|` that separates patterns, the leading `(` (task #334), the
+/// `)` that closes the list, the `;` skip of `parse_clauses`, and every quoted
+/// spelling (the gate is the raw span).
+#[test]
+fn an_operator_word_in_a_pattern_slot_reports_the_empty_pattern() {
+    for line in [
+        b"case x in & ) echo yes;; esac".as_slice(),
+        b"case x in a & ) echo yes;; esac".as_slice(),
+        b"case x in & a*) echo yes;; esac".as_slice(),
+        b"case x in a && b) echo yes;; esac".as_slice(),
+        b"case x in a || b) echo yes;; esac".as_slice(),
+    ] {
+        let err = clauses_of(line)
+            .err()
+            .unwrap_or_else(|| panic!("{line:?} is ok"));
+        assert_eq!(
+            err.current_context().to_string(),
+            "case: empty pattern",
+            "{line:?}: bash rc 2"
+        );
+    }
+    // The owners' half flips the answer: the quoted `&` and the owned `|` are
+    // pattern text, so the walk answers with two patterns, not the verdict above.
+    let clauses = clauses_of(b"case x in \"&\"|a*) esac").unwrap();
+    assert_eq!(clauses.len(), 1);
+    assert_eq!(clauses[0].patterns.len(), 2);
+    assert_eq!(clauses[0].patterns[0].text, ShortCStr::from(c"&"));
+    assert_eq!(clauses[0].patterns[1].text, ShortCStr::from(c"a*"));
+}
+
 /// Task #334: bash strips POSIX 2.9.4.3's optional leading `(` of a pattern
 /// list, so the clause's first pattern text starts **behind** it. POSIX's
 /// spaced `( pattern )` spelling is the case where the `(` is a whole token of
