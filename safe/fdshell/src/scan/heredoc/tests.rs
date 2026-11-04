@@ -609,3 +609,19 @@ fn a_substitution_region_on_the_delimiter_word_is_one_word() {
         Some((7, &b"$"[..]))
     );
 }
+
+/// The guard of `lines.rs::substitution_span` demands the **whole** `$(` pair on
+/// the word byte, and the task #513 mutant sweep proved it is load-bearing here:
+/// a word byte that is *not* `$` but is followed by `(` with a matching `)`
+/// inside the window (`a(b; c)`) must fall through, not open a region — under
+/// `||`→`&&` the guard passes, the paren scan jumps the walk over the `;`, and
+/// the word becomes the whole `a(b; c)`. Exact-index pin (rule 9); the `$` row
+/// above pins the other arm.
+#[test]
+fn the_substitution_guard_demands_the_full_dollar_paren_pair() {
+    assert_eq!(
+        delimiter_span(b"cat <<a(b; c)\nX", 6, 13),
+        Some((9, &b"a(b"[..])),
+        "a non-$ byte before a `(` is an ordinary word byte: the word ends at the `;`"
+    );
+}

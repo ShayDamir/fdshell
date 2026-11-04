@@ -121,9 +121,13 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     operators. Prefer that to a slice rewrite: `get(a..)` with an
     `unwrap_or_default`/`unwrap_or` fallback re-creates the equivalence,
     because `replace … with None` **is** the fallback. Measured on
-    `parse/case_block/literal.rs`: the bound and rule 11's rebinding both kept
-    the suite green, deleting them deleted both families, and the step base
-    shared with the output range is killed by the exact-index pins (rule 9).
+     `parse/case_block/literal.rs`: the bound and rule 11's rebinding both kept
+     the suite green, deleting them deleted both families, and the step base
+     shared with the output range is killed by the exact-index pins (rule 9).
+     When the body carries no test of its own (a pure state-machine walk), end
+     the loop through the exact range's own method — `loop { if (i..next).is_empty()
+     { break } … }` — measured on task #513 (`scan/heredoc/ops.rs`'s word walk, the
+     three `scan/heredoc/lines.rs` walks).
 19. **Program-level unreachability does not bind a helper-level call.** Rule 10's
     "equivalent because the input is rejected upstream" is a claim about the
     *program*; a unit test feeds the helper exactly the text the rejection
