@@ -1413,7 +1413,7 @@ LESSONS: "A heredoc terminator line is structure, not command bytes"; the
 body-line half of the class is #311's, pinned by
 `tests/heredoc.rs::single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_is_verbatim`.
 
-Measured boundary of the same entry (task #263's review, 2026-10-19): the delimiter word's *flag* rule is now bash-parity, its *word-span* rule is not, and the two must not be conflated. An escaped whitespace byte inside the word (`<<a\ b`, `<<\ b`, `<<a\<TAB>b`) and a `\` at the end of the word before the newline (`<<E\`) still diverge — bash joins the word across the pair (delimiter `a b`, ` b`, `a<TAB>b`, and `<<E\` joins the next line into `Ezzz` with its EOF warning, rc 0) where fdshell splits the word at the whitespace byte and reports a parse error at rc 1. `bytes/fold.rs` is not the fix for those rows: the span is built by `scan/heredoc/lines.rs::word_span`/`delimiter_span`, which step one byte at a time. Owner: task #349 (measured, no prerequisite relation to #263; the flag flip leaves every one of those rows rc 1, unchanged).
+Measured boundary of the same entry (task #263's review, 2026-10-19): the delimiter word's *flag* rule is now bash-parity, its *word-span* rule is not, and the two must not be conflated. An escaped whitespace byte inside the word (`<<a\ b`, `<<\ b`, `<<a\<TAB>b`) and a `\` at the end of the word before the newline (`<<E\`) still diverge — bash joins the word across the pair (delimiter `a b`, ` b`, `a<TAB>b`, and `<<E\` joins the next line into `Ezzz` with its EOF warning, rc 0) where fdshell splits the word at the whitespace byte and reports a parse error at rc 1. `bytes/fold.rs` is not the fix for those rows: the span is built by `scan/heredoc/lines/word.rs::word_span`/`lines.rs::delimiter_span`, which step one byte at a time. Owner: task #349 (measured, no prerequisite relation to #263; the flag flip leaves every one of those rows rc 1, unchanged).
 
 **Closed by task #347 for the pair half, and the boundary is narrower now** (measured 2026-10-28, bash 5.3.9): `word_span` consumes an unquoted `\X` pair whole, so the escaped-whitespace rows are bash parity — `cat <<a\ b`, `<<\ b`, `<<a\<TAB>b`, `<<a\;b`, `<<a\|b`, `<<a\)`, `<<\;`, `<<\|`, their `<<-` and io-number twins, and `X=v; cat <<a\ b` + `$X` (the pair quotes the body) all print their body at rc 0. The **`\` at the end of the word** member is narrowed but not closed: the tokenizer's continuation join (`<<E\` + `zzz` → the word `Ezzz`, `<<a\` + `a\` → `aa\`) is task **#489**'s, pinned as measured in `tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners` — since task **#364** both shells run these rows at rc 0 with an end-of-file warning, so only the word text (and the warning count it produces) stays with #489. #349's remaining scope is that join (its pair half landed in #347); the pins are `scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word` and `parse/heredoc/tests.rs::escaped_delimiter_words_fold_the_same_at_both_levels`.
 
@@ -3084,7 +3084,7 @@ rc 1, and the arms' mask insensitivity is pinned by
 `scan/heredoc/op/tests.rs::invalid_delimiter_gates_operator_bytes_on_the_quote_mask`.
 - **A byte walk over a delimiter word consumes `\X` pairs whole** (task #347,
 closing #349's scope). The tokenizer keeps the pair in the word text
-(`parse/token/escape.rs::read_escape`), so `scan/heredoc/lines.rs::word_span`
+(`parse/token/escape.rs::read_escape`), so `scan/heredoc/lines/word.rs::word_span`
 that steps over the `\` alone ends the word at the separator byte **behind** it
 (`token_word_end`'s set: ` `, tab, `;`, `|`, `)`) and the region layer delimits
 on the truncated word while the parse layer compares the **folded** word — the
@@ -6136,7 +6136,7 @@ instead of rewriting its measurement.
 
 `cat <<$(x)` + `body` + `$(x)` + `echo after` prints `body` and `after` at rc 0
 (bash 5.3.9), so a `$( … )` / `$(( … ))` region opened **on the delimiter word** is
-one word for the byte walk: `safe/fdshell/src/scan/heredoc/lines.rs::word_span`
+one word for the byte walk: `safe/fdshell/src/scan/heredoc/lines/word.rs::word_span`
 consumes it whole through the shared paren scan, exactly as it consumes a quoted
 region (LESSONS: "A quoted region is a unit for *every* byte scanner"). Before that,
 the walk stepped byte at a time and stopped at the `)` closing the region, so the
