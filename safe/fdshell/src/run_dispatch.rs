@@ -7,6 +7,7 @@ use sys::{ScriptText, Trace};
 
 mod arith_cmd;
 mod array_ops;
+mod assign_array;
 mod assign_str;
 mod loop_ctl;
 mod unset;
@@ -39,6 +40,9 @@ pub(crate) fn run_simple(
                 assign_str::set(assign, text, cell)?;
             }
             finish_assignment(cell)?;
+        }
+        crate::parse::ParsedLine::AssignArray(assigns) => {
+            assign_array::run(assigns, text, cell)?;
         }
         crate::parse::ParsedLine::Unset(targets) => unset::run(targets, cell)?,
         crate::parse::ParsedLine::Umask(mask) => {

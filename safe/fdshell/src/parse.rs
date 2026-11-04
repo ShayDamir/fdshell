@@ -1,5 +1,6 @@
 mod arith_cmd;
-mod array_ref;
+mod array_literal;
+pub(crate) mod array_ref;
 mod backtick;
 use alloc::vec::Vec;
 mod bg_redirect;
@@ -43,6 +44,7 @@ pub(crate) mod wait_block;
 pub(crate) mod while_block;
 pub(crate) mod word_quoted;
 
+pub(crate) use array_literal::{ArrayAssign, ArrayWord};
 pub(crate) use case_block::literal_indices;
 pub use cmdline::stage::{BlockStage, ExpandedStage, Pipeline, Stage};
 pub use cmdline::{BuiltinPrefix, CommandLine};

@@ -64,8 +64,8 @@ impl ShellState {
         }
     }
 
-    /// `name[idx]=value`: one element write; the parse's
-    /// [`super::super::parse::array_ref::split_index_ref`] owns the index syntax.
+    /// `name[idx]=value`: one element write; `parse/array_ref.rs::split_index_ref`
+    /// owns the index syntax.
     pub(crate) fn set_str_element(&mut self, name: &ShortCStr, index: usize, value: ImportedStr) {
         self.str_arrays
             .entry(name.clone())

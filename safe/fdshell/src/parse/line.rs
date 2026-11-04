@@ -1,3 +1,4 @@
+use crate::parse::array_literal::ArrayAssign;
 use crate::parse::case_block::CaseBlock;
 use crate::parse::for_block::ForBlock;
 use crate::parse::for_block::arith::ArithForBlock;
@@ -37,6 +38,9 @@ pub enum ParsedLine {
     AssignStr(Assign),
     /// A bare statement of several `NAME=value` words; all persist.
     AssignStrs(Vec<Assign>),
+    /// A statement of `name=(w1 w2 …)` words: each region's name (`+=` marked)
+    /// and its element words, each kept as the tokenizer wrote it (task #422).
+    AssignArray(Vec<ArrayAssign>),
     /// `unset name…`: every operand word, in the order it was written.
     Unset(Vec<UnsetTarget>),
     Umask(Option<u32>),

@@ -1,5 +1,6 @@
 use super::Token;
 use crate::error::parse::ParseError;
+use crate::parse::array_literal;
 use crate::parse::array_ref;
 use crate::parse::detect_keyword;
 use crate::parse::envassign;
@@ -18,6 +19,10 @@ pub(crate) fn detect(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<Pars
         && let Some(line) = fd_assign(var, rhs)
     {
         return Ok(Some(line));
+    }
+
+    if let Some(assigns) = array_literal::detect(tokens)? {
+        return Ok(Some(ParsedLine::AssignArray(assigns)));
     }
 
     if envassign::is_env_assign(first) {
