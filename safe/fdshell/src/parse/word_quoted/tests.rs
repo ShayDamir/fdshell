@@ -209,4 +209,15 @@ fn operator_word_reads_the_gate_and_the_owners_set() {
         Some(b"&".as_slice()),
         "a word the position does not own is still the operator"
     );
+    // The `||` row of the set, on a **synthesized** token: the tokenizer emits two
+    // `|` tokens, so no real token ever arrives with this text — the row is the
+    // byte-level set's spelling (task #396), and a set row nobody reaches is dead
+    // data. The span equals the text, so the gate passes and the row answers.
+    let tok = (ShortCStr::from(c"||"), 0, 2, false, Vec::new(), Vec::new());
+    assert_eq!(
+        operator_word(&tok, b"a || b", &owns_nothing),
+        Some(b"||".as_slice())
+    );
+    let owns_pipe2 = |w: &[u8]| w == b"||";
+    assert_eq!(operator_word(&tok, b"a || b", &owns_pipe2), None);
 }
