@@ -9,7 +9,7 @@ use super::{run_line_bodies, stream_start};
 /// just past that line's newline — the same index for the segment flush's edge (the
 /// newline's position) and the block-condition extension's edge (just past it).
 /// Every single-line window lands here, so the `single_line` rule of
-/// `segment/line.rs::flush_line` and the window+skip pair of task #138 are
+/// `segment/line/flush.rs::flush_line` and the window+skip pair of task #138 are
 /// byte-identical to what they were before task #403.
 #[test]
 fn stream_start_of_a_single_line_window_is_just_past_its_newline() {

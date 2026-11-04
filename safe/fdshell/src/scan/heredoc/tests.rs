@@ -610,7 +610,7 @@ fn a_substitution_region_on_the_delimiter_word_is_one_word() {
     );
 }
 
-/// The guard of `lines.rs::substitution_span` demands the **whole** `$(` pair on
+/// The guard of `lines/word.rs::substitution_span` demands the **whole** `$(` pair on
 /// the word byte, and the task #513 mutant sweep proved it is load-bearing here:
 /// a word byte that is *not* `$` but is followed by `(` with a matching `)`
 /// inside the window (`a(b; c)`) must fall through, not open a region — under

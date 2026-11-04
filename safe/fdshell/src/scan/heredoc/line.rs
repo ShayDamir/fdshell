@@ -98,7 +98,7 @@ pub(crate) fn line_body_contents(
 /// The regions **and** the bytes the `k` operators written in the window
 /// `line[start..]` claim from their physical line's body stream: the line's
 /// allocation starting after the `p` operators written on that line **before**
-/// the window (the same skip `segment/line.rs::flush_line` applies to a
+/// the window (the same skip `segment/line/flush.rs::flush_line` applies to a
 /// block's trailing statements, and `parse/cond_bodies.rs` to an arm slice).
 /// The skip and the take stay one arithmetic unit with the window (LESSONS).
 pub(crate) fn claimed_line_bodies(

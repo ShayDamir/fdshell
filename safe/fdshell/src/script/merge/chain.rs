@@ -9,7 +9,7 @@
 //! but the first. The separator the merge itself writes is a space, and so is every
 //! **separator** newline a link carries inside itself — the newlines the scan stepped
 //! over as the operator's terminator and left on the segment as `joins`
-//! (`segment/join.rs`, `segment/line.rs::run_joins`). A newline that is not a
+//! (`segment/join.rs`, `segment/line/flush.rs::run_joins`). A newline that is not a
 //! separator stays a newline: it is data inside a quoted word, or the newline that
 //! ends a `#` comment — that one must survive, since the parse layer reads the
 //! comment's text only up to it and a space would let the comment swallow the next

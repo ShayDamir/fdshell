@@ -157,7 +157,7 @@ fn the_last_part_keeps_the_background_flag() {
 
 /// A link that is itself a **scan-joined** run carries the separator newlines of the
 /// physical lines it spans inside its own text, and the scan left their offsets on the
-/// segment (`segment/line.rs::run_joins`). The chain writes every one of them as a
+/// segment (`segment/line/flush.rs::run_joins`). The chain writes every one of them as a
 /// space, so the whole chain — not only the merge's own separators — is the one line
 /// the parse layer reads it as (task #492, LESSONS: "A `;` token is a newline in
 /// disguise"). Left as newlines, the operator at the end of the run's second line

@@ -14,7 +14,7 @@ use super::{line_end_after, line_start};
 /// Where the window's body stream starts: just past the newline ending the
 /// physical line that carries the window's **first** operator. A window that stops
 /// on that line keeps its own end — every single-line window lands there, so the
-/// `single_line` rule of `segment/line.rs::flush_line` (tasks #232/#295) and the
+/// `single_line` rule of `segment/line/flush.rs::flush_line` (tasks #232/#295) and the
 /// window+skip pair of task #138 stay byte-identical — while a window that runs
 /// past it starts its stream after the first operator's line, so each physical line
 /// inside the run owns exactly one body stream and [`body_regions_full`] hands its
