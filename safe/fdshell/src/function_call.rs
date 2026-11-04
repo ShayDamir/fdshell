@@ -25,7 +25,7 @@ pub(crate) fn call(
     )
     .change_context(CmdError::Resolve)?;
     let saved = swap_positional(cell, &substituted, text)?;
-    crate::state::frames::push_frame(cell)?;
+    crate::state::frames::cell::push_frame(cell)?;
     let script = ScriptText::new(body.clone(), text.start, text.origin.clone());
     let result = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
         crate::script::run_script(&script, cell)
@@ -33,7 +33,7 @@ pub(crate) fn call(
     // Restore the caller's positional parameters and the `local` frame before
     // propagating, so a body that fails (or `return`s out) leaks nothing.
     restore_positional(cell, saved)?;
-    crate::state::frames::pop_frame(cell)?;
+    crate::state::frames::cell::pop_frame(cell)?;
     let mut control = result?;
     if matches!(control, Some(LoopControl::Return)) {
         control = None;

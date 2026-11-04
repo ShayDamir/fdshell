@@ -2,10 +2,11 @@
 //! values to restore when the call returns. The shape is `run_env::EnvSave`
 //! (LESSONS: scoped assignments save `strings`, `exports` and `IFS` together).
 
+pub(crate) mod cell;
+
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 use hashbrown::HashMap;
-use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, ShortCStr};
 
 use super::ShellState;
@@ -93,20 +94,6 @@ fn restore(
             let _ = store.remove(name);
         }
     }
-}
-
-/// Cell-level frame push/pop for `function_call` (narrow borrows, LESSONS:
-/// never hold a `ForkCell` borrow across a recursive call).
-pub fn push_frame(cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
-    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-    state.begin_frame();
-    Ok(())
-}
-
-pub fn pop_frame(cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
-    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-    state.end_frame();
-    Ok(())
 }
 
 #[cfg(test)]

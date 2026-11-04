@@ -4,7 +4,7 @@ use crate::capture::Capture;
 use crate::intercept::try_intercept;
 use crate::mask::MaskBit;
 use crate::parse::{BuiltinPrefix, CommandLine};
-use crate::state::frames::{pop_frame, push_frame};
+use crate::state::frames::cell::{pop_frame, push_frame};
 use alloc::vec;
 use alloc::vec::Vec;
 use sys::{ImportedStr, Origin, Position, ShortCStr};

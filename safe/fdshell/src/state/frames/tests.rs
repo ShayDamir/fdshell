@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use super::{pop_frame, push_frame};
+use super::cell::{pop_frame, push_frame};
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, ShortCStr};
 
