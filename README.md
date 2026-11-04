@@ -1590,6 +1590,11 @@ dies silently when its reader goes away (`seq 1000000 | echo got` prints
 `got` and nothing else), while the interactive shell itself survives a closed
 stdout.
 
+* Data-driven recursion — the arithmetic evaluator/parser, `test` expressions
+  and brace expansion — is capped at 1 000 levels of nesting. bash computes
+  deeper input; fdshell reports a clean error instead of aborting on a stack
+  overflow.
+
 ## Implementation
 
 The fdshell binary is a dynamically linked Linux x86_64 binary with no

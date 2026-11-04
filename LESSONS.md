@@ -6574,3 +6574,31 @@ the flag's `false` side and the mutation killer for a flag flipped either way), 
 `tests/loops.rs::for_clause_without_in_iterates_the_positional_parameters` with
 `tests/loops.rs::the_default_for_list_is_quoted_dollar_at`. README
 "Conditionals and loops" states the rule for users.
+
+## Data-driven descents ride one shared depth cap (`depth.rs`)
+
+A descent whose depth is a property of the **data** — the arithmetic
+evaluator/parser, `test` expressions, brace expansion — cannot ride the
+`ShellState` counter (LESSONS: "Keep execution-context counters in ShellState,
+not threaded parameters"): these sites have no state to ride, so they share
+`depth.rs::MAX_DATA_DEPTH` and one guard call. The bounds are the rule: above the
+pinned-legal nesting (100 — `nest.rs`, `arith/var.rs`), below the lowest measured
+crash depth (2 200, brace expansion), so the cap bites on hostile input only.
+LESSONS: "Recursive glob_match caused stack overflow on long inputs" says *prefer*
+iterative; for these descents the accepted shape is the cap, because the recursion
+is a precedence-climbing/mutual one whose side-effect order must not move (arith
+short-circuits, `update` pre/post, the brace cross-product order).
+
+One guard, one boundary-test family, one pin per site. The boundary pins are
+**integration** tests on purpose: a unit test's thread stack is too small to
+*reach* the cap, so a deep pin there would be the thing that overflows. Where a
+guard sits at a production's entry, the boundary is one input level early (the
+parser's own level counts) — pin the measured boundary, not the intended one.
+
+Pins: `depth/tests.rs::at_the_cap_the_closure_runs`,
+`depth/tests.rs::past_the_cap_the_guard_reports`,
+`tests/arith.rs::arith_flat_chain_from_data_is_capped`,
+`tests/arith.rs::arith_paren_nesting_is_capped`,
+`tests/test.rs::nested_groups_and_negation_chains_are_capped`,
+`tests/brace_expand.rs::deep_nesting_reports_the_depth_cap`. README "Security"
+states the rule for users.
