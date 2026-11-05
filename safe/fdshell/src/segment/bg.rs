@@ -20,6 +20,11 @@ use split::Split;
 /// statement's text.
 pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
     let amp = book.i;
+    // One computation of the index just past the `&`, shared by both consumers —
+    // the fast path below and the sole advancement rule at the end (rule 17:
+    // the recomputed twin's mutants converged on this value and were recorded
+    // equivalent; with one site, the load-bearing consumer sees the mutation too).
+    let past_amp = amp + 1;
     let mut split = Split {
         line,
         start: book.start,
@@ -48,7 +53,7 @@ pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
         // A line that ends at the `&` (blank, or a `#` comment behind it)
         // keeps jumping past the body regions.
         book.i = if line_continues(line, amp) {
-            amp + 1
+            past_amp
         } else {
             resume
         };
@@ -64,8 +69,8 @@ pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
     // empty target, a body-floor clamp) must never park the cursor on the
     // `&` it just consumed — the scan would re-read it forever.
     if book.i <= amp {
-        book.start = amp + 1;
-        book.i = amp + 1;
+        book.start = past_amp;
+        book.i = past_amp;
     }
 }
 
