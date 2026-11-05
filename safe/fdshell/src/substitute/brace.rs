@@ -1,11 +1,12 @@
-use core::fmt::Write;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::resolve::ResolveError;
 use crate::mask::MaskBit;
 use crate::state::ShellState;
+
+mod length;
 
 pub(crate) fn handle_brace(
     peek: &mut super::mask::Counting<'_>,
@@ -18,40 +19,7 @@ pub(crate) fn handle_brace(
 ) -> Result<(), Report<ResolveError>> {
     peek.next();
     if peek.peek().copied() == Some(b'#') {
-        peek.next();
-        let state = super::borrow_state(cell)?;
-        let (name, closed) = read_until_close(peek)?;
-        // `${#}` is the length of the empty name: bash prints `0` at rc 0 even
-        // under `set -u`, so this case must not reach the nounset bail (an
-        // `UnboundVariable` with an empty name names nothing, STYLE §4.7).
-        if closed && name.is_empty() {
-            out.push(c"0");
-            return Ok(());
-        }
-        if closed {
-            // The array arm of `#`: the element count (`${#name[@]}`) and the
-            // element's length (`${#name[idx]}`) — task #422.
-            if let Some(len) = super::array_fields::len(&name, cell)? {
-                core::write!(out, "{len}").change_context(ResolveError::Never)?;
-                return Ok(());
-            }
-        }
-        match (closed, state.var_value(&name).map(|v| v.len())) {
-            (true, Some(len)) => {
-                core::write!(out, "{len}").change_context(ResolveError::Never)?;
-            }
-            // nounset bails on `${#name}` like bash's `x: unbound variable`.
-            (true, None) if state.options & crate::options::NOUNSET != 0 => {
-                bail!(ResolveError::UnboundVariable { var: name });
-            }
-            // POSIX 2.7.1: an unset parameter has length 0.
-            (true, None) => out.push(c"0"),
-            (false, _) => {
-                out.push(c"${#");
-                out.push(&name);
-            }
-        }
-        return Ok(());
+        return length::length(peek, cell, out);
     }
     let (content, closed) = read_until_close(peek)?;
     if !closed {
@@ -93,7 +61,7 @@ pub(crate) fn handle_brace(
     state.resolve_var_name(&content, out)
 }
 
-fn read_until_close(
+pub(super) fn read_until_close(
     peek: &mut super::mask::Counting<'_>,
 ) -> Result<(ShortCStr, bool), Report<ResolveError>> {
     let mut name = ShortCStr::new();
