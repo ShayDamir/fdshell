@@ -5,16 +5,17 @@
 //! caught; the dispatch in `script.rs` owns the scan, the pre-passes and the
 //! early return.
 
+use alloc::vec::Vec;
+use error_stack::Report;
+use sys::ScriptText;
+use sys::fork_cell::ForkCell;
+
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::script::merge::{Unit, text_at};
 use crate::script::unclosed::report;
 use crate::segment::Segment;
 use crate::state::ShellState;
-use alloc::vec::Vec;
-use error_stack::Report;
-use sys::ScriptText;
-use sys::fork_cell::ForkCell;
 
 /// Run one statement unit: the joined statement `merge::units` built for it, or
 /// the segment as it stands.

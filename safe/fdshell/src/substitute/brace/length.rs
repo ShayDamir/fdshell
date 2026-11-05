@@ -9,10 +9,9 @@ use sys::fork_cell::ForkCell;
 use crate::error::resolve::ResolveError;
 use crate::state::ShellState;
 
-use crate::substitute::array_fields;
-use crate::substitute::borrow_state;
 use crate::substitute::brace::read_until_close;
 use crate::substitute::mask::Counting;
+use crate::substitute::{array_fields, borrow_state};
 
 pub(crate) fn length(
     peek: &mut Counting<'_>,

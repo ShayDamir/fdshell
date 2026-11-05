@@ -26,14 +26,18 @@ pub(crate) fn run_timeout(
     cell: &ForkCell<ShellState>,
 ) -> Result<bool, Report<TimeoutError>> {
     // The shared validator answers with `CmdError`; `timeout`'s type carries the
-    // same two messages, so the conversion is per-variant (STYLE §4.5).
+    // same two messages, so the conversion is per-variant (STYLE §4.5). A variant
+    // the shared validator does not produce today is an invariant violation here,
+    // so the fallback maps to `Never` (§4.10) rather than borrowing another's word.
     super::validation::validate_intercept(line, "timeout", cmdline).map_err(
         |report| match *report.current_context() {
+            CmdError::BuiltinKeywordNotSupported { command } => {
+                report.change_context(TimeoutError::BuiltinKeywordNotSupported { command })
+            }
             CmdError::CapturesNotSupported { command } => {
                 report.change_context(TimeoutError::CapturesNotSupported { command })
             }
-            _ => report
-                .change_context(TimeoutError::BuiltinKeywordNotSupported { command: "timeout" }),
+            _ => report.change_context(TimeoutError::Never),
         },
     )?;
     let cfg = parse::parse(
