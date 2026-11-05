@@ -66,9 +66,39 @@ fn amp_before_brace_is_a_list_terminator() {
     assert!(g.body.data.eq_bytes(b"echo a & echo b &"));
 }
 
+/// The terminator after a **compound command** is optional (the rule task #301
+/// measured; the group arm adopted it for task #425, reading the shared
+/// closer-predecessor set through `comment::terminates_closer`): the body is the
+/// whole compound, closer included — nothing brackets it for the `;` trim to take.
+#[test]
+fn a_compound_closer_before_the_brace_is_accepted() {
+    for (script, body) in [
+        (b"{ if :; then :; fi }".as_slice(), "if :; then :; fi"),
+        (b"{ { echo n; } }", "{ echo n; }"),
+        (b"{ ( : ) }", "( : )"),
+        // The `;` before `done` is required here: the optional terminator is the
+        // closer's own rule, and a *simple* command before `do`'s `done` needs it
+        // (bash rejects `do : done` rc 2) — what the new rule decides is the
+        // group's `}` standing straight behind `done`.
+        (b"{ for i in a; do :; done }", "for i in a; do :; done"),
+        (b"{ while false; do :; done }", "while false; do :; done"),
+        (b"{ case x in x) : ;; esac }", "case x in x) : ;; esac"),
+    ] {
+        assert!(
+            group(script).body.data.eq_bytes(body.as_bytes()),
+            "{script:?}"
+        );
+    }
+    // The closer keeps the group's own redirect.
+    let g = group(b"{ if :; then :; fi } > out");
+    assert!(g.body.data.eq_bytes(b"if :; then :; fi"));
+    assert_eq!(g.redirects.len(), 1);
+}
+
 #[test]
 fn empty_group_is_an_error() {
     assert_eq!(group_err(b"{ }"), "group is empty");
+    assert_eq!(group_err(b"{ ; }"), "group is empty");
     assert_eq!(group_err(b"{ ; ; }"), "group is empty");
     assert_eq!(group_err(b"{  2> out }"), "expected ';' before '}'");
     // The emptiness test is `semi::block_body`'s, run on the **trimmed** slice —
@@ -88,6 +118,12 @@ fn empty_group_is_an_error() {
 #[test]
 fn missing_semicolon_before_brace_is_an_error() {
     assert_eq!(group_err(b"{ echo a }"), "expected ';' before '}'");
+    // The two gates of the shared closer-predecessor set, at the group arm
+    // (task #425): a quoted `"fi"` is word data (`keyword_word`'s raw-span gate),
+    // and a closer glued behind a redirect is not the bare keyword either —
+    // bash rejects both rc 2, so they stay parse errors here.
+    assert_eq!(group_err(b"{ echo a; \"fi\" }"), "expected ';' before '}'");
+    assert_eq!(group_err(b"{ { echo a; }>out }"), "expected ';' before '}'");
 }
 
 #[test]

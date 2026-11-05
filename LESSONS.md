@@ -4085,7 +4085,11 @@ predicate, read at the scan and at the builders, that knows both halves.
   terminator (`;`, the newline token, the plain `&`) **or** a closer keyword.
   `keyword_word`'s raw-span gate keeps a quoted `"fi"` out, and the glued
   `}>f`/`esac>f` words out — bash rejects `while false; do { :; }>f done` rc 2 and
-  the token test says no, so that row stays rc 1.
+  the token test says no, so that row stays rc 1. The **group** arm reads the same
+  predicate since task #425, through its comment-extended one
+  (`group_block/comment.rs::terminates_closer`) — the shared set is its base, and
+  the comment-closed line is the group's extra half (LESSONS: "A comment-terminated
+  line ends a brace group's body, and no keyword block's").
 - **The clause keywords carry the same gate**, read from the transition side:
   `if`/`while`/`until` and `then`/`do`/`else`/`elif` restart command position only
   where they are not an argument, so the `else` of `if true; then echo a else fi`

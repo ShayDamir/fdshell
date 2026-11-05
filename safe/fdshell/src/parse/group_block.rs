@@ -40,14 +40,16 @@ pub(crate) fn tokens_to_group(
     // POSIX #1.2's `compound_list` must be non-empty, and the emptiness test is
     // [`block_body`]'s, shared with every block arm (the task #305 template).
     let trimmed = block_body(body_tokens, line, ParseError::GroupEmpty)?;
-    // POSIX #1.2: `}` must be preceded by a command-list terminator. The
-    // tokenizer emits a `;` token for a newline, so `{ echo a` newline `}` is
-    // accepted, and the plain `&` backgrounds the body's last statement
+    // POSIX #1.2: `}` must be preceded by a command-list terminator, read through
+    // the shared closer-predecessor set `semi::preceded` — so the terminator after a
+    // **compound command** is optional at the group too (task #301's rule, adopted
+    // here for task #425). The tokenizer emits a `;` token for a newline, so `{ echo a`
+    // newline `}` is accepted, and the plain `&` backgrounds the body's last statement
     // (task #354: `{ echo hi & }`). `closing_keyword_index` skips token 0 (the
     // `{`), so `close` is never 0. The body's last **word** is a predecessor as well
     // once its line is closed by a `#` comment — bash's brace grammar reads the newline
-    // that ends such a comment as the terminator (task #404; the group arm's own half of
-    // the rule, since the keyword closers must keep the shared set).
+    // that ends such a comment as the terminator (task #404; the group arm's own half
+    // of the rule, kept out of the shared set).
     let before_close = close.saturating_sub(1);
     ensure!(
         comment::terminates_closer(tokens, line, before_close),

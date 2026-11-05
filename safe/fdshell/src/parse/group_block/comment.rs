@@ -1,17 +1,20 @@
 //! The group arm's `;`-before-`}` predecessor: extracted for the line budget.
 //!
-//! Bash's **brace-group** grammar reads the newline that ends a `#` comment as the
-//! body's terminator (`{ echo a # c` + newline + `}` runs, rc 0), while its keyword
-//! closers do not (`if true; then # c` + newline + `fi` stays bash's syntax error,
-//! pinned in `tests/block_bodies.rs`) — so the half of the rule that reads a comment
-//! line belongs to the group arm, not to `semi::preceded`'s shared predecessor set.
+//! Its base is the shared closer-predecessor set ([`is_closer_predecessor`]: the
+//! command-list terminator **plus** the closer of a compound command — the rule
+//! task #301 measures, which the group's `}` adopted for task #425). The group's
+//! **extra half** is the comment line: bash's brace-group grammar reads the newline
+//! that ends a `#` comment as the body's terminator (`{ echo a # c` + newline + `}`
+//! runs, rc 0), while its keyword closers do not (`if true; then # c` + newline +
+//! `fi` stays bash's syntax error, pinned in `tests/block_bodies.rs`) — so that half
+//! of the rule belongs to the group arm, not to `semi::preceded`'s shared set.
 
 use crate::parse::Token;
-use crate::parse::semi::is_list_terminator;
+use crate::parse::semi::is_closer_predecessor;
 use crate::scan::{Boundary, ScanState, boundary};
 
-/// The token in front of the group's `}`: the shared terminator set
-/// ([`is_list_terminator`]), **plus** a word whose line is closed by a `#` comment.
+/// The token in front of the group's `}`: the shared closer-predecessor set
+/// ([`is_closer_predecessor`]), **plus** a word whose line is closed by a `#` comment.
 /// Comment text never reaches the token list — the tokenizer drops a comment and the
 /// newline that ends it with it — so this half of the rule reads the raw bytes of the
 /// gap the tokenizer left between the word and the closer. Those bytes sit outside every
@@ -19,13 +22,13 @@ use crate::scan::{Boundary, ScanState, boundary};
 /// starts fresh and the `#` it finds is a run's first byte after whitespace: exactly the
 /// word-start rule [`boundary`] applies, so no byte compare is needed here.
 pub(super) fn terminates_closer(tokens: &[Token], line: &[u8], idx: usize) -> bool {
-    let Some(tok @ (_, prev_end, _, _, _, _)) = tokens.get(idx) else {
+    let Some(&(_, prev_end, _, _, _, _)) = tokens.get(idx) else {
         return false;
     };
     let Some(&(_, close_start, _, _, _, _)) = tokens.get(idx + 1) else {
         return false;
     };
-    is_list_terminator(tok) || comment_in_gap(line, *prev_end, close_start)
+    is_closer_predecessor(tokens, line, idx) || comment_in_gap(line, prev_end, close_start)
 }
 
 /// A word-start `#` comment sits in `line[from..to]`: the gap between the body's last

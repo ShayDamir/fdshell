@@ -890,3 +890,55 @@ fn a_comment_line_inside_the_body_terminates_the_group() {
     assert_eq!((out.as_str(), err.as_str(), rc), ("w\n", "", 0), "{err}");
     assert_eq!(body(&f), "a\n");
 }
+
+/// Task #425: the terminator after a **compound command** is optional — the rule
+/// task #301 measured for the keyword blocks (README "A block's closing keyword
+/// has a rule of its own") — and the group's `}` now reads the shared
+/// closer-predecessor set, so a body ending in `fi`/`done`/`esac`/`}`/`)` closes
+/// straight at its own keyword. Every accepted row is measured against bash 5.3.9;
+/// the arith-`for` twin shares `tokens_to_group` (task #394's brace body), so it
+/// lives here with the rest of the family. The two run-side divergences keep their
+/// owners: the `(` lookup is task #316's (no subshell runtime), and the
+/// predecessor-only rule answers only the closer's predecessor question (README).
+#[test]
+fn a_compound_closer_before_the_group_brace_is_accepted() {
+    for (script, want) in [
+        ("{ if :; then echo A; fi }", "A\n"),
+        ("{ { echo A; } }", "A\n"),
+        ("{ case x in x) echo A ;; esac }", "A\n"),
+        ("{ for i in a; do echo A; done }", "A\n"),
+        ("{ while false; do echo A; done }", ""),
+        ("{ f() { echo A; } }", ""),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), err.as_str(), rc), (want, "", 0), "{script}");
+    }
+    // Cond part, mid-run, and the arith-`for` twin: the scan side already
+    // accepted these shapes (task #301's lesson), so only the parse-side rule
+    // was missing.
+    let (out, err, rc) = run("true && { if :; then echo A; fi }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("A\n", "", 0), "{err}");
+    let (out, err, rc) = run("{ if :; then echo A; fi } && echo T");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("A\nT\n", "", 0), "{err}");
+    let (out, err, rc) = run("if :; then { if :; then echo A; fi }; fi");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("A\n", "", 0), "{err}");
+    let (out, err, rc) = run("for ((i=0;i<1;i++)) { if :; then echo A; fi }");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("A\n", "", 0), "{err}");
+    // The closer keeps the group's own redirect: rc 0, the file written.
+    let (f, _sf) = temp_path("closer");
+    let (out, err, rc) = run(&format!("{{ if :; then echo A; fi }} > {f}"));
+    assert_eq!((out.as_str(), err.as_str(), rc), ("", "", 0), "{err}");
+    assert_eq!(body(&f), "A\n");
+    // Pinned as measured, owners named. **Task #316**: the parse accepts the
+    // subshell body and its `(` reaches the command lookup — exactly what top
+    // level `( echo A )` reports.
+    let (out, err, rc) = run("{ ( echo A ) }");
+    assert_eq!((out.as_str(), rc), ("", 1), "{err}");
+    assert!(err.contains("\"(\" not found"), "{err}");
+    // The rule answers only the closer's **predecessor** question (README): the
+    // parse accepts `{ echo A; fi }`, the body runs, and its `fi` reports like
+    // top-level `echo A; fi` — bash rejects this line at parse (rc 2).
+    let (out, err, rc) = run("{ echo A; fi }");
+    assert_eq!((out.as_str(), rc), ("A\n", 1), "{err}");
+    assert!(err.contains("\"fi\" not found"), "{err}");
+}

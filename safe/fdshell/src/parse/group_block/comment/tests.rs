@@ -82,3 +82,13 @@ fn a_comment_line_keeps_the_closers_redirect() {
     assert!(g.body.data.eq_bytes(b"echo a"));
     assert_eq!(g.redirects.len(), 1);
 }
+
+/// The two halves of the arm's predicate agree (task #425): the compound closer here
+/// already answers through the shared set, and the comment keeps the body the words
+/// before the `#` — the comment's own text stays out of the body, as everywhere else
+/// in this file.
+#[test]
+fn a_compound_closer_and_a_comment_line_agree() {
+    let g = group(b"{ if :; then :; fi # c\n}");
+    assert!(g.body.data.eq_bytes(b"if :; then :; fi"));
+}
