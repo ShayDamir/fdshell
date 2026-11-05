@@ -1152,7 +1152,16 @@ then :; fi done`, `for i in a; do if :; then echo f; fi done`,
 `if true; then { echo a; } fi`, `if true; then f() { :; } fi` and
 `while false; do ( : ) done` (a subshell's `)` is a closer too; a subshell that
 **runs** is task #316's gap), mid-run (`true && if …; fi`) and as a pipeline
-stage (`echo a | while …; done`) alike, all run at rc 0. A block keyword written as an
+stage (`echo a | while …; done`) alike, all run at rc 0. The rule reaches a
+function definition's **own** `}` too (task **#424**): `f() { echo a }` reports
+`expected ';' before '}'` — the group's message, reused — at rc 1 where bash
+stops at rc 2, and nothing of the statement runs (`f() { echo a } ; f` prints
+nothing, `f() { echo a } >f` opens no file), while the compound-command exception
+applies at the def site as everywhere else, so `f() { if :; then :; fi }` and
+`f() { { :; } }` run at rc 0; the glued spellings the tokenizer never reads as a
+def (`f() {}`, `f() {:;}`) and the comment-line predecessor — the group arm's half
+of the set, so a def body ending on one reports where bash runs — are pinned as
+measured in `safe/fdshell/tests/block_bodies.rs`. A block keyword written as an
 **argument** is word data and never swallows the closer, so
 `if true; then echo a else fi` and `while false; do echo a else done` are parse
 errors (bash rc 2, fdshell rc 1 with its own

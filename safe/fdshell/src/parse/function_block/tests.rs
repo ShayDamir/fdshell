@@ -32,6 +32,10 @@ fn parses_function_name_and_body() {
 /// body too (task #302): POSIX #2.9's `function_def` nests the group's
 /// `compound_list`, and bash stops on `f() { }` with rc 2. Every spelling of a
 /// body with no command is a parse error, in both definer forms.
+///
+/// The rows are also the message-order pins of task #424: the emptiness check runs
+/// first, so an empty body keeps *this* message and never the terminator's (the
+/// group's `{ ; }` is `group is empty` for the same reason).
 #[test]
 fn empty_body_is_a_parse_error() {
     for text in [
@@ -70,6 +74,45 @@ fn non_empty_bodies_stay_definitions() {
         };
         assert!(def.name.eq_bytes(b"bar"), "name of {text:?}");
         assert!(def.body.data.eq_bytes(body), "body of {text:?}");
+    }
+}
+
+/// The def-site twin of the `;`-before-closer rule task #301 wrote (the group's
+/// own twin is `group_block.rs`): the body is a `compound_list`, so the `}` needs
+/// a command-list terminator in front of it — `;` (the newline's token), the plain
+/// `&`, or the closer of a compound command. The message is the group's variant,
+/// reused. A **quoted** `";"` word in front of `}` is word data and terminates
+/// nothing (task #336), so it reports too. Glued-brace spellings (`f() {}`,
+/// `f() {:;}`) never reach this layer — the tokenizer's gate is what rejects them,
+/// pinned in `tests/block_bodies.rs`.
+#[test]
+fn a_body_without_a_terminator_reports_the_missing_semicolon() {
+    for text in [
+        &b"bar() { echo hi }"[..],
+        &b"function bar { echo hi }"[..],
+        &b"bar() { echo a ';' }"[..],
+    ] {
+        // `ParsedLine` is not `Debug`, so map the `Ok` arm to `()` before unwrap_err.
+        assert!(
+            matches!(
+                try_parse(text).map(|_| ()).unwrap_err().current_context(),
+                ParseError::ExpectedSemicolonBeforeCloseBrace
+            ),
+            "{text:?} is not the missing-terminator error"
+        );
+    }
+    // The accepted predecessors keep the definition: the plain `&`, and two closers
+    // of a compound command — an `if` and a group. The newline is covered by
+    // `non_empty_bodies_stay_definitions`.
+    for text in [
+        &b"bar() { echo hi & }"[..],
+        &b"bar() { if :; then :; fi }"[..],
+        &b"bar() { { :; } }"[..],
+    ] {
+        assert!(
+            matches!(parse(text), crate::parse::ParsedLine::Function(_)),
+            "{text:?} stays a definition"
+        );
     }
 }
 

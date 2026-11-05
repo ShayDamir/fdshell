@@ -4,7 +4,7 @@ pub(crate) use definer_region::definer_with_region;
 
 use super::Token;
 use super::part_text::part_text;
-use super::semi::block_body;
+use super::semi::{block_body, ensure_before_closer};
 use super::word_quoted::{gated_word, keyword_word, span_word};
 use crate::error::parse::ParseError;
 use crate::keywords::name_len;
@@ -115,10 +115,21 @@ pub(crate) fn tokens_to_function(
     // bytes must travel with the stored body, so the text the call re-runs is a
     // contiguous heredoc (task #305). The multi-line form is extension mode,
     // whose regions are already inside the slice, and stays verbatim.
-    let body = part_text(
-        text,
-        block_body(body_tokens, line, ParseError::FunctionEmptyBody)?,
+    let trimmed = block_body(body_tokens, line, ParseError::FunctionEmptyBody)?;
+    // The def-site twin of the closing-keyword rule task #301 wrote: the body's
+    // `}` needs a command-list terminator in front of it — `;` (the newline's
+    // token), the plain `&`, or the closer of a compound command, which is what
+    // keeps `f() { if :; then :; fi }` and `f() { { :; } }` definitions. The
+    // predicate is the shared [`ensure_before_closer`], the group's own
+    // comment-predecessor extension (task #404) staying that arm's half. The
+    // order is the group's: empty first, then the terminator.
+    ensure_before_closer(
+        tokens,
+        line,
+        close,
+        ParseError::ExpectedSemicolonBeforeCloseBrace,
     )?;
+    let body = part_text(text, trimmed)?;
     Ok(FunctionDef { name, body })
 }
 

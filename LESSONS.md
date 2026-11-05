@@ -4080,7 +4080,8 @@ predicate, read at the scan and at the builders, that knows both halves.
   (`for`'s `;`-only ensure already mis-rejected `… fi done` once the closer was
   found).
 - **Builder side** (`parse/semi/preceded.rs::is_closer_predecessor` +
-  `ensure_before_closer`, called at the `if`/`while`/`for`/`for ((…))` sites): a
+  `ensure_before_closer`, called at the `if`/`while`/`for`/`for ((…))` and
+  function-definition sites (task #424): a
   terminator (`;`, the newline token, the plain `&`) **or** a closer keyword.
   `keyword_word`'s raw-span gate keeps a quoted `"fi"` out, and the glued
   `}>f`/`esac>f` words out — bash rejects `while false; do { :; }>f done` rc 2 and
@@ -6403,12 +6404,18 @@ and never run. Do **not** fix this by emitting a separator token for a comment's
 newline: it is global, it would make fdshell *accept* the keyword rows above (a new
 divergence, in the wrong direction), and it rewrites the tokenizer's comment pins.
 
+The **function-definition body's** `}` is the other brace closer, and bash reads a
+comment line in front of it the same way (rc 0); the def site reads the shared
+predecessor set, so it reports there — the extra half belongs to the group arm, so
+this row is pinned as a measured divergence (task #424).
+
 Pins: `tests/group.rs::a_comment_line_inside_the_body_terminates_the_group` (every
 row measured against bash 5.3.9; the `{ false # c` row's rc 1 is **earned by
 running**, so its pin asserts the parse message is **gone** — the only shape that
 tells "runs and fails" from "always errors") and
 `parse/group_block/comment/tests.rs` — the arm from both sides of the gap: a
-comment-terminated line, and `{ echo a }` without one.
+comment-terminated line, and `{ echo a }` without one. The def site:
+`tests/block_bodies.rs::the_def_site_needs_a_terminator_before_its_closing_brace`.
 
 ## The closer tail's stop is load-bearing: only an ordinary word bails
 

@@ -7,7 +7,9 @@
 //! 2026-10-23), fdshell reports its own message with rc 1 (README "Errors").
 //! The empty-`do` forms used to **run forever** (`while true; do; done` is an
 //! unbounded no-op loop), so the two loop pins below run under a bounded
-//! child: a regression must panic, not hang.
+//! child: a regression must panic, not hang. The file is also the body-rule home,
+//! so the def-site terminator pins of task #424 — and the glued-brace rows that
+//! never reach the parse layer — live here.
 
 use std::process::{Command, Stdio};
 use std::str;
@@ -248,7 +250,7 @@ fn heredoc_arm_bodies_are_not_empty() {
 
 #[test]
 fn bash_parity_forms_stay_green() {
-    let cases: [(&str, &str); 11] = [
+    let cases: [(&str, &str); 12] = [
         ("if true; then echo a; fi", "a\n"),
         ("if false; then echo a; else echo b; fi", "b\n"),
         (
@@ -265,9 +267,11 @@ fn bash_parity_forms_stay_green() {
         ("f() { echo a; }; f", "a\n"),
         ("f() {\necho hi\n}; f", "hi\n"),
         // A brace-expanded body is non-empty, and bash's compound-command
-        // exception needs no `;` before `}` (the def-site rule is task #424's).
+        // exception needs no `;` before `}` — the def's own `}` is governed by the
+        // same rule now (#424), whose predecessor set includes a compound closer.
         ("f() { echo {a,b}; }; f", "a b\n"),
         ("f() { if :; then :; fi }", ""),
+        ("f() { { :; } }; f", ""),
     ];
     for (script, want) in cases {
         let (out, err, code) = run(script);
@@ -385,8 +389,10 @@ fn a_dangling_cond_operator_before_a_block_closer_is_measured() {
         // The group: the closer rule passes for the same reason.
         "{ echo a ||\n}",
         "{ echo a ||; }",
-        // A function-definition body needs no terminator before `}` at all
-        // (#424), so the glued pair reaches the body's list directly.
+        // A function-definition body whose last word is a glued operator: the
+        // def-site terminator rule (#424) answers first, so the body's own list is
+        // never reached — rc and stdout are unchanged here, only the message layer
+        // moved (README says so).
         "f() { echo a || }; f",
         "f() { echo a && }; f",
         "f() { echo a ||; }; f",
@@ -428,4 +434,47 @@ fn a_line_ending_on_a_cond_operator_continues_an_if_body() {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
     }
+}
+
+/// The def-site twin of the closing-keyword rule (README "Conditionals and loops",
+/// LESSONS: "A block's closing keyword has a rule of its own"), task #424: a
+/// function-definition body is the group's `compound_list`, so its `}` needs a
+/// command-list terminator in front of it — `;` (the newline's token), the plain
+/// `&`, or the closer of a compound command (the accepted half stays green in
+/// `bash_parity_forms_stay_green`). The group's message is reused, no new variant,
+/// and bash's rc 2 stays fdshell's rc 1 — the documented family — with nothing run:
+/// `f() { echo a }; f` prints nothing, `f() { echo a } >f` opens no file.
+///
+/// The glued-brace rows are tokenizer triage: the def gate never fires on them, so
+/// they never reach the parse layer, and they are pinned **as measured** — `f() {}`
+/// and `f() {:;}` end at the command-not-found the tokenizer's word leaves behind,
+/// and `f(){ }` is the message-order pin: the emptiness check runs first, so an empty
+/// body keeps its own message (the group's `{ ; }` is `group is empty` for the same
+/// reason).
+///
+/// The one row where **bash accepts and fdshell reports**: a `#` comment closing the
+/// body's last line. The tokenizer drops the comment and the newline that ends it, so
+/// no `;` token ever stands in the predecessor slot, while bash's brace grammar reads
+/// that newline as the terminator and runs — rc 0, both spellings, and rc 0 on `master`
+/// before this task. The group arm reads a comment line as a predecessor
+/// (`parse/group_block/comment.rs`, LESSONS: "A comment-terminated line ends a brace
+/// group's body"); the def site reads the shared predecessor set, so it reports here.
+/// Pinned as measured, both spellings (task #424).
+#[test]
+fn the_def_site_needs_a_terminator_before_its_closing_brace() {
+    // Both definer forms, at the def; the tail behind the row runs nothing.
+    run_err("f() { echo a }; f", "expected ';' before '}'");
+    run_err("function f { echo a }; f", "expected ';' before '}'");
+    // A separator spaced behind the closer: the def is what reports first, so the
+    // call is never reached.
+    run_err("f() { echo a } ; f", "expected ';' before '}'");
+    // The redirection written behind the closer reports and opens no file.
+    run_err("f() { echo a } >f", "expected ';' before '}'");
+    // The tokenizer's rows, pinned as measured.
+    run_err("f() {}", "\"f(\" not found");
+    run_err("f(){ }", "function definition body is empty");
+    run_err("f() {:;}", "\"f(\" not found");
+    // bash rc 0, fdshell rc 1 — see the doc comment.
+    run_err("f() { echo a # c\n}", "expected ';' before '}'");
+    run_err("f() { echo a # c\n}; f", "expected ';' before '}'");
 }
