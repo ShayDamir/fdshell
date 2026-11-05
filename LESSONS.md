@@ -455,7 +455,9 @@ The token-level half of the same rule: `tokenize_statement` blanks the heredoc *
 
 Three mechanics keep it one rule. (1) **One scan**: `regions::terminator_spans` is derived from `body_regions` (a region's `(start, term_start)` → the terminator line is `term_start..terminator_end`), so the body and its delimiter line cannot drift — the whole-text-scan rule in the entry above, extended to the delimiter half. The derivation has a mutant-shaped consequence: the two lists are **not** equivalent, because an *empty* delimiter line yields a region and **no** span, so `tokenize_statement`'s `regions.is_empty() && terminators.is_empty()` mask decision must key on the body regions, and the `&&`→`||` mutant is unkillable unless the empty-delimiter shape is pinned (`cat <<''` + `'` + the blank line prints `'`, bash parity — `parse/token/tests.rs::the_body_of_an_empty_delimiter_line_is_blank_too`, `tests/heredoc.rs::the_body_of_an_empty_delimiter_line_is_data`). (2) **Tokenizer**: `tokenize_statement` blanks the structure bytes (`is_structural`) of those spans in the copy it tokenizes; `brace_expand/protect::terminator_word` stays as it was — the two mechanisms are complementary (`{`/`}` are deliberately *not* in the byte set, because brace expansion runs on the original text, and blanking a brace would change the token text that protection matches). (3) **Byte count**: `scan/heredoc::operator_count_opaque` skips the regions claimed **inside** the window, and is used by exactly the two call sites whose windows span multiple lines (`cond/parts.rs::take_bodies`, an arm/cond text; `segment/block/keyword.rs`'s `k`, a pre-block heredoc's regions precede the block). The window-subset invariant of `regions.rs` (every counting window is a sub-window of the physical line's window) is what keeps `segment/line.rs`, `parse/cond_bodies.rs` and `segment/block/keyword.rs:125` on the plain `operator_count`: a physical-line-bounded window cannot straddle a claimed region. The region filter `line_start(line, start.saturating_sub(1)) >= from` is load-bearing, not a detail: a region claimed by an operator written **before** the window starts on the window's own line, and its body *covers* the window's bytes, so subtracting it blinds the count to the block's closer (`segment/block/keyword/tests.rs::skip_is_bounded_to_the_blocks_physical_line` is the probe; dropping the filter makes the block skip its closer). The byte/token agreement rule (the #207/#234 entries) names the pair explicitly: `operator_count_opaque` ↔ `tokenize_statement`'s terminator blanking — one of them alone leaves the counts disagreeing, which is why a token-level-only design is not a fix.
 
-Two build facts. `sites` was widened to `pub(crate)` and reused **unchanged** by the new count rather than refactoring `ops.rs`, because LESSONS used to record four accepted-equivalent mutants of `scan/heredoc/ops.rs` (and three of `lines.rs`) with their proofs, and named the gate that kept them honest (a focused `--iterate` run reporting **only recorded equivalents** as misses); task #513 resolved all seven by writing their sites operator-free, and the gate now reports exactly one accepted equivalent — the comment-skip arm re-derived on the rewritten body. And the new count lives in its own module `scan/heredoc/opaque.rs`: the same 31 lines inside `ops.rs` measured **98 tokei LoC**, over the 90-line cap, so the module split is the complexity fix, not a stylistic choice. The walk's `if end <= pos { continue }` guard is **unreachable by construction** and stays uncovered (`nix build .#coverage`): `body_regions` yields regions with strictly increasing starts *and* strictly increasing terminator-line ends (the scan resumes past each region, and a `;`-terminated line's own regions step past the previous region's terminator line), so `pos` — a previous span's end — is always below the next span's end. It is kept as the never-moves-backwards guard (its mutant `<=`→`>` **is** caught: inverting it skips every span, which the region-blindness pins see), and recorded so the coverage gap is not chased (LESSONS: "A guard the window invariant makes unreachable is recorded, not chased").
+Two build facts. `sites` was widened to `pub(crate)` and reused **unchanged** by the new count rather than refactoring `ops.rs`, because LESSONS used to record four accepted-equivalent mutants of `scan/heredoc/ops.rs` (and three of `lines.rs`) with their proofs, and named the gate that kept them honest (a focused `--iterate` run reporting **only recorded equivalents** as misses); task #513 resolved all seven by writing their sites operator-free, and the gate
+now reports exactly one accepted equivalent — the comment-skip arm re-derived on
+the rewritten body (resolved by task #525, item 3). And the new count lives in its own module `scan/heredoc/opaque.rs`: the same 31 lines inside `ops.rs` measured **98 tokei LoC**, over the 90-line cap, so the module split is the complexity fix, not a stylistic choice. The walk's `if end <= pos { continue }` guard is **unreachable by construction** and stays uncovered (`nix build .#coverage`): `body_regions` yields regions with strictly increasing starts *and* strictly increasing terminator-line ends (the scan resumes past each region, and a `;`-terminated line's own regions step past the previous region's terminator line), so `pos` — a previous span's end — is always below the next span's end. It is kept as the never-moves-backwards guard (its mutant `<=`→`>` **is** caught: inverting it skips every span, which the region-blindness pins see), and recorded so the coverage gap is not chased (LESSONS: "A guard the window invariant makes unreachable is recorded, not chased").
 
 ## A harness jobserver's pipes are inherited by test processes: exclude own pipe targets in /proc fd-table assertions
 cargo-mutants (and any jobserver-driven harness) passes its jobserver pipe into every spawned test process as an inherited fd. Pipeline stages and other forked children inherit that fd for their whole lifetime, so a `/proc/<pid>/fd` assertion that counts "exactly N pipes" passes under nextest alone but never holds under the harness. Rule: a test that inspects a child's fd table must first snapshot its own `pipe:[…]` targets from `/proc/self/fd` and count only pipes it did *not* open. Second half of the same lesson: `/proc`-based checks need a stable steady state to inspect, so identify the state by the full assertion itself (poll until some child satisfies it) rather than by process position or a sleep — transient states (pre-exec, mid-cleanup) are not inspectable and must simply be re-polled.
@@ -1008,10 +1010,10 @@ and the stays-errors family
 ## Linux `struct rusage` has no child-time fields; accumulate them from each `waitid` out-parameter
 The plan assumed `getrusage(RUSAGE_SELF)` yields the reaped children's times via `ru_cutime`/`ru_cstime` — those fields exist only on BSD. On Linux `struct rusage` has just `ru_utime`/`ru_stime` (self). The kernel does report a child's `rusage` through the `waitid` out-parameter (what bash uses), so fdshell reads it at every reap site (`sys::localfd::wait_pidfd_rusage`) and accumulates it into `ShellState.child_utime`/`child_stime` (`add_child_times`); `times` reports self times from `self_usage()` and children times from the accumulators. Foreground, background, pipeline, cmd-subst, timeout, and `wait`-arm reaps all feed the total.
 
-## The post-block `line_start` `<`→`<=` in the block scanners is an accepted equivalent mutant (the `comment.rs` twin is resolved, task #513)
-One residual mutant in the block-scanner files (task #117 re-work) is unkillable by any test and is recorded here so future `cargo mutants` runs and reviews do not re-flag it (its `comment.rs` twin was resolved in 2026-11, see item 2):
+## The post-block `line_start` `<`→`<=` in the block scanners is resolved: the comparisons are written operator-free (tasks #513, #525)
+Both block-scanner residuals were recorded as unkillable so future `cargo mutants` runs and reviews would not re-flag them; both are resolved (2026-11):
 
-1. `segment/block.rs::open_block` — the post-block `line_start` update (`new_start = if resume < heredoc::line_end_after(line, start) { line_start } else { resume }`), shared by both block branches since task #240 (it sat inline in `segment.rs`'s block arm when this mutant was first recorded, at `segment.rs:75`). The `<`→`<=` mutant differs only when `resume == line_end_after(line, start)`; `line_end_after` returns the first bare newline at-or-after `start` plus one (strictly `> start`) or `line.len()`, so the equality arises at end of input **and** (task #240's function branch) when the definition's closing token is the physical line's last byte — `resume = end + 1 == line_end_after`. In the equality case both arms take the `else` branch, whose resume was already pushed past every body region of the line (`resume.max(line_resume).max(pre_resume)` in `function_block`, `block_start_pos.max(line_resume).max(pre_resume)` in `keyword_block`), so no flush ever runs from the `line_start` the mutant picks; the remaining scan is a final flush of an *empty* run buffer (pre-block runs were drained by the `pre_resume` flush, and `flush_line` returns before reading `line_start` when the buffer is empty). Re-proven by running (task #240): `<=` on the shared site passes the whole suite (5062/5062) and the mutated and unmutated binaries are byte-identical (stdout, stderr, rc) on the equality shapes — `cat <<X; f() { echo hi; }` + `bodyX`/`X`, `f() { echo hi; }echo hi`, the multi-line-definition follow-on shapes, the keyword-block twins — and on task #240's 25-shape probe. Unobservable. The **group** branch's twin site (`segment/group.rs::open`'s own `new_start = if resume < line_end { line_start } else { resume }`, task #332) is the same shape: the equality arises when the group's statement ends at the physical line's newline (`cat <<X; { echo a; }` + `bodyX`/`X`), the equality case's remaining scan is again a flush of an *empty* run buffer, and it was re-proven by running on the #332 tree — `<`→`<=` passes the whole suite (5915/5915) and the mutated and unmutated binaries are byte-identical (stdout, stderr, rc) on the equality, trailing-content and comment shapes.
+1. Resolved by task #525 — `segment/block.rs::open_block` and its `segment/group.rs::open` twin: both comparisons are written through `matches!(resume.cmp(&line_end), Ordering::Less)` (rules 3/16/24 — a method call and a macro expose no operator), so the `<`→`<=` family — and its `==`/`>` twins, previously killed by the pins listed below — have no site to land on. The equality-case argument lives at the sites' own comments: both branches agree there because the equality case's resume was already pushed past every body region of the line, so the remaining scan is a final flush of an *empty* run buffer (pre-block runs were drained by the `pre_resume` flush, and `flush_line` returns before reading `line_start` when the buffer is empty). The rewrite was proven behaviour-preserving by a green full suite on the clean tree, and the equality shapes from the original probe (`cat <<X; f() { echo hi; }` + `bodyX`/`X`, `f() { echo hi; }echo hi`, `cat <<X; { echo a; }` + `bodyX`/`X`, and the multi-line follow-on shapes) stay green (2026-11-05).
 2. Resolved by task #513 — `comment.rs`'s heredoc branch of `scan_block` (`i = resume; *start = i + 1;`, `replace + with -` and `replace + with *`), where `resume` indexes the newline terminating the delimiter line. The old "both unobservable, re-proven by running" proof covered only the path where the loop *keeps going* (the run measured at the newline boundary contributes 0 either way and the `else` arm recomputes the value). Re-derived on the current tree: `+`→`-` is **killed** — RED twice, by the existing `block_redirect` pins `the_here_doc_tail_rows_that_keep_their_measured_values` and `a_here_doc_or_here_string_on_a_closer_feeds_the_block`. `+`→`*` stayed green by hand, and is killed by the rule-9 direct pin `comment/tests.rs::the_heredoc_branch_records_start_past_the_delimiter_newline`: when the run's own closer closes the pairing on the heredoc command line, the loop exits right after the branch, so the assignment — not the recomputation — is the final state, asserted exactly (measured on the clean tree).
 Coordinates drift with every split: re-derive the site from the heredoc branch of `scan_block`, never from the recorded line number, and re-prove a status change by applying the mutation and running the suite — a parallel `cargo mutants` log line is not proof (the entry "A mutant caught by a flaky test is a false kill").
 
@@ -1313,7 +1315,8 @@ resolved the seven mutants this entry used to accept as equivalent: each site
 is now written with no operator to mutate (rules 18/22/24), so the families are
 gone from `--list`, and the focus run
 `cargo mutants -f safe/fdshell/src/scan/heredoc/ops.rs -f safe/fdshell/src/scan/heredoc/ops/pipe.rs -f safe/fdshell/src/scan/heredoc/lines.rs`
-reports exactly one miss — item 3's accepted equivalent, nothing else. Verify with a **focused** run — this file's
+reports no miss at all since task #525 resolved item 3 — every family on the
+list is operator-free or killed, nothing else. Verify with a **focused** run — this file's
 build takes ~40 s per mutant, so a big `-j6` sweep over all changed files scores
 them as *caught* (the per-mutant timeout expires before the mutant is tested) —
 the sweep's count is not the truth for this file. **The file list is part of the
@@ -1347,28 +1350,28 @@ the load-flaky tests comes before chasing any of this.
    current body (green, task #513). Resolved by writing the walk over the exact
    range `(0..i).rev()` — the byte tests terminate it, the read at index 0
    answers, and the range carries no operators (rule 18).
-  3. `ops.rs`'s comment-skip arm `i = i + p + 1` → `i + p * 1` (the comment skip
-     lands **on** the comment's `\n` instead of just past it) is an **accepted
-     equivalent** again — and this time the argument is complete: the extra
-     iteration touches only the index, which converges (`advance` consumes the
-     `\n` as one word-break byte and lands on the same next byte), and nothing on
-     a comment run changes the walker's state; with the `seen_token` flag gone
-     there is no variable left for the extra step to leave behind. Task #513
-     re-proved it by hand: green twice on the current tree. It was **killed**
-     while the flag existed — task #318 re-proved that by hand: applying the
-     mutation failed `ops/tests.rs::word_break_bytes_and_the_run_start_open_the_operator`
-     (renamed from `newline_is_a_token_byte_space_and_tab_are_not`, task #345;
-     `# x\n<<EOF` counted **1** operator where the walker then counted **0**) plus
-     `parse::heredoc::tests::operator_count_leading_newline_agree` and
-     `…leading_operator_forms_agree` — but **task #345** deleted the flag and made
-     the clean walker count **1** on `# x\n<<EOF` (the run behind the comment's
-     newline opens its operator at the run start), so those pins stopped seeing the
-     difference, exactly as this item predicted. **Rule:** an
-     equivalence argument must cover every variable the extra iteration can reach —
-     a flag is as load-bearing as the index — and a recorded equivalent on a
-     rewritten body is a **new** finding: 4950/4950 green in the 2026-10 record,
-     three failures on 2026-10-25, both honest, both only visible by applying the
-     mutation and running the whole suite.
+  3. Resolved by task #525 — the comment-skip arm's `i + p + 1` → `i + p * 1`
+     (the site's second description is item 3 of the task #276 entry, and its
+     rule-24 shape is what resolved it): **the recorded mutant is now the
+     source** — the entry's own proof licensed it (the extra iteration touches
+     only the index, which converges, `advance` consuming the newline being
+     state-neutral; #276 measured it three ways, #513 re-proved it green twice,
+     and the full suite went green a third time on the rewritten source,
+     2026-11-05) — and the jump is written as a method call
+     (`Some(p) => i = i.saturating_add(p),`) so no operator is left at the site
+     (rules 22/24): the family — `+`→`*` and its `-` twins at both operands,
+     which the focus runs kept scoring as caught — has no site to land on.
+     The focused `-j1` run over the five rewritten files (this one, `block.rs`,
+     `group.rs`, `bg.rs`, `regions.rs`, 108 mutants, 2026-11-05) reports **no
+     miss** from any of the seven resolved sites; its four misses are the
+     pre-existing `segment/bg.rs::line_continues` family (drift from task
+     #313's sweep, not a registry record — this chore's `bg.rs` change is
+     value-identical by construction and those mutants touch only
+     `line_continues`'s own body, so they read the same before and after).
+     What stays from the old entry is its rule: an equivalence argument must
+     cover every variable the extra iteration can reach — a flag is as
+     load-bearing as the index — and a recorded equivalent on a rewritten body
+     is a **new** finding to re-prove by hand.
 4. Resolved by task #513 — the **three** `scan/heredoc/lines.rs` loop bounds this
    entry accepted (each proven equivalent by applying it and running the whole
    suite green, twice, task #318):
@@ -3222,22 +3225,12 @@ newline at index > 0, where `n * 1` is off by one) and
 `line_bodies_of_an_empty_window_are_empty` (with the guard gone the
 `line_end - 1` read underflows at 0 and the test panics).
 
-The accepted mutants are the repo's two known equivalent shapes: **loop bounds
-that `advance` walks past** (`line_end_after`'s `while i < line.len()` → `<=`:
-the extra step reads `line[len]` = `None`, advances by 1 and exits, returning
-`line.len()`; `sites`' `while i < next` → `<=`: the extra step is exactly the
-`advance` the outer loop takes at `next`, and `next` is always a
-whitespace/`;`/newline/`|`/line-end byte from `delimiter_span`, never a
-`#`-comment start (a `#` is a word byte, so it is inside the delimiter word)
-and never a `<<` site start (a site needs `word_start`, i.e. whitespace in
-front, and `next` is the delimiter word's end)) — the same family as the
-`clobber.rs` residuals "`advance`'s jump arms are one byte past the window";
-and **the usize guard whose distinguishing path is unreachable**
-(`precedes_pipe`'s `while k > 0` → `>=`: the loop only reaches `k == 0` when
-every byte before the `|` is whitespace, which is the 0-coverage-hits `false`
-fall-through recorded above, and there `k -= 1` underflows — so the guard is
-the debug-build panic guard, exactly `clobber.rs`'s "`s > 0` → `s >= 0`"
-residual).
+The paragraph that used to register the repo's two known equivalent shapes
+(loop bounds that `advance` walks past; the usize guard whose distinguishing
+path is unreachable) folded to a pointer: both its sites were resolved
+operator-free by task #513 — see "The `scan/heredoc/ops.rs` walker, its
+`pipe.rs` arm and the `lines.rs` neighbour" — so it is no longer part of the
+registry.
 
 ## A value substituted with an empty mask folds quoted escape pairs as unquoted
 The three assignment surfaces — `run_env::expand_one` (a scoped `NAME=value` prefix), `run_dispatch/assign_str.rs::set` (a bare `NAME=value` statement) and `intercept/local/expand.rs::expand_value` (`local NAME=value`) — all called `substitute_arg(value, &[], …)`. An empty mask means every byte takes the POSIX 2.2.1 (unquoted) arm, so a `\<char>` pair written **inside double quotes** — which POSIX 2.2.2 keeps, dropping the backslash only for `\$`, `\\`, `` \` `` and `\<newline>` — folded as an unquoted escape: `x="a\ b"; printf "[%s]\n" "$x"` printed `[a b]` where bash prints `[a\ b]`, and the same folding reached a child verbatim (`x="a\ b" env` showed `x=a b` vs bash's `x=a\ b`) and a stored pattern (`${x#"["a]}` stripped the quoted `[`). All three now take the value word's **own** mask: `CommandLine::env_assigns` is `Vec<Assign>` (name, raw value, mask) and `ParsedLine::AssignStr(Assign)`/`AssignStrs(Vec<Assign>)` carry it to the bare statement; `local` slices its own word's `args_mask`. The slice offset `name.len() + 1` exists in exactly one function, `parse::envassign::value_mask`, so the three consumers cannot drift (LESSONS: "Slice the word vector, its quote mask"); it rests on the tokenizer's 1:1 invariant (`cur.push_byte` ⇔ `mask.push`, pinned as a test in `parse/tests.rs::test_token_mask_is_parallel_to_the_word` — not as a `debug_assert!`, because nextest runs debug binaries) and pads short masks as unquoted, the same padding `substitute/arg.rs` applies. Two shapes carry the pins: `"\$b"` (the escape pair *is* the value's first byte, so a shifted slice misreads it) and the two-word pair `x="a\ b" y=b\ c cmd`, whose masks differ (`[true;4]` vs `[false;4]`) — the LESSONS rule that a same-quoting pair cannot tell an off-by-one from an off-by-two. The mask changes **folding only**: the value is stored whole (`substitute_arg` never splits and never globs — splitting lives in `substitute/words.rs::substitute_args`, which no assignment path uses), so `x="a b"` keeps its space, `x="a *"` stays a literal star, and the `&[]` → mask change cannot introduce a split; the *use* of the value still splits on IFS (`x="a\ b"` used unquoted splits into `a\` and `b`, as bash). The single-quote encoding is mask-independent (its `\$`/`\\` fold identically under both arms — `x='a\ b'` prints `[a\ b]` with and without the mask, pinned in `tests/env_assign.rs::single_quoted_value_is_mask_independent`), so task #141's claim that it needs nothing from #217 stands. The same `&[]` literal survived in `redirect/herestring.rs`, `redirect/heredoc.rs` and `case_exec.rs` (here-string word, here-doc body, `case` word) until task #269 threaded those masks too; `export` never substitutes at all (task #214).
@@ -4504,31 +4497,19 @@ accepted equivalents, unkillable because of scanner invariants:
   mutant causes is unreachable. **Task #345 deleted `preceded`**: `opens_word`
   calls `precedes_pipe` directly as its `|` arm, so a window starting on a `|`
   reaches `k == 0` — re-prove.
-- `ops.rs` `i + p + 1`→`i + p * 1` in the comment skip (the MISSED one,
-  col 38): the mutant's jump is `i + p * 1 = i + p`, the comment's
-  terminating newline — exactly **one byte short** of the unmutated
-  `i + p + 1`, not an identical expression. The extra iteration starts on
-  that newline: the comment gate rejects it (not a `#`) and the operator
-  gate rejects it (not a `<`), so the loop consumes it through
-  `ScanState::advance`, which at a newline is **state-neutral** —
-  `word_active` is already false (the comment gate requires `!word_active`)
-  and `advance` sets it to `!is_word_break(b'\n') = false`; no quote is
-  toggled (the comment gate requires the bare state, so none is open);
-  `paren_depth` is unmoved; and a newline is not `is_token_byte`, so
-  `seen_token` is unchanged. The scan therefore resumes at `i + p + 1` with
-  identical state and no input separates the two expressions: the mutant is
-  unkillable. The review read col 38 as col 34 and predicted an infinite
-  loop at `p == 0`; that mutation (`i * p + 1`) is **caught** by the existing
-  comment tests (in `caught.txt` with both `-` and `*`), and the loop is
-  unreachable for every input: the newline search starts *at* the `#`, so
-  `p >= 1` always — at `i = 1, p = 1` (the comment rows' own shape) the
-  product is `2`, the newline, from which the same state-neutral extra
-  iteration resumes. Measured three ways: MISSED in two independent
-  cargo-mutants runs, every hand-built shape (`"  #\n…"`, `" #\n…"`,
-  `" # #\n…"`, `"   # #\n…"`, the double-comment lines) ran the unmutated
-  outcome under the manually applied mutation, and the instrumented scan
-  trace shows identical trajectories. Chasing this mutant with tests is
-  chasing the newline's state-neutrality — record it, do not pin around it.
+- Resolved by task #525 — the comment skip: **the recorded mutant is now the
+  source** (`Some(p) => i = i + p,`, rule 1). The entry's own proof licensed it —
+  landing **on** the comment's newline, one byte short of `i + p + 1`, costs a
+  state-neutral extra iteration (`advance` consumes the newline: `word_active`
+  was already false, no quote is open, `paren_depth` unmoved) and resumes at the
+  same index with the same state; #276 measured it three ways and #513 re-proved
+  it green twice. The full suite is green on the rewritten source (2026-11-05),
+  and the one operator the site now carries (`i + p`) keeps the `-`/`*` mutants
+  that were **caught** by the existing comment tests — the `+`→`*` shape's
+  `i = 1, p = 1` livelock lives on in the new form (a deterministic hang on the
+  comment rows, rule 17: counted as a kill, attributed to those rows). Do **not**
+  "simplify" the jump by reusing `line_end_after`: it is quote-aware and this raw
+  search is not — `# it's` makes them disagree.
 
 ## A pin that asserts "the parent's fd N is closed" must close it in the child's start state (task #276)
 
@@ -4595,12 +4576,17 @@ rule, five consequences:
    (`the_leading_open_paren_is_taken_off_the_clause_s_first_pattern`). The span
    decrement is pinned by `case_pattern_span_survives_the_stripped_paren`:
    `HOME=/tmp/H; case /tmp/H/x in (~""/x)` prints `n` in bash; without it the
-   pattern expands to `/tmp/H/x` and prints `m`. Accepted-equivalent mutants of
-   that site: `start + 1` → `*start` (a pattern token reaches no raw-span
-   reader — the arm's text starts at the `)`, and `alias_expand`/
-   `brace_expand::rebuild` run on the untouched list) and `*fully_quoted` →
-   `false` (an unquoted leading byte is never fully quoted); keep both, they
-   hold the span-covers-text invariant (`word_quoted`'s `end - start`).
+pattern expands to `/tmp/H/x` and prints `m`. Resolved by task #525: the
+accepted `start + 1` → `*start` (`+`→`*`; its `-` twin was already killed) is
+killed by the rule-19 helper-level pin
+`parse/case_clause/tests.rs::take_open_paren_answers_with_the_exact_shifted_tuple`
+— the old "a pattern token reaches no raw-span reader" is a program-level claim
+that does not bind a unit call, so the pin feeds the helper a token with
+`start > 0` and a quote span behind the `(` and asserts the exact returned
+tuple, measured on the clean tree (2026-11-05). The `*fully_quoted` → `false`
+half of the old record generated no mutant in 27.1.0 (a tuple field deref, not
+a call), so it is no longer a live family; the span-covers-text invariant
+(`word_quoted`'s `end - start`) it guarded stands.
 
 `Pattern { text, mask, spans }` (`parse/case_clause/pattern.rs`) is joined by
 `semi::try_join_masked`, #269's single owner of the mask's offsets, so the
@@ -4621,23 +4607,20 @@ LESSONS: "A `case` arm is a command list"
 
 ## A guard the window invariant makes unreachable is recorded, not chased (task #311, `scan/heredoc/regions.rs`)
 
-`semi_terminated_regions` opens with
-`line.get(semi) != Some(&b';') || operator_count(line, run_start, semi) == 0` and
-closes with `if ops.is_empty() { return None }`. Two accepted-equivalent mutant
-species live there.
+`semi_terminated_regions` now states its two opening rules as their own early
+returns — `if line.get(semi) != Some(&b';') { return None }`, then
+`if operator_count(line, run_start, semi) == 0 { return None }` (rules 11/24) —
+and closes with `if ops.is_empty() { return None }`. One accepted-equivalent
+mutant and one coverage record lived there; the first resolved in 2026-11:
 
-- The `||`→`&&` of the opening guard is **unkillable**: flipping it only changes
-  *which* `;` of a physical line performs the whole-line claim, never *what* is
-  claimed — the anchor is the line's start and `body_start` is the line's own
-  newline, so a plain `;`-terminated run reaches exactly the regions the run
-  carrying the `<<` reaches (`cat <<T; echo hi` + body + `T` and
-  `echo a; cat <<T; echo hi` + body + `T` produce the same single region, one
-  byte-offset apart), and a newline-terminated run with an operator keeps taking
-  `skip_region`'s path with `semi_terminated_regions` answering `None` under both
-  spellings (`line.get(nl) != Some(&b';')` is true, and under `&&` the proceed
-  path lands on the same missing-delimiter `None`). The individual guards *are*
-  killed (`==`→`!=` on `operator_count`, the `Some(&b';')` pattern), so the pair's
-  `||` is the only residual.
+- Resolved by task #525 — the opening guard's `||`→`&&`, recorded **unkillable**
+  because flipping it only changed *which* `;` of a physical line performed the
+  whole-line claim, never *what* was claimed (the anchor is the line's start and
+  `body_start` is the line's own newline, so a plain `;`-terminated run reaches
+  exactly the regions the run carrying the `<<` reaches). Stating the two rules
+  as separate early returns leaves no connective site; each surviving test keeps
+  the kill it had as a conjunct (`==`→`!=` on `operator_count`, the
+  `Some(&b';')` pattern), and the suite is green on the split (2026-11-05).
 - The `ops.is_empty()` guard has **no reachable false branch**:
   `operator_count(line, run_start, semi)` scans the sub-window `[run_start, semi)`
   with the *stricter* preceding-token rule (`seen_token` starts false at
@@ -5073,16 +5056,18 @@ its own file; pinning the concatenation is a flake. fd-3 rows go through
 catches a leaked `async-*` scratch file before it breaks
 `glob::tests::relative_pattern_walks_from_the_base_fd`.
 
-The two missed mutants of this change (`cargo mutants -f
-safe/fdshell/src/segment/bg.rs`, 27.1.0, 22 mutants: 20 caught) are
-`mark`'s `amp + 1` → `amp * 1` and `→ amp - 1` in the `line_continues` arm. Both
-are **provably equivalent** to the original and are accepted: the sole
-advancement rule directly below normalizes every value ≤ `amp` to `amp + 1`
-(`if book.i <= amp { book.start = amp + 1; book.i = amp + 1 }`), so the final
-`Book` state is identical byte-for-byte — the same equivalence class the
-"clamp the tail guard already enforces" entry above records, reached from the
-other side. Deleting the tail guard is *not* an option (that entry pins what it
-protects); the arm's value is only the **fast path** of a rule with one owner.
+Resolved by task #525 (rule 17): `mark`'s `amp + 1` is now computed **once**
+(`let past_amp = amp + 1;`) and shared by both consumers, so the family sits at
+one site and a mutation there hits the load-bearing consumer too — the two
+mutants this entry recorded as **provably equivalent** (`+`→`*`, `+`→`-`) are
+now **caught**, killed by existing pins (`segment/bg/tests.rs::invalid_splits_are_marked`
+and `tests/run.rs::block_body_ampersand_then_semicolon_records_no_job` go red
+at `-j1`, 2026-11-05). Why they were equivalent before the sharing: the sole
+advancement rule directly below normalized every value ≤ `amp` to `amp + 1`, so
+the fast path's mutated write was recomputed away and the final `Book` state was
+identical byte-for-byte — the convergence became observable the moment both
+consumers read one value. Deleting the tail guard is *not* an option (that entry
+pins what it protects).
 
 ## A `;` token is a newline in disguise: the body-slice rule must read the token's byte (task #355)
 
