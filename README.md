@@ -1168,9 +1168,17 @@ a redirection (`while false; do { :; }>f done`). The closing keyword is the one
 place the glue is read the way bash reads it: the operand behind it
 (`done>f`, `fi>f`, `esac>f`, task #413) **and** the byte in front of it — a `case`
 pattern word's `)` (`case x in a)esac`, task **#421**) — so those shapes run at
-rc 0. A `;;` written in a `then` body
-is the separator rule's, not this one's: `if true; then echo a ;; fi` prints `a`
-at rc 0 where bash stops at rc 2.
+rc 0. A `;;` written in a `then` body is the stray-`;;` rule below, not this
+one's: `if true; then echo a ;; echo b; fi` reports (rc 1, nothing prints, bash
+rc 2). Its **one** exception is this rule's: a pair written immediately in front
+of the closer, where the token in front of it is claimed as POSIX's `;` and the
+body the guard then reads holds a single `;` and no pair —
+`if true; then echo a ;; fi` prints `a` at rc 0, and so does its spaced twin
+`if true; then echo a ; ; fi`; what the claim leaves behind still parses, so
+`if true; then b ;; fi` ends at its runtime miss `"b" not found`. All three are
+pinned as measured
+(`safe/fdshell/tests/block_closers.rs::a_double_semi_body_is_the_separator_rule_not_this_one`,
+the spaced twin in `safe/fdshell/tests/semi_semi.rs`), bash rejecting each at rc 2.
 
 This rule answers only the closer's **predecessor** question, so a body that
 ends in a **dangling `&&`/`||`** behind a legal terminator reaches its own
@@ -1269,23 +1277,81 @@ and bash's `;;` + newline + `&` — the newline is the list separator, and a
 terminator's head is a real `;` byte. Pinned in `safe/fdshell/tests/case.rs` and
 `safe/fdshell/src/parse/case_clause/terminator/tests.rs`.
 
+The `;;` is the clause separator **and only that**: POSIX #2.10 puts it inside a
+clause and nowhere else, so a `;;` written in any other command list is a parse
+error — bash names the token and stops at rc 2, fdshell answers
+`stray ';;' — it only separates 'case' clauses` at its house rc 1 and prints
+nothing. The rule is **one predicate read at two granularities** (LESSONS, the
+task **#355** entry), because the two halves of a command list are seen by
+different layers. The **byte** reader owns everything the statement split shows the
+scanner — the top-level list, a pipeline, a `&&`/`||` chain: `echo a ;; echo b`,
+the glued `echo a;;echo b`, the spaced `echo a ; ; echo b`, a pair opening a
+statement (`;; echo b`, `echo a; ;; echo b`) or closing one (`echo a ;;`). A `;;`
+*is* a separator there, so the report is a **preflight** over the whole scan and
+nothing on the line runs — `echo z; echo a ;; echo b` prints nothing, which is
+bash's answer too; a statement run from an **earlier line** of a multi-line input
+stays run in bash (`echo z` + newline + `echo a ;; echo b` prints `z`) and stays
+unrun here, exactly as the invalid `&`-split preflight of tasks #354/#355 behaves.
+
+The **token** reader owns the lists the scanner never re-splits: a block body, a
+group or a function body, and an opener's condition slot — `{ : ;; }`,
+`f() { : ;; }; f`, `for i in a; do : ;; done`, `while false; do echo a ;; echo b;
+done`, `if : ;; then :; fi`. A body that never **runs** is guarded all the same
+(bash calls that row a parse error too); what stays lazy is an inner construct
+*inside* an unrun body, the pinned family of
+`tests/block_closers.rs::a_never_run_body_is_never_parsed`. The guard answers
+**after** the non-empty ensures and only outside a slice's **leading** separator
+run, so those spellings keep their own messages — `'then' body is empty`
+(`if true; then ;; fi`, and the same pair written as two lines), `group is empty`
+(`{ ;; }`), `function definition body is empty` (`f() { ;; }`),
+`missing condition` (`if ;; then :; fi`), `malformed if block` (`elif ;; then`),
+`expected condition` (`while ;; do :; done`) — while a leading pair with content
+behind it runs at rc 0 (`if true; then ;; echo a; fi` prints `a`, `{ ;; :; }` and
+`bar() { ;; :; }; bar` print nothing; bash rc 2 on all three). Its **one**
+exception is the pair written immediately before a closing keyword, where the
+closer-claim above has already claimed the token in front of it:
+`if true; then echo a ;; fi` and its spaced twin `if true; then echo a ; ; fi`
+print `a` at rc 0, and the body that survives the claim still parses
+(`if true; then b ;; fi` ends at its runtime miss `"b" not found`) — pinned as
+measured, bash rejecting each at rc 2. What the rule does **not** reach stays as
+measured too: a quoted `";;"`/`";"` and an escaped `\;\;` are word data (tasks
+#247/#336); a here-doc body, a `$( … )` substitution and an arithmetic
+`for (( … ))` region stay opaque; a `;\n;` pair is task **#487**'s — the gap
+between the two `;` is spaces and tabs only, at both granularities; `;&`/`;;&`
+written **outside** a clause keep the split's own message
+(`unexpected character in this context`, bash names the token and stops at rc 2),
+and so does a line carrying both shapes, since the preflight order is pinned; and
+the `case` clause's own terminator — all three kinds of it, single- and
+multi-line, in a body and in an arm — stays legal. Pinned in
+`safe/fdshell/tests/semi_semi.rs`, `safe/fdshell/tests/case.rs` and
+`safe/fdshell/src/parse/semi/semisemi/tests.rs`.
+
 A `;;` written inside a block **nested in an arm** belongs to that block: the
 clause walk's `;;` search accepts a window only at the arm's **own level** — the
 same walk the closing-keyword search runs (the block's seed, the `case` word-list
 rule, LESSONS "One clause rule, three scorers"), stopped by a different predicate
 — so `case a in a) case b in b) echo y;; esac;; esac` and
 `case a in a) case b in b) echo y;; esac;; c) echo outer;; esac` print `y` at
-rc 0 as bash does, and so do the nested `for`/`while`/`if`/`{ …; }` arms and the
-heredoc-carrying nested arm. The pairing counts keyword openers and exact brace
-words only, so a `;;` inside a **subshell** in an arm is still the arm's
-(`case a in a) (echo y;; ) ;; esac` keeps its verdict), and the nested `case`'s
-first pattern `)` stays word-list data behind `in`. Two rows stay divergent by
-rule, both pinned: a nested clause list with a **second** clause
+rc 0 as bash does, and so does the nested `case` reached through a `while`
+(`case a in a) while :; do case b in b) echo y;; esac; break; done ;; esac`) and
+the heredoc-carrying nested arm — there the pair **is** a clause's own separator,
+which the rule above leaves legal. A `;;` written in the nested block's **body** is
+not, so that rule's token reader answers: the nested group
+(`case a in a) { echo y;; } ;; esac`), the nested definer
+(`case a in a) f() { echo y;; }; f ;; esac`) and a nested `for`/`while` body all
+report at rc 1 and print nothing, bash rc 2. The nested `if` row
+(`case a in a) if true; then echo y;; fi ;; esac`) still prints `y` at rc 0, and
+only through the closer-claim exception above. The pairing counts keyword openers
+and exact brace words only, so a `;;` inside a **subshell** in an arm is still the
+arm's (`case a in a) (echo y;; ) ;; esac` keeps its verdict), and the nested
+`case`'s first pattern `)` stays word-list data behind `in`. One row stays
+divergent by rule, pinned: a nested clause list with a **second** clause
 (`case a in a) case b in x) echo n;; *) echo inner;; esac;; esac`) — the
 stray-`)` rule above reads the nested clause's pattern paren and answers at rc 1,
-bash rc 0; and a `;;` inside a nested `if`/`{ …; }`/definer body written in an
-arm, which fdshell accepts at rc 0 as it already does at top level (bash rc 2).
-Pinned in `safe/fdshell/tests/case.rs::a_nested_block_in_an_arm_keeps_its_semi_semi`.
+bash rc 0. Pinned in
+`safe/fdshell/tests/case.rs::a_nested_block_in_an_arm_keeps_its_semi_semi` (the
+walk's rows) and `…::a_semi_inside_a_nested_arm_block_stays_as_measured` (the two
+bodies that now report, the `if` row that does not).
 
 An **empty clause list** is legal only in the spellings bash allows: its slot is
 POSIX #2.9.1's `newline_list`, so `case x in esac`, `case x in` + newline `esac`
@@ -1403,7 +1469,13 @@ family is pinned in
 statements, `&&`/`||` gate them, and a trailing `&` turns the statement before
 it into a background job (fdshell also offers the named form `cmd &>&name`,
 above). `time cmd` reports how long cmd
-took; `timeout seconds cmd` stops it after a deadline.
+took; `timeout seconds cmd` stops it after a deadline. A list takes **one** `;`:
+the doubled `;;` is the `case` clause separator and nothing else, so a stray one
+anywhere in a list is a parse error — `echo a ;; echo b`, its glued
+`echo a;;echo b` and its spaced `echo a ; ; echo b` are one report each, not two
+statements (bash rc 2, fdshell rc 1, and nothing on the line runs — the preflight's
+shape; the full rule, its two readers and its boundaries are in "Conditionals and
+loops" above).
 
 `set -e` (`set -o errexit`) ends the shell at a failing command, with that
 command's own status. Two positions are exempt, as in bash: a command run in an
