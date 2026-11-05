@@ -88,7 +88,16 @@ pub(crate) fn sites(line: &[u8], from: usize, to: usize) -> Vec<Site> {
                 .get(i..)
                 .and_then(|s| s.iter().position(|&b| b == b'\n'))
             {
-                Some(p) => i = i + p + 1,
+                // The jump lands **on** the comment's newline — the recorded
+                // mutant is the source (task #276 proved the landing three ways,
+                // task #513 re-proved it green twice): the loop consumes the
+                // newline through `ScanState::advance`, which at a newline is
+                // state-neutral. The jump is written as a method call so the
+                // site carries no operator to mutate (rule 22/24 — clippy's
+                // `+=` would re-open a family). Do not "simplify" the lookup to
+                // `line_end_after`: it is quote-aware, this raw search is not
+                // (`# it's` makes them disagree).
+                Some(p) => i = i.saturating_add(p),
                 None => return found,
             }
             continue;
