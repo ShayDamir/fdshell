@@ -5,6 +5,7 @@
 
 use super::Token;
 use crate::keywords::{Glue, Place, scores};
+use crate::parse::word_quoted::span_word;
 
 /// How the walk reads a keyword closer written inside a `case`/`for **word
 /// list** ([`Place::Pattern`], task #236): bash reads a word list as words.
@@ -49,15 +50,19 @@ pub(crate) fn scores_at(
 /// adjacent to the run — the byte-level scan sees the same two word starts
 /// because [`is_word_break`](crate::scan::advance) breaks words at operator
 /// bytes.
+///
+/// Both neighbour rows go through [`span_word`] (task #530, bug #474): the pair
+/// is made of **unquoted** operator bytes (POSIX §2.9.1), so a quote-protected
+/// `"|"`/`"&"` word standing next to a real one is word data and is no pair
+/// half — `echo "|" | cat` is `echo`'s argument through a pipeline, not a `||`
+/// pair. Escape spellings need no arm: `\|`/`\&` keep the pair in the word text,
+/// so no operator text exists to compare, and a quoted *current* word is caught
+/// by the walk's `separator_data` row before this row is consulted.
 pub(crate) fn glue_at(tokens: &[Token], i: usize, word: &[u8]) -> Glue {
     if !is_op(word) {
         return Glue::None;
     }
-    let same = |j: usize| {
-        tokens
-            .get(j)
-            .is_some_and(|(t, _, _, _, _, _)| t.as_bytes().is_ok_and(|p| p == word))
-    };
+    let same = |j: usize| tokens.get(j).is_some_and(|tok| span_word(tok, word));
     match (same(i - 1), same(i + 1)) {
         (true, _) => Glue::Tail,
         (false, true) => Glue::Head,

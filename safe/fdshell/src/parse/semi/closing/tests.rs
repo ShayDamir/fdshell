@@ -285,3 +285,45 @@ fn a_quoted_semicolon_word_closes_no_block() {
     assert_eq!(idx(b"for i in \";\" do echo x; done"), Some(8));
     assert_eq!(idx(b"for i in 1 do echo x; done"), Some(8));
 }
+
+/// Task #530 (bug #474): the cond-pair rows read **both** neighbours through the ONE
+/// span gate [`crate::parse::word_quoted::span_word`], so a quote-protected `|`/`&`
+/// **word** standing next to a real operator token is word data and never a pair half
+/// — `echo "|" | cat` is `echo`'s argument through a pipeline, not a split `||` pair.
+/// Both neighbour sides are pinned in both directions (a gate that reads only one
+/// neighbour, or only the text, is a mutant); the word's **own** quotedness is the
+/// walk's `separator_data` row, so `glue_at`'s answer for a quoted word is still what
+/// its unquoted neighbour earns. The both-unquoted twins keep their answers.
+#[test]
+fn a_quoted_operator_word_is_no_pair_half() {
+    // The quoted word first, the real operator token behind it: the real token's
+    // predecessor row is gated (the pair today), the quoted word's own answer is its
+    // neighbour's (unquoted) text plus span.
+    let t = toks(b"echo \"|\" | cat");
+    assert_eq!(
+        glue_at(&t, nth(&t, b"|", 1), b"|"),
+        Glue::None,
+        "the real `|`: its predecessor is a quoted word"
+    );
+    assert_eq!(glue_at(&t, nth(&t, b"|", 0), b"|"), Glue::Head);
+    // The mirror: the real token first, the quoted word behind it — the successor row
+    // is gated the same way.
+    let t = toks(b"echo | \"|\" cat");
+    assert_eq!(glue_at(&t, nth(&t, b"|", 0), b"|"), Glue::None);
+    assert_eq!(glue_at(&t, nth(&t, b"|", 1), b"|"), Glue::Tail);
+    // The `&` family, both directions.
+    let t = toks(b"echo \"&\" & cat");
+    assert_eq!(glue_at(&t, nth(&t, b"&", 1), b"&"), Glue::None);
+    assert_eq!(glue_at(&t, nth(&t, b"&", 0), b"&"), Glue::Head);
+    let t = toks(b"echo & \"&\" cat");
+    assert_eq!(glue_at(&t, nth(&t, b"&", 0), b"&"), Glue::None);
+    assert_eq!(glue_at(&t, nth(&t, b"&", 1), b"&"), Glue::Tail);
+    // Two real operator tokens: a pair, unchanged (the gate passes on both halves).
+    let t = toks(b"echo a & & if :");
+    assert_eq!(glue_at(&t, nth(&t, b"&", 0), b"&"), Glue::Head);
+    assert_eq!(glue_at(&t, nth(&t, b"&", 1), b"&"), Glue::Tail);
+    // Two quoted words: no pair half at all.
+    let t = toks(b"echo \"|\" \"|\"");
+    assert_eq!(glue_at(&t, nth(&t, b"|", 0), b"|"), Glue::None);
+    assert_eq!(glue_at(&t, nth(&t, b"|", 1), b"|"), Glue::None);
+}
