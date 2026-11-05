@@ -5178,6 +5178,20 @@ question, and making the byte rule general there would flip those pins. Pins:
 whose two accepted rows kill the byte test from both sides, and `tests/case.rs`
 (`a_semicolon_byte_in_an_empty_clause_list_is_a_parse_error`).
 
+The byte is read at a third place now (task #423), from the other side: the
+stray-`;;` predicate is **one rule at two granularities** — the byte reader
+answers at a real pair's head byte (gap spaces/tabs only), and the token reader
+answers inside body slices with the `case` clause walk's own stop test — and
+because that walk asks its stop at the end of **every** token, the newline's `;`
+word pairs with the real `;` before it and the token reader would fire on
+`echo a || ;\ndone` (#367's row) and `;\n;` shapes (#487's family), both pinned
+must-not-fire. So the token-level stop re-reads bytes: the tail token's start
+byte must be a real `;` and the gap spaces/tabs only
+(`parse/semi/semisemi.rs::real_pair_gap`) — the byte reader's rule restated,
+never the token words. Pins: `parse/semi/semisemi/tests.rs` (one test per arm)
+and `tests/semi_semi.rs` (the two readers' families, each row commented to its
+owning rule).
+
 ## A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)
 
 `if true & then echo x; fi` parsed and ran (task #354) with **no** job: the

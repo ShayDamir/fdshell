@@ -29,6 +29,7 @@ fn scan_time_prefixed_keyword_block() {
             }
             Segment::Statement { cmd, .. } => panic!("expected Block, got {:?}", cmd),
             Segment::AsyncInvalid => panic!("unexpected async marker"),
+            Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
         }
     }
 }
@@ -53,6 +54,7 @@ fn scan_time_prefixed_group_span_starts_at_the_prefix() {
         }
         Segment::Statement { cmd, .. } => panic!("expected Block, got {:?}", cmd),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
     // `time echo { …` is a command whose argument is a brace: not a group.
     let segments = scan_segments(b"time echo { a; }", false);
@@ -77,6 +79,7 @@ fn scan_if_block_end_pos() {
         }
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -98,6 +101,7 @@ fn scan_for_block_end_pos() {
         }
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -119,6 +123,7 @@ fn scan_case_block_end_pos() {
         }
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -130,6 +135,7 @@ fn scan_statement_no_block() {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo hello"),
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -195,6 +201,7 @@ fn scan_if_with_leading_whitespace() {
         }
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -216,6 +223,7 @@ fn scan_for_with_leading_whitespace() {
         }
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -326,6 +334,7 @@ fn scan_comment_on_block_line() {
         }
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -371,6 +380,7 @@ fn scan_block_not_closed() {
         }
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -431,6 +441,7 @@ fn scan_statement_semicolon_inside_dollar_paren() {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a; b)"),
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -442,6 +453,7 @@ fn scan_statement_semicolon_inside_nested_dollar_paren() {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a $(b; c) d)"),
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -453,6 +465,7 @@ fn scan_statement_semicolon_inside_backtick() {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo `a; b`"),
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -464,6 +477,7 @@ fn scan_statement_semicolon_inside_dollar_paren_with_newline() {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a\nb)"),
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -491,6 +505,7 @@ fn scan_statement_plain_paren_inside_dollar_paren() {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a (b; c) d)"),
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -518,6 +533,7 @@ fn scan_statement_backtick_paren_isolated() {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"echo $(a `b) ; c` d)"),
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -752,6 +768,7 @@ fn scan_wait_pid_is_statement() {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"wait 123"),
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -764,6 +781,7 @@ fn scan_bare_wait_is_statement() {
         Segment::Statement { cmd: s, .. } => assert_eq!(s, b"wait"),
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -786,6 +804,7 @@ fn scan_wait_block_opens_on_subsequent_line() {
         }
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -808,6 +827,7 @@ fn scan_wait_block_opens_on_same_line_keyword() {
         }
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -1118,6 +1138,7 @@ fn check_shapes(line: &[u8], want: &[Shape]) {
                 ..
             } => ("B", *block_start, *end_pos, *closed, bodies.clone()),
             Segment::AsyncInvalid => ("A", 0, 0, false, Vec::new()),
+            Segment::UnexpectedSemiSemi => ("A", 0, 0, false, Vec::new()),
         })
         .collect();
     assert_eq!(got, want, "{line:?}");
@@ -1154,6 +1175,7 @@ fn check_block(line: &[u8], want: (usize, usize, bool)) {
         } => assert_eq!((*block_start, *end_pos, *closed), want, "{line:?}"),
         Segment::Statement { .. } => panic!("{line:?} must be a group block"),
         Segment::AsyncInvalid => panic!("{line:?} must be a group block"),
+        Segment::UnexpectedSemiSemi => panic!("{line:?} must be a group block"),
     }
 }
 
@@ -1171,6 +1193,7 @@ fn check_segments(line: &[u8], want: &[(usize, usize, bool)]) {
             } => Some((*block_start, *end_pos, *closed)),
             Segment::Statement { .. } => None,
             Segment::AsyncInvalid => None,
+            Segment::UnexpectedSemiSemi => None,
         })
         .collect();
     assert_eq!(blocks, want, "{line:?}");
@@ -1259,6 +1282,7 @@ fn statements(line: &[u8]) -> Vec<Vec<u8>> {
                 ..
             } => line.get(*block_start..*end_pos).unwrap_or(b"").to_vec(),
             Segment::AsyncInvalid => Vec::new(),
+            Segment::UnexpectedSemiSemi => Vec::new(),
         })
         .collect()
 }
@@ -1477,6 +1501,7 @@ fn scan_ampersand_inside_block_text_stays_in_the_span() {
                 panic!("expected one closed Block, got a statement split: {cmd:?}")
             }
             Segment::AsyncInvalid => panic!("unexpected async marker: {:?}", line),
+            Segment::UnexpectedSemiSemi => panic!("unexpected async marker: {:?}", line),
         }
     }
     // A function block plus a tail command: the span ends at the `}`, the tail
@@ -1494,11 +1519,13 @@ fn scan_ampersand_inside_block_text_stays_in_the_span() {
         }
         Segment::Statement { .. } => panic!("expected the function block first"),
         Segment::AsyncInvalid => panic!("expected the function block first"),
+        Segment::UnexpectedSemiSemi => panic!("expected the function block first"),
     }
     match &segments[1] {
         Segment::Statement { cmd, .. } => assert_eq!(*cmd, b"f".as_slice()),
         Segment::Block { .. } => panic!("expected the tail statement"),
         Segment::AsyncInvalid => panic!("expected the tail statement"),
+        Segment::UnexpectedSemiSemi => panic!("expected the tail statement"),
     }
 }
 
@@ -1515,6 +1542,7 @@ fn scan_ampersand_outside_a_block_is_unchanged() {
         Segment::Statement { cmd, .. } => assert_eq!(*cmd, b"echo hi".as_slice()),
         Segment::Block { .. } => panic!("expected the async statement"),
         Segment::AsyncInvalid => panic!("expected the async statement"),
+        Segment::UnexpectedSemiSemi => panic!("expected the async statement"),
     }
     for in_block in [false, true] {
         for line in [
@@ -1522,10 +1550,15 @@ fn scan_ampersand_outside_a_block_is_unchanged() {
             b"echo a &;;echo b".as_slice(),
         ] {
             let segments = scan_segments(line, in_block);
-            assert_eq!(segments.len(), 2, "{:?} in_block={in_block}", line);
+            assert_eq!(segments.len(), 3, "{:?} in_block={in_block}", line);
             assert!(
                 matches!(segments[0], Segment::AsyncInvalid),
                 "the peek guard must still fire: {:?} in_block={in_block}",
+                line
+            );
+            assert!(
+                matches!(segments[1], Segment::UnexpectedSemiSemi),
+                "the pair answers at its head byte (task #423): {:?} in_block={in_block}",
                 line
             );
         }
@@ -1539,6 +1572,7 @@ fn scan_ampersand_outside_a_block_is_unchanged() {
         Segment::Block { closed, .. } => assert!(!*closed, "the span must stay open"),
         Segment::Statement { .. } => panic!("expected the open case span"),
         Segment::AsyncInvalid => panic!("expected the open case span"),
+        Segment::UnexpectedSemiSemi => panic!("expected the open case span"),
     }
 }
 
@@ -1634,6 +1668,7 @@ fn scan_substitution_region_at_a_run_start_is_a_statement() {
                 panic!("{line:?} opened a block (closed {closed}), expected a statement")
             }
             Segment::AsyncInvalid => panic!("{line:?} is a valid split"),
+            Segment::UnexpectedSemiSemi => panic!("{line:?} is a valid split"),
         }
     }
 }
@@ -1646,6 +1681,7 @@ fn midrun_stamps(line: &[u8]) -> Vec<bool> {
             Segment::Statement { midrun_open, .. } => *midrun_open,
             Segment::Block { .. } => panic!("{line:?} must stay a statement"),
             Segment::AsyncInvalid => panic!("{line:?} is a valid split"),
+            Segment::UnexpectedSemiSemi => panic!("{line:?} is a valid split"),
         })
         .collect()
 }
@@ -1710,6 +1746,7 @@ fn a_heredoc_body_hides_a_midrun_opener_from_the_stamp() {
         }
         Segment::Block { .. } => panic!("a here-doc statement"),
         Segment::AsyncInvalid => panic!("a valid split"),
+        Segment::UnexpectedSemiSemi => panic!("a valid split"),
     }
 }
 
@@ -1740,6 +1777,7 @@ fn scan_for_block_with_a_closer_shaped_list_word() {
         }
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
     // Unclosed: the list word does not close the block, so the block stays open.
     let segments = scan_segments(b"for i in done", false);
@@ -1748,6 +1786,7 @@ fn scan_for_block_with_a_closer_shaped_list_word() {
         Segment::Block { closed, .. } => assert!(!*closed, "the REPL's continuation signal"),
         Segment::Statement { .. } => panic!("expected Block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -1769,6 +1808,7 @@ fn face(line: &[u8]) -> Vec<(Vec<u8>, Vec<Vec<u8>>)> {
                 bodies.clone(),
             ),
             Segment::AsyncInvalid => (b"A".to_vec(), Vec::new()),
+            Segment::UnexpectedSemiSemi => (b"A".to_vec(), Vec::new()),
         })
         .collect()
 }

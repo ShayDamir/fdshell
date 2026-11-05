@@ -32,6 +32,7 @@ fn span(line: &[u8], end: usize, resume: usize, floor: usize, tail_open: bool) {
         }
         Segment::Statement { .. } => panic!("{line:?} must be a block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
     assert_eq!(got_resume, resume, "resume of {line:?}");
     assert_eq!(got_floor, floor, "floor of {line:?}");
@@ -76,6 +77,7 @@ fn unclosed_group_is_open() {
         }
         Segment::Statement { .. } => panic!("expected an open group"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
     assert_eq!(resume, 9);
 }
@@ -104,6 +106,7 @@ fn group_resume_never_reopens_the_group_body() {
         }
         Segment::Statement { .. } => panic!("expected a group block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
     assert_eq!(resume, line.len());
     assert_eq!(floor, 0);
@@ -150,6 +153,7 @@ fn claim(line: &[u8], end: usize, resume: usize, floor: usize, bodies: &[&[u8]])
         }
         Segment::Statement { .. } => panic!("{line:?} must be a block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
     assert_eq!(got_resume, resume, "resume of {line:?}");
     assert_eq!(got_floor, floor, "floor of {line:?}");
@@ -241,6 +245,7 @@ fn group_after_and_stays_a_cond_part_not_a_block() {
         }
         Segment::Block { .. } => panic!("{line:?} must stay one statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }
 
@@ -338,6 +343,7 @@ fn the_opener_arm_stamps_an_unclosed_midrun_group() {
             }
             Segment::Block { .. } => panic!("{line:?} must stay one statement"),
             Segment::AsyncInvalid => panic!("unexpected async marker"),
+            Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
         }
     }
 }
@@ -354,6 +360,7 @@ fn a_brace_at_the_end_of_input_opens_its_shape() {
         Segment::Block { closed, .. } => assert!(!closed, "the lone brace never closes"),
         Segment::Statement { .. } => panic!("the run-start brace must be a block"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
     let segments = scan_segments(b"true && {", false);
     assert_eq!(segments.len(), 1, "the cond split is the cond layer's");
@@ -363,5 +370,6 @@ fn a_brace_at_the_end_of_input_opens_its_shape() {
         }
         Segment::Block { .. } => panic!("the mid-run brace must stay one statement"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
+        Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
     }
 }

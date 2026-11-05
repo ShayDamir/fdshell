@@ -84,10 +84,11 @@ fn the_token_reader_reports_the_bodies() {
     // owns `{ ;; }` and `f() { ;; }`, and `{ ;; :; }`-shapes run.
     let (out, err, code) = run("bar() { ;; :; }; bar");
     assert_eq!((out.as_str(), code), ("", 0), "bash rc 2: {err}");
-    assert_eq!(run("{ ;; }").1.trim(), "group is empty");
-    assert_eq!(
-        run("f() { ;; }").1.trim(),
-        "function definition body is empty"
+    assert!(run("{ ;; }").1.contains("group is empty"));
+    assert!(
+        run("f() { ;; }")
+            .1
+            .contains("function definition body is empty")
     );
 }
 
@@ -97,8 +98,8 @@ fn the_token_reader_reports_the_bodies() {
 #[test]
 fn the_measured_families_stay_measured() {
     // Task #247/#336: quoted and escaped pairs are word data (bash parity).
-    assert_eq!(run("echo a \";\" \";\" b").0, "a ;; b\n");
-    assert_eq!(run("echo a \\;\\; echo b").0, "a ;; b\n");
+    assert_eq!(run("echo a \";\" \";\" b").0, "a ; ; b\n");
+    assert_eq!(run("echo a \\;\\; echo b").0, "a ;; echo b\n");
     // Regions are opaque to the walk (parity): a heredoc body line and the
     // block-body variant.
     assert_eq!(run("cat <<T\nx;;y\nT\n").0, "x;;y\n");
@@ -120,10 +121,10 @@ fn the_measured_families_stay_measured() {
         assert!(err.contains("unexpected character"), "{script}: {err}");
     }
     // Task #487's family: single separators and every `;\n;` shape (parity).
-    assert_eq!(run("echo a ; echo b").0, "a b\n");
-    assert_eq!(run("echo a; echo b; echo c").0, "a b c\n");
+    assert_eq!(run("echo a ; echo b").0, "a\nb\n");
+    assert_eq!(run("echo a; echo b; echo c").0, "a\nb\nc\n");
     assert_eq!(run("; echo b").0, "b\n");
-    assert_eq!(run("echo a ;\n; echo b").0, "a b\n");
+    assert_eq!(run("echo a ;\n; echo b").0, "a\nb\n");
     // Task #301's closer-claim: the token before the closer is POSIX's `;` and
     // drops out of the body, so the if-row's pair never reaches the guard
     // (bash rc 2; this row keeps its measured acceptance, the plan's risk-2

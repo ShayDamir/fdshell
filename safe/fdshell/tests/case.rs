@@ -1824,9 +1824,10 @@ fn a_nested_block_in_an_arm_keeps_its_semi_semi() {
 }
 
 /// The nested-block rows bash rejects (rc 2) keep fdshell's own verdicts (its rc
-/// 1), except the accepted family the plan lists — a `;;` inside a nested
-/// `if`/`{}`/definer body written in an arm, which fdshell already accepts at
-/// the top level. Measured 2026-11-03; do not "fix" the rc.
+/// 1). Task #423 (measured 2026-11-05) extended the one-predicate rule to a `;;`
+/// inside a nested `{}`/definer body in an arm — those rows now report at
+/// fdshell's rc 1; the `if` row keeps its accepted verdict because the
+/// closer-claim trims the pair out of the body it parses.
 #[test]
 fn a_semi_inside_a_nested_arm_block_stays_as_measured() {
     // Task #300's leniency inside an arm: the nested clause's `esac` sits in an
@@ -1854,19 +1855,26 @@ fn a_semi_inside_a_nested_arm_block_stays_as_measured() {
         assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
         assert!(err.contains(needle), "{script}: {err}");
     }
-    // The accepted family: fdshell accepts a `;;` inside a nested `if`/group/
-    // definer body in an arm (bash rc 2); the pairing counts keyword openers and
-    // exact brace words only, and the `;;` search's depth rule reads those.
+    // The accepted family, minus what task #423 pulled out. The `if` row stays:
+    // the `;;` is glued to the body's last word and the token before the closer
+    // is POSIX's `;` — it drops out of the body, and the body the guard reads
+    // has no pair left (the same closer-claim `tests/cond_blocks.rs` pins for
+    // the `||;;` row).
+    let (out, err, code) = run("case a in a) if true; then echo y;; fi ;; esac");
+    assert_eq!(
+        (out.as_str(), code),
+        ("y\n", 0),
+        "bash rc 2, the closer-claim trims the pair: {err}"
+    );
+    // The group and definer rows flip to the report: their bodies keep both `;`
+    // tokens, and the one-predicate rule answers — fdshell rc 1, bash rc 2,
+    // nothing prints.
     for script in [
-        "case a in a) if true; then echo y;; fi ;; esac",
         "case a in a) { echo y;; } ;; esac",
         "case a in a) f() { echo y;; }; f ;; esac",
     ] {
         let (out, err, code) = run(script);
-        assert_eq!(
-            (out.as_str(), code),
-            ("y\n", 0),
-            "{script}: bash rc 2: {err}"
-        );
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2: {err}");
+        assert!(err.contains("stray ';;'"), "{script}: {err}");
     }
 }

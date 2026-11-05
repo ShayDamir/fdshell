@@ -56,6 +56,7 @@ fn statements(line: &[u8]) -> Vec<(&[u8], Vec<Vec<u8>>, bool)> {
             } => (*cmd, bodies.clone(), *background),
             Segment::Block { .. } => (b"B".as_slice(), Vec::new(), false),
             Segment::AsyncInvalid => (b"A".as_slice(), Vec::new(), false),
+            Segment::UnexpectedSemiSemi => (b"A".as_slice(), Vec::new(), false),
         })
         .collect()
 }
@@ -69,6 +70,7 @@ fn faces(line: &[u8]) -> Vec<(&'static str, bool)> {
             Segment::Statement { background, .. } => ("S", *background),
             Segment::Block { .. } => ("B", false),
             Segment::AsyncInvalid => ("A", false),
+            Segment::UnexpectedSemiSemi => ("A", false),
         })
         .collect()
 }
@@ -262,9 +264,11 @@ fn ampersand_inside_a_block_text_is_classified_the_same() {
     }
     // The statement-level guard, unchanged: `;;` behind the `&` is the invalid
     // split, and the arm-shaped line behind a closed block is not its business.
+    // Task #423 adds the pair's own marker behind the guard's split (the scan
+    // answers SemiSemi at the pair's head byte), so the line has one more face.
     assert_eq!(
         faces(b"echo a & ;; echo b"),
-        alloc::vec![("A", false), ("S", false)],
+        alloc::vec![("A", false), ("A", false), ("S", false)],
         "the peek guard still fires at statement level"
     );
 }

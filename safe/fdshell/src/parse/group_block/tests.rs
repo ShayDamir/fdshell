@@ -77,8 +77,12 @@ fn empty_group_is_an_error() {
     // keeps that statement.
     let g = group(b"{ ; echo a; }");
     assert!(g.body.data.eq_bytes(b"echo a"));
-    let g = group(b"{ echo a ;; }");
-    assert!(g.body.data.eq_bytes(b"echo a"));
+    // Task #423 flipped this row: a pair with kept content before it is the
+    // rule's pair, not a trim — the same predicate the top level answers.
+    assert_eq!(
+        group_err(b"{ echo a ;; }"),
+        "stray ';;' — it only separates 'case' clauses"
+    );
 }
 
 #[test]
