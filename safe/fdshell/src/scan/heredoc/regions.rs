@@ -100,7 +100,14 @@ pub(super) fn semi_terminated_regions(
     run_start: usize,
     semi: usize,
 ) -> Option<(Vec<Span>, usize)> {
-    if line.get(semi) != Some(&b';') || operator_count(line, run_start, semi) == 0 {
+    // The two rejection rules are stated as their own early returns, not a
+    // compound guard: each test is pinned on both sides, so each keeps its own
+    // operator site and the `||` between them — a connective no test can move —
+    // has no site at all (CATCHING_MUTANTS rules 11/24).
+    if line.get(semi) != Some(&b';') {
+        return None;
+    }
+    if operator_count(line, run_start, semi) == 0 {
         return None;
     }
     let start = line_start(line, run_start);
