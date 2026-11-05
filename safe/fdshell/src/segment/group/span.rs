@@ -35,7 +35,10 @@ pub(crate) fn statement_end(
     let mut tail_closed = true;
     while line.get(i).is_some() {
         match boundary(line, i, &state) {
-            Boundary::Separator => return (i, i + 1, tail_closed),
+            // A `;;` pair cuts the span exactly like the separator it is built
+            // from (task #423): the span boundary is the same byte, and the
+            // stray decision belongs to the parse layer's one predicate.
+            Boundary::Separator | Boundary::SemiSemi => return (i, i + 1, tail_closed),
             Boundary::Comment => return (i, skip_comment(line, i), tail_closed),
             // A group swallows a trailing `&` as word data (word_active is set
             // by the scan), exactly like a `Char`: the group's text carries the

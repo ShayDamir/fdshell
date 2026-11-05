@@ -86,7 +86,10 @@ impl<'a> Book<'a> {
             crate::segment::line::end_comment(self, line);
             return;
         }
-        if kind == Boundary::Separator {
+        // A `;;` pair separates runs exactly like a plain separator (task #423):
+        // the mark it leaves is the preflight's business, the run bookkeeping
+        // is the same.
+        if matches!(kind, Boundary::Separator | Boundary::SemiSemi) {
             self.sep_since_run = !deferred;
         }
         self.i = self.i.max(sep + 1);

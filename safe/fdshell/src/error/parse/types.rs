@@ -27,6 +27,8 @@ pub(crate) enum ParseError {
     CaseEmptyClauseList,
     /// case arm: unexpected ')' — a command list cannot take a paren
     CaseArmUnexpectedCloseParen,
+    /// stray ';;' — it only separates 'case' clauses
+    UnexpectedSemiSemi,
     /// array assignment is missing its closing ')'
     ArrayLiteralMissingCloseParen,
     /// internal invariant violated

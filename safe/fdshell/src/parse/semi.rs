@@ -8,6 +8,7 @@ use sys::ShortCStr;
 
 mod closing;
 mod preceded;
+mod semisemi;
 mod trim;
 
 pub(crate) use closing::{
@@ -16,6 +17,7 @@ pub(crate) use closing::{
 pub(crate) use preceded::{
     Term, amp_semi, ensure_before_closer, find_preceded_by, is_list_terminator, semi_byte,
 };
+pub(crate) use semisemi::{first_stray, pair_at_byte};
 pub(crate) use trim::{
     block_body, block_condition, body_end, condition_background, trim_body, trim_condition,
     trim_semi,

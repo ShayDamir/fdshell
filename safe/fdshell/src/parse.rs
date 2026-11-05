@@ -55,6 +55,7 @@ pub use line::{ParsedLine, UnsetTarget};
 pub(crate) use redirect::operand_offset;
 pub(crate) use redirect::parse_fd;
 pub(crate) use redirect::{clobber_word, pipe_token_span, pipeline_pipe};
+pub(crate) use semi::pair_at_byte;
 pub(crate) use time_block::TimeBlock;
 
 use crate::error::parse::ParseError;

@@ -41,6 +41,12 @@ pub(crate) enum Segment<'a> {
     /// runs" family). `run_script` bails on it **before executing any**
     /// segment; it is never executed itself.
     AsyncInvalid,
+    /// A stray `;;` outside a `case` clause (task #423): a `;;` pair in the
+    /// statement list is bash's syntax error and it stops before running
+    /// anything, so `run_script` bails on it at preflight — after the
+    /// [`Segment::AsyncInvalid`] check (the order is pinned by `tests/async.rs`,
+    /// whose rows keep their own message); it is never executed itself.
+    UnexpectedSemiSemi,
     /// Block (`if … fi`, `while … done`, `case … esac`, `name() { … }`,
     /// `{ …; }`) spanning from `block_start` to `end_pos`.
     Block {

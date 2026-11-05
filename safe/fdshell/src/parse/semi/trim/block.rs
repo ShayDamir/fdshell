@@ -5,6 +5,7 @@
 use super::Token;
 use super::{trim_body, trim_condition};
 use crate::error::parse::ParseError;
+use crate::parse::semi::first_stray;
 use error_stack::{Report, ensure};
 
 /// A block arm's body tokens: `tokens` with the `;`s bracketing it trimmed
@@ -22,6 +23,12 @@ pub(crate) fn block_body<'a>(
 ) -> Result<&'a [Token], Report<ParseError>> {
     let body = trim_body(tokens, line);
     ensure!(!body.is_empty(), err);
+    // The one predicate's token reader (task #423); the empty-slice message
+    // above stays first (the pins own it) and the reader owns its arms.
+    ensure!(
+        first_stray(tokens, line).is_none(),
+        ParseError::UnexpectedSemiSemi
+    );
     Ok(body)
 }
 
@@ -41,5 +48,11 @@ pub(crate) fn block_condition<'a>(
 ) -> Result<&'a [Token], Report<ParseError>> {
     let cond = trim_condition(tokens, line);
     ensure!(!cond.is_empty(), err);
+    // The same reader on the same slice (task #423); the empty-condition
+    // message above stays first (the pins own it).
+    ensure!(
+        first_stray(tokens, line).is_none(),
+        ParseError::UnexpectedSemiSemi
+    );
     Ok(cond)
 }

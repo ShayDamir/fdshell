@@ -107,6 +107,13 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
                 });
                 book.sep_since_run = false;
             }
+            // A `;;` pair here is the stray of task #423: the run was not
+            // claimed as a block, so this separator is not a `case` clause's
+            // terminator, and the mark is the preflight's business (bash runs
+            // nothing). The run path is the only place it can arise.
+            if kind == Boundary::SemiSemi {
+                book.segments.push(Segment::UnexpectedSemiSemi);
+            }
             let sep = book.i;
             if line.get(book.i) == Some(&b'\n') || book.i == line.len() {
                 deferred = line.get(book.i) == Some(&b'\n') && bg::async_ahead(line, book.i);

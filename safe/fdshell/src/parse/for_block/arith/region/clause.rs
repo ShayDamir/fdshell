@@ -20,8 +20,15 @@ fn cut_points(line: &[u8], region: &Region) -> Vec<usize> {
     let mut i = region.inner;
     while i < end {
         // [`boundary`]'s separator is a `;` **or** a newline at this depth; only
-        // the `;` byte cuts a clause.
-        if line.get(i) == Some(&b';') && boundary(line, i, &state) == Boundary::Separator {
+        // the `;` byte cuts a clause. The fresh per-region state never learns the
+        // `((` depth, so a `;;` inside the region answers the task #423 kind —
+        // the pair rule belongs to the statement list, not here: both kinds cut.
+        if line.get(i) == Some(&b';')
+            && matches!(
+                boundary(line, i, &state),
+                Boundary::Separator | Boundary::SemiSemi
+            )
+        {
             points.push(i);
         }
         i = state.advance(line, i);

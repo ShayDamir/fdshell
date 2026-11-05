@@ -9,6 +9,10 @@ pub(crate) enum Boundary {
     /// The plain `&` async operator (POSIX #3.9.4.1): a bare `&` at a word
     /// start that ends the statement and runs it asynchronously (task #326).
     Async,
+    /// A stray `;;` outside a `case` clause (task #423): a `;;` pair in the
+    /// statement list, answered at the pair's head byte by the one predicate
+    /// (`parse/semi/semisemi.rs`) after the walk's state is settled.
+    SemiSemi,
     /// An ordinary character with no special meaning at the boundary level.
     Char,
 }
@@ -22,6 +26,13 @@ pub(crate) fn boundary(line: &[u8], i: usize, state: &ScanState) -> Boundary {
     let bare = !state.in_quote && !state.in_single && !state.in_backtick;
     if bare && !state.word_active && line.get(i) == Some(&b'#') {
         return Boundary::Comment;
+    }
+    // The stray-`;;` predicate (task #423) answers at the pair's **head** byte,
+    // ahead of the plain separator it is: the segment scan marks the line for
+    // it, so the report is a preflight (bash runs nothing). The walk's state
+    // has settled quotes, escapes and regions before this consult.
+    if bare && state.paren_depth == 0 && crate::parse::pair_at_byte(line, i, state) {
+        return Boundary::SemiSemi;
     }
     let is_sep = i == line.len()
         || (bare && state.paren_depth == 0 && matches!(line.get(i), Some(&b';') | Some(&b'\n')));

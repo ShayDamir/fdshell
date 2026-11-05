@@ -29,6 +29,16 @@ pub(crate) fn run_script(
             Report::new(ParseError::UnexpectedChar { ch: b'&' }).change_context(CmdError::Parse)
         );
     }
+    // The same preflight for the stray `;;` (task #423): bash stops before
+    // running anything, and the scan marks the line, so the report is a parse
+    // error. It rides **after** the async check — a line carrying both keeps
+    // the async message (the order is pinned by `tests/async.rs`).
+    if segments
+        .iter()
+        .any(|seg| matches!(seg, Segment::UnexpectedSemiSemi))
+    {
+        return Err(Report::new(ParseError::UnexpectedSemiSemi).change_context(CmdError::Parse));
+    }
     for unit in merge::units(&segments) {
         match unit.segment {
             Segment::Statement {
@@ -98,8 +108,9 @@ pub(crate) fn run_script(
                     return Ok(Some(control));
                 }
             }
-            // Unreachable: the pre-pass above bails on every invalid split.
-            Segment::AsyncInvalid => {}
+            // Unreachable: the pre-pass above bails on every invalid split and
+            // every stray `;;` (task #423).
+            Segment::AsyncInvalid | Segment::UnexpectedSemiSemi => {}
         }
     }
     Ok(None)
