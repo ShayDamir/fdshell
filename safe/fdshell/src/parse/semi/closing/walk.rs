@@ -44,7 +44,7 @@ pub(crate) fn walk_until(
     };
     let mut place = Place::Command;
     for (i, tok) in tokens.iter().enumerate().skip(start) {
-        let (t, _start, end, _fq, _mask, _spans) = tok;
+        let (t, _start, end, _fq, mask, _spans) = tok;
         // Defensive: the tokens were built from `line`, so their bytes are
         // always valid; an error token means a future tokenizer that hands
         // this scan a token it cannot read, and the scan skips it.
@@ -72,14 +72,14 @@ pub(crate) fn walk_until(
         place = if separator_data(tok) {
             word_place(place)
         } else {
-            after(word, line, *end, place, glue, pairing.top())
+            after(word, line, *end, place, glue, pairing.top(), mask)
         };
         // A glued cond pair *inside* a token (`a||if` is one token) hides its
         // payload from the token walk: score the payload at the place the pair
         // sets, the same payload rule the byte scans apply via [`Glue`] (task
         // #236's S2: `do echo a||if :; …; fi` nests the `if`, so its `fi`
         // closes *the if* and the walk keeps the enclosing block's closer).
-        if let Some(payload) = pair_payload(word)
+        if let Some(payload) = pair_payload(word, mask)
             && scores(payload, line, *end, place)
         {
             pairing.apply(payload, line, *end);

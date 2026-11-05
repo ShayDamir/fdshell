@@ -93,7 +93,7 @@ pub(super) fn word_delta(
     // The closer row of [`after`] is gated by the pairing's innermost block,
     // read **before** the word is applied: a closer pairs with the block it
     // closes, not with the one left behind it (task #309).
-    let next = after(word, line, word_end, at, glue, pairing.top());
+    let next = after(word, line, word_end, at, glue, pairing.top(), &[]);
     let brace = matches!(word.trim_ascii(), b"{" | b"}");
     let delta = if !brace && scores(word, line, word_end, at) {
         pairing.apply(word, line, word_end)

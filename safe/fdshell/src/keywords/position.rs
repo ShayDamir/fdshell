@@ -30,6 +30,7 @@
 //! ends. Two orthogonal gates: [`after`] takes the innermost open block as `top`.
 
 use crate::keywords::Closer;
+use crate::mask::{MaskBit, quoted_at};
 use crate::parse::Token;
 use crate::parse::word_quoted::word_quoted;
 use crate::segment::group::opens;
@@ -120,6 +121,18 @@ pub(crate) fn separator_data(tok: &Token) -> bool {
 /// *pairing* row, so only that block's own closer restarts command position. A
 /// caller with no block stack (the top level, `gate_end`'s start, a `case` arm's
 /// stray-pattern walk) passes `None` and keeps the row as it always fired.
+///
+/// `mask` is the word's per-byte quote mask, and it is the gate of the two rows
+/// that read **word text** as an operator: the glue row and the pipeline-`|`
+/// row (task #530 / bug #474, POSIX §2.9.1). A word whose operator byte is
+/// quoted — the `"|"`/`"&"` word of `echo "|" | cat` — is word data: it is in no
+/// pair and opens no stage, so it leaves the place an ordinary word leaves. The
+/// byte-level callers read raw bytes, where a quoted separator's text keeps its
+/// quote bytes and no row can fire, so they pass an empty mask (the padding rule
+/// answers *unquoted*) and stay byte-identical; only the token-level callers
+/// (`parse/semi/closing`, `parse/case_clause/stray`) have a mask to hand.
+/// LESSONS: "An operator word in a word slot is ONE predicate's answer; each
+/// position supplies only its owned set"
 pub(crate) fn after(
     word: &[u8],
     line: &[u8],
@@ -127,8 +140,16 @@ pub(crate) fn after(
     place: Place,
     glue: Glue,
     top: Option<Closer>,
+    mask: &[MaskBit],
 ) -> Place {
     let w = word.trim_ascii();
+    // The **glue** row reads word text as syntax, so it answers through the ONE
+    // quotedness gate (POSIX §2.9.1, task #530 / bug #474): a word whose byte 0 —
+    // the operator byte, since only an operator word can be a pair half — is
+    // quoted is word data, and it is in no cond pair. Byte-level callers pass an
+    // empty mask, which pads to *unquoted*, and stay byte-identical.
+    let op_quoted = quoted_at(mask, 0);
+    let glue = if op_quoted { Glue::None } else { glue };
     // A word of a `for` list keeps the list: only its separator or its `do`
     // leaves it ([`list::step`], task #306) — the scan must reach the block's
     // real closer, and a closer-shaped list word never closes the block.
@@ -170,7 +191,7 @@ pub(crate) fn after(
     // The payload pass — the glue bytes, the `time [-p]` prefix, and the rows
     // a payload's shape decides on its own — is [`payload`]; the keyword rows
     // below judge the word it leaves behind.
-    let (decided, rest) = payload::payload(w, place, glue, open);
+    let (decided, rest) = payload::payload(w, place, glue, open, op_quoted);
     if let Some(next) = decided {
         return next;
     }

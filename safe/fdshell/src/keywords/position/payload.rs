@@ -12,15 +12,26 @@ use crate::keywords::time_prefix_len;
 use super::{Glue, Place, glue};
 
 /// Preprocess `w`'s payload at a [`Glue`] position: the pair's operator bytes,
-/// the `time [-p]` prefix, and the payload-shape rules.
+/// the `time [-p]` prefix, and the payload-shape rules. `op_quoted` is the ONE
+/// quotedness gate on the word's **operator byte** (supplied by [`super::after`],
+/// which reads it from the caller's quote mask): a quoted `"|"`/`"&"` word is word
+/// data, so the glue rows and the pipeline-stage row below never fire for it —
+/// `echo "|" | cat` is `echo`'s argument through a pipeline, not a `||` pair
+/// (task #530 / bug #474, POSIX §2.9.1). Byte-level callers mask an empty mask,
+/// which pads to unquoted, and stay byte-identical.
 ///
 /// The result is `(decided, rest)`: `decided` is the [`Place`] a payload rule
 /// reached (`open` for a payload-less glue, `Place::Data` behind a pair in data
 /// position, the place of a pipeline stage), and `rest` is the payload the
-/// keyword rows of [`super::after`] judge — so `None` means "fall through to
-/// the rows", with `rest` already stripped of the glue bytes and the `time`
-/// prefix.
-pub(super) fn payload(w: &[u8], place: Place, glue: Glue, open: Place) -> (Option<Place>, &[u8]) {
+/// keyword rows of [`super::after`] judge — so `None` means "fall through to the
+/// rows", with `rest` already stripped of the glue bytes and the `time` prefix.
+pub(super) fn payload(
+    w: &[u8],
+    place: Place,
+    glue: Glue,
+    open: Place,
+    op_quoted: bool,
+) -> (Option<Place>, &[u8]) {
     let n = glue::strip(glue);
     let rest = w.get(n..).unwrap_or(b"").trim_ascii();
     if rest.is_empty() {
@@ -48,7 +59,7 @@ pub(super) fn payload(w: &[u8], place: Place, glue: Glue, open: Place) -> (Optio
     // of a cond pair is. Inside a `case` word list the `|` is the pattern
     // alternation (`case x in a|while)`), so the list stays a list; a `||`
     // spelled without its glue stays the argument row it always was.
-    if rest.starts_with(b"|") && !rest.starts_with(b"||") {
+    if !op_quoted && rest.starts_with(b"|") && !rest.starts_with(b"||") {
         let stage = if matches!(place, Place::Pattern) {
             Place::Data
         } else {

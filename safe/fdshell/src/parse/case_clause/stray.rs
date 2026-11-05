@@ -135,7 +135,7 @@ pub(crate) fn verdict(
         place = if separator_data(tok) {
             word_place(place)
         } else {
-            after(bytes, line, *end, place, glue, None)
+            after(bytes, line, *end, place, glue, None, mask)
         };
     }
     None

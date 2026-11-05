@@ -12,6 +12,7 @@ use super::{
     separator_data, separator_shape, word_place,
 };
 use crate::keywords::{Closer, first_word_end};
+use crate::mask::MaskBit;
 
 /// `after` on the whole word: `word_end` sits just past it, outside a cond
 /// pair. `glue` marks the word's start in a pair (see [`super::after`]).
@@ -20,14 +21,14 @@ fn after_word(word: &[u8], place: Place) -> Place {
 }
 
 fn after_word_glue(word: &[u8], place: Place, glue: Glue) -> Place {
-    after(word, word, word.len(), place, glue, None)
+    after(word, word, word.len(), place, glue, None, &[])
 }
 
 /// `after` inside a block whose innermost open block requires `top` (task
 /// #309): the closer row is a **pairing** row, so only the closer of `top`
 /// restarts command position.
 fn after_in(word: &[u8], place: Place, top: Closer) -> Place {
-    after(word, word, word.len(), place, Glue::None, Some(top))
+    after(word, word, word.len(), place, Glue::None, Some(top), &[])
 }
 
 /// `scores` on the whole word.
@@ -555,7 +556,7 @@ fn keyword_behind_a_time_prefix_keeps_the_place() {
     let line = b"time if";
     let word_end = first_word_end(line, 0);
     assert_eq!(
-        after(line, line, word_end, Place::Pattern, Glue::None, None),
+        after(line, line, word_end, Place::Pattern, Glue::None, None, &[]),
         Place::Command
     );
     assert!(scores(b"time if", b"time if", 7, Place::Command));
@@ -757,7 +758,8 @@ fn a_closer_restarts_command_position_only_for_its_own_block() {
             3,
             Place::Command,
             Glue::None,
-            Some(Closer::Fi)
+            Some(Closer::Fi),
+            &[]
         ),
         Place::Words
     );
@@ -831,4 +833,59 @@ fn a_quoted_separator_shape_leaves_the_place_of_a_word() {
     assert!(data(b"a \")\" b", 1));
     assert!(data(b"a \"&&\" b", 1));
     assert!(!data(b"a b", 1), "an ordinary word is no separator shape");
+}
+
+/// Task #530 (bug #474): the two rows of [`after`] that read **word text** as an operator —
+/// the glue row and the pipeline-`|` row (task #292) — answer through the word's own quote
+/// mask, the ONE predicate. A word whose operator byte is quoted is word data: it is in no
+/// cond pair and opens no pipeline stage, so it leaves the place an ordinary word leaves
+/// (`echo "|" | cat` is `echo`'s argument through a pipeline). Both directions are pinned
+/// for both families: the byte-level callers pass an empty mask (the padding rule answers
+/// *unquoted*, so those rows are byte-identical), the token-level callers hand the real mask.
+#[test]
+fn a_quoted_operator_word_starts_no_stage_and_no_pair() {
+    let (q, u) = (&[MaskBit::QuotedStart][..], &[MaskBit::Unquoted][..]);
+    // The pipeline-`|` row: an unquoted byte 0 is the pipe byte, and the stage behind it
+    // is a command (task #292); a quoted one is the word `|` and leaves an argument.
+    assert_eq!(
+        after(b"|", b"|", 1, Place::Data, Glue::None, None, u),
+        Place::Command
+    );
+    assert_eq!(
+        after(b"|", b"|", 1, Place::Data, Glue::None, None, q),
+        Place::Data
+    );
+    // The byte-level family: an empty mask pads to unquoted and keeps the row.
+    assert_eq!(
+        after(b"|", b"|", 1, Place::Data, Glue::None, None, &[]),
+        Place::Command
+    );
+    // The glue rows: a pair's head sets the pair's place when its bytes are unquoted …
+    assert_eq!(
+        after(b"|", b"|", 1, Place::Data, Glue::Head, None, u),
+        Place::Command
+    );
+    // … and is no pair half when they are quoted (the gate runs before the rows).
+    assert_eq!(
+        after(b"|", b"|", 1, Place::Data, Glue::Head, None, q),
+        Place::Data
+    );
+    // The tail byte is transparent for both answers: the gate decides, the row does not.
+    assert_eq!(
+        after(b"|", b"|", 1, Place::Command, Glue::Tail, None, u),
+        Place::Command
+    );
+    assert_eq!(
+        after(b"|", b"|", 1, Place::Command, Glue::Tail, None, q),
+        Place::Data
+    );
+    // The word-list place keeps its own step (task #306) — the gate never reaches it.
+    assert_eq!(
+        after(b"|", b"|", 1, Place::Words, Glue::None, None, u),
+        Place::Words
+    );
+    assert_eq!(
+        after(b"|", b"|", 1, Place::Words, Glue::None, None, q),
+        Place::Words
+    );
 }

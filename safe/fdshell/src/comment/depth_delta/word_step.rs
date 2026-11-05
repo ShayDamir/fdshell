@@ -38,7 +38,7 @@ pub(crate) fn word_step(
     // The payload is scored at the *fragment's* end in `line` (`word_end`):
     // the payload is a slice of the fragment, so the fragment's own end is
     // the only offset into `line` that is true for it.
-    let payload_delta = pair_payload(frag).map_or(0, |payload| {
+    let payload_delta = pair_payload(frag, &[]).map_or(0, |payload| {
         if scores(payload, line, word_end, *place) {
             pairing.apply(payload, line, word_end)
         } else {
@@ -63,6 +63,6 @@ pub(crate) fn word_step(
     // The fragment is the run's *whitespace* unit: a glued pair is one
     // fragment, never a bare tail byte, so the fragment is never in a pair
     // ([`Glue::None`]).
-    *place = after(frag, line, word_end, *place, Glue::None, top);
+    *place = after(frag, line, word_end, *place, Glue::None, top, &[]);
     delta + payload_delta + closer_delta
 }
