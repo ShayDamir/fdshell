@@ -5,7 +5,7 @@
 
 use error_stack::{Report, ResultExt};
 
-use crate::error::cmd::CmdError;
+use crate::error::cmd::timeout::TimeoutError;
 
 /// Poll the child's pidfd against a one-shot deadline timer. Returns the
 /// child's exit code (or 124 if the deadline fired first, after [`terminate`]
@@ -13,17 +13,17 @@ use crate::error::cmd::CmdError;
 pub(super) fn bounded_wait(
     pidfd: &sys::LocalFd,
     seconds: i64,
-) -> Result<(i32, sys::getrusage::CpuTimes), Report<CmdError>> {
-    let timer = sys::timerfd::timerfd_create(0).change_context(CmdError::TimeoutTimer)?;
+) -> Result<(i32, sys::getrusage::CpuTimes), Report<TimeoutError>> {
+    let timer = sys::timerfd::timerfd_create(0).change_context(TimeoutError::TimeoutTimer)?;
     sys::timerfd::timerfd_settime(&timer, (seconds, 0), (0, 0))
-        .change_context(CmdError::TimeoutTimer)?;
+        .change_context(TimeoutError::TimeoutTimer)?;
     let mut pfd = [
         sys::poll::PollFd::new(pidfd.as_raw(), sys::poll::POLLIN),
         sys::poll::PollFd::new(timer.as_raw(), sys::poll::POLLIN),
     ];
     // `poll(-1)` blocks until at least one fd is ready, so exactly one of the
     // two arms fired: the child's pidfd or the deadline timer.
-    sys::poll::poll(&mut pfd, -1).change_context(CmdError::TimeoutPoll)?;
+    sys::poll::poll(&mut pfd, -1).change_context(TimeoutError::TimeoutPoll)?;
     let timed_out = pfd
         .get(1)
         .is_some_and(|p| p.revents & sys::poll::POLLIN != 0);
@@ -31,12 +31,12 @@ pub(super) fn bounded_wait(
         terminate(pidfd)?;
         let (_, times) = pidfd
             .wait_pidfd_rusage()
-            .change_context(CmdError::TimeoutWait)?;
+            .change_context(TimeoutError::TimeoutWait)?;
         Ok((124, times))
     } else {
         let (status, times) = pidfd
             .wait_pidfd_rusage()
-            .change_context(CmdError::TimeoutWait)?;
+            .change_context(TimeoutError::TimeoutWait)?;
         Ok((status.exit_code(), times))
     }
 }
@@ -45,17 +45,17 @@ pub(super) fn bounded_wait(
 /// the child is still alive after the one-second grace poll. The grace period
 /// is the whole rule — a child that exits on SIGTERM is never killed by force,
 /// and the reaping `wait_pidfd_rusage` runs only after the sequence.
-fn terminate(pidfd: &sys::LocalFd) -> Result<(), Report<CmdError>> {
+fn terminate(pidfd: &sys::LocalFd) -> Result<(), Report<TimeoutError>> {
     pidfd
         .send_signal(sys::signal::SIGTERM)
-        .change_context(CmdError::TimeoutSignal)?;
+        .change_context(TimeoutError::TimeoutSignal)?;
     // Grace period: give the child a chance to exit on SIGTERM.
     let mut grace = [sys::poll::PollFd::new(pidfd.as_raw(), sys::poll::POLLIN)];
-    let n2 = sys::poll::poll(&mut grace, 1000).change_context(CmdError::TimeoutPoll)?;
+    let n2 = sys::poll::poll(&mut grace, 1000).change_context(TimeoutError::TimeoutPoll)?;
     if n2 == 0 {
         pidfd
             .send_signal(sys::signal::SIGKILL)
-            .change_context(CmdError::TimeoutSignal)?;
+            .change_context(TimeoutError::TimeoutSignal)?;
     }
     Ok(())
 }

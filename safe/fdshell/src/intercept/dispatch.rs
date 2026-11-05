@@ -3,7 +3,7 @@
 use crate::error::cmd::CmdError;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
@@ -43,7 +43,9 @@ pub(crate) fn dispatch(
         b"read" => super::read::run_read(line, cmdline, text, cell).map(super::handled),
         b"ulimit" => super::ulimit_cmd::run_ulimit(line, cmdline, cell).map(super::handled),
         b"signalfd" => super::signalfd_cmd::run_signalfd(line, cmdline, cell).map(super::handled),
-        b"timeout" => super::timeout_cmd::run_timeout(line, cmdline, cell).map(super::handled),
+        b"timeout" => super::timeout_cmd::run_timeout(line, cmdline, cell)
+            .map(super::handled)
+            .change_context(CmdError::Parse),
         b"send_fd" => super::send_fd::run_send_fd(line, cmdline, cell).map(super::handled),
         b"sendmsg" => super::sendmsg::run_sendmsg(line, cmdline, cell).map(super::handled),
         b"recvmsg" => super::recvmsg::run_recvmsg(line, cmdline, text, cell).map(super::handled),

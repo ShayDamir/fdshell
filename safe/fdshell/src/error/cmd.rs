@@ -1,5 +1,7 @@
 //! Command dispatch errors (run.rs, cond.rs).
 
+pub(crate) mod timeout;
+
 /// [CmdError] Command dispatch errors
 #[derive(displaydoc::Display, Debug)]
 pub enum CmdError {
@@ -111,22 +113,6 @@ pub enum CmdError {
     SignalfdBadFlag { value: sys::ShortCStr },
     /// signalfd: failed to create the signalfd
     SignalfdSyscall,
-    /// timeout: '{value}' is not a seconds value
-    TimeoutBadSeconds { value: sys::ShortCStr },
-    /// timeout: missing seconds argument (usage: timeout <seconds> <cmd> [args ...])
-    TimeoutMissingSeconds,
-    /// timeout: missing command argument (usage: timeout <seconds> <cmd> [args ...])
-    TimeoutMissingCommand,
-    /// timeout: failed to launch the command
-    TimeoutLaunch,
-    /// timeout: failed to create the deadline timer
-    TimeoutTimer,
-    /// timeout: failed to poll the command or the deadline
-    TimeoutPoll,
-    /// timeout: failed to signal the command
-    TimeoutSignal,
-    /// timeout: failed to wait for the command
-    TimeoutWait,
     /// sendmsg: socket must be an fd variable or a valid fd number
     SendmsgBadSocket,
     /// sendmsg: unknown argument (usage: sendmsg %sock [--msg TEXT | --msgfd %var COUNT] [--fd %var]... [--passcred])

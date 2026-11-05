@@ -4,11 +4,11 @@ use error_stack::Report;
 use sys::ShortCStr;
 
 use super::parse::parse;
-use crate::error::cmd::CmdError;
+use crate::error::cmd::timeout::TimeoutError;
 use crate::mask::MaskBit;
 use crate::mask::MaskBit::{Quoted, Unquoted};
 
-fn run(words: &[&str]) -> Result<super::parse::TimeoutConfig, Report<CmdError>> {
+fn run(words: &[&str]) -> Result<super::parse::TimeoutConfig, Report<TimeoutError>> {
     let args: Vec<ShortCStr> = words
         .iter()
         .map(|w| ShortCStr::from_vec(w.as_bytes().to_vec()).unwrap())
@@ -22,7 +22,7 @@ fn run(words: &[&str]) -> Result<super::parse::TimeoutConfig, Report<CmdError>> 
 fn run_masked(
     words: &[&str],
     mask: &[Vec<MaskBit>],
-) -> Result<super::parse::TimeoutConfig, Report<CmdError>> {
+) -> Result<super::parse::TimeoutConfig, Report<TimeoutError>> {
     let args: Vec<ShortCStr> = words
         .iter()
         .map(|w| ShortCStr::from_vec(w.as_bytes().to_vec()).unwrap())
@@ -36,7 +36,7 @@ fn run_masked_quoted(
     words: &[&str],
     mask: &[Vec<MaskBit>],
     quoted: &[bool],
-) -> Result<super::parse::TimeoutConfig, Report<CmdError>> {
+) -> Result<super::parse::TimeoutConfig, Report<TimeoutError>> {
     let args: Vec<ShortCStr> = words
         .iter()
         .map(|w| ShortCStr::from_vec(w.as_bytes().to_vec()).unwrap())
@@ -49,7 +49,7 @@ fn missing_seconds() {
     let err = run(&[]).unwrap_err();
     assert!(matches!(
         err.current_context(),
-        CmdError::TimeoutMissingSeconds
+        TimeoutError::TimeoutMissingSeconds
     ));
 }
 
@@ -58,7 +58,7 @@ fn missing_command() {
     let err = run(&["5"]).unwrap_err();
     assert!(matches!(
         err.current_context(),
-        CmdError::TimeoutMissingCommand
+        TimeoutError::TimeoutMissingCommand
     ));
 }
 
@@ -96,7 +96,7 @@ fn bad_seconds() {
     let err = run(&["abc", "true"]).unwrap_err();
     assert!(matches!(
         err.current_context(),
-        CmdError::TimeoutBadSeconds { .. }
+        TimeoutError::TimeoutBadSeconds { .. }
     ));
 }
 
@@ -105,7 +105,7 @@ fn negative_seconds() {
     let err = run(&["-1", "true"]).unwrap_err();
     assert!(matches!(
         err.current_context(),
-        CmdError::TimeoutBadSeconds { .. }
+        TimeoutError::TimeoutBadSeconds { .. }
     ));
 }
 

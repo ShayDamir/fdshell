@@ -12,6 +12,7 @@ use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
+use crate::error::cmd::timeout::TimeoutError;
 use crate::parse::BuiltinPrefix;
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
@@ -23,8 +24,18 @@ pub(crate) fn run_timeout(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
-) -> Result<bool, Report<CmdError>> {
-    super::validation::validate_intercept(line, "timeout", cmdline)?;
+) -> Result<bool, Report<TimeoutError>> {
+    // The shared validator answers with `CmdError`; `timeout`'s type carries the
+    // same two messages, so the conversion is per-variant (STYLE §4.5).
+    super::validation::validate_intercept(line, "timeout", cmdline).map_err(
+        |report| match *report.current_context() {
+            CmdError::CapturesNotSupported { command } => {
+                report.change_context(TimeoutError::CapturesNotSupported { command })
+            }
+            _ => report
+                .change_context(TimeoutError::BuiltinKeywordNotSupported { command: "timeout" }),
+        },
+    )?;
     let cfg = parse::parse(
         &cmdline.args,
         &cmdline.args_mask,
@@ -51,12 +62,18 @@ pub(crate) fn run_timeout(
     };
     // The target word is word 0, so it is expanded exactly like a command word
     // — substitution, IFS splitting, globbing — before the launch (task #268).
-    let subcmdline = crate::command_word::expand(&subcmdline, cell)?;
-    let subcmdline = subcmdline.into_owned();
+    // The shared expansion answers with `CmdError`; the conversion is per-variant
+    // so both messages survive verbatim (STYLE §4.5, §4.17).
+    let subcmdline = crate::command_word::expand(&subcmdline, cell)
+        .map_err(|report| match *report.current_context() {
+            CmdError::Never => report.change_context(TimeoutError::Never),
+            _ => report.change_context(TimeoutError::Resolve),
+        })?
+        .into_owned();
     let outcome = crate::launch::launch(cell, &subcmdline, &Vec::new())
-        .change_context(CmdError::TimeoutLaunch)?;
+        .change_context(TimeoutError::TimeoutLaunch)?;
     let (exit, times) = wait::bounded_wait(&outcome.pidfd, cfg.seconds)?;
-    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+    let mut state = cell.borrow_mut().change_context(TimeoutError::Never)?;
     state.add_child_times(times);
     state.set_last_exit(exit);
     Ok(true)
