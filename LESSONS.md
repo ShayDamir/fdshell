@@ -3966,7 +3966,7 @@ unit holds it: the tokenizer splits `b` `)` `esac`, so the clause walk reads the
 spaced spelling, while the byte run gets `b)esac` whole and reads the closer from
 the word's **interior** — the inside-word payload of
 `keywords/position/paren.rs`, consumed by
-`comment/depth_delta.rs::word_step` beside the cond pair's, scored at the word's
+`comment/depth_delta/word_step.rs::word_step` beside the cond pair's, scored at the word's
 own place so the place, kind and stray-closer gates keep firing, one score per
 word with the word-start row winning, and the arithmetic region's `)` still
 region bytes (task #396). Bash parity follows for every glued-closer spelling,
