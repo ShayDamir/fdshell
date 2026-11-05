@@ -2,6 +2,7 @@ use crate::scan::heredoc;
 use crate::segment::book::Book;
 use crate::segment::line;
 use block::group_block;
+use core::cmp::Ordering;
 
 mod block;
 pub(super) mod opener;
@@ -51,8 +52,11 @@ pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
     // trailing flush's `assigned` count then skips the regions the group's own
     // operators claimed (`{ cat <<T; }; cat <<U` gives the `cat <<U` run region
     // 1, not the group's region 0). The keyword/definer branches do the same
-    // ([`super::block::open_block`], tasks #240/#305).
-    let new_start = if resume < line_end {
+    // ([`super::block::open_block`], tasks #240/#305). The test is operator-free
+    // like that twin's: equality (the group's statement ending at the physical
+    // line's newline) takes the same branch either way, the run buffer there is
+    // empty and its flush never reads the line start.
+    let new_start = if matches!(resume.cmp(&line_end), Ordering::Less) {
         line_start
     } else {
         resume

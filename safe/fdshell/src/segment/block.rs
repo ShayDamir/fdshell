@@ -11,6 +11,7 @@ use crate::scan::ScanState;
 use crate::scan::heredoc;
 use crate::segment::book::Book;
 use crate::segment::line;
+use core::cmp::Ordering;
 
 /// Take the keyword-block branch of the segment scan for the block-opening run
 /// `raw` that starts at `book.start`: the run's statements are flushed, then
@@ -70,8 +71,14 @@ pub(super) fn open_block<'a>(
     // Trailing content shares the block's physical line: the line's bookkeeping
     // (and its global body stream) continues from the line's start, so the
     // trailing runs' flush skips the regions the pre-block statements and the
-    // block's own operators claimed.
-    let new_start = if resume < heredoc::line_end_after(line, start) {
+    // block's own operators claimed. The test is written operator-free on
+    // purpose: at equality (`resume == line_end`, the definition's closing token
+    // the physical line's last byte) both branches already agree — the equality
+    // case's resume was pushed past every body region of the line, so the
+    // remaining scan is a flush of an empty run buffer either way — and a
+    // comparison here would carry a family no test can see.
+    let line_end = heredoc::line_end_after(line, start);
+    let new_start = if matches!(resume.cmp(&line_end), Ordering::Less) {
         line_start
     } else {
         resume
