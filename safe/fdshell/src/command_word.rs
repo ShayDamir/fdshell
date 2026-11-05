@@ -19,7 +19,7 @@ use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use error_stack::Report;
+use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
@@ -37,6 +37,14 @@ pub(crate) fn expand<'a>(
     cmdline: &'a CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<Cow<'a, CommandLine>, Report<CmdError>> {
+    // The per-command scratch (task #426): the vanished-word marker and the last
+    // substitution's status are the run side's decision inputs, and each command
+    // — each pipeline stage — answers with what **its own** expansion produced.
+    {
+        let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+        state.word0_vanished = false;
+        state.last_substitution = None;
+    }
     if fields::passes_through(&cmdline.command, &cmdline.command_mask) {
         return Ok(Cow::Borrowed(cmdline));
     }
@@ -71,10 +79,13 @@ pub(crate) fn expand_pipeline<'a>(
     Ok(stages)
 }
 
-/// Rebuild the command line from word 0's field list: `fields[0]` is the
-/// command name (the empty name included — it is what bash reports as
-/// `: command not found`), its mask fully quoted so the child's word-0 rules
-/// are no-ops on it, and `fields[1..]` become leading arguments.
+/// Rebuild the command line from word 0's field list: `fields[0]` is the command
+/// name — for a **quoted** word whose expansion is empty that is the empty name
+/// bash reports as `: command not found` — its mask fully quoted so the child's
+/// word-0 rules are no-ops on it, and `fields[1..]` become leading arguments.
+/// **No field at all** is the other family: the word vanished, so bash's command
+/// name is *omitted* (POSIX #2.9.1, task #426) and the run side decides;
+/// [`ShellState::word0_vanished`] is the carrier.
 fn with_fields(
     cmdline: &CommandLine,
     fields: Vec<ShortCStr>,
@@ -82,7 +93,15 @@ fn with_fields(
 ) -> Result<CommandLine, Report<CmdError>> {
     let (fields, consumed) = consume(cmdline, fields, cell)?;
     let mut fields = fields.into_iter();
-    let command = fields.next().unwrap_or_else(ShortCStr::new);
+    let command = match fields.next() {
+        Some(field) => field,
+        None => {
+            cell.borrow_mut()
+                .change_context(CmdError::Never)?
+                .word0_vanished = true;
+            ShortCStr::new()
+        }
+    };
     let (args, args_mask, args_span, args_quoted) = leading_args(fields, cmdline, consumed)?;
     Ok(CommandLine {
         prefix: cmdline.prefix,

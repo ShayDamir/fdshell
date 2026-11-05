@@ -91,6 +91,26 @@ fn plain_assignment_clears_last_arg() {
 }
 
 #[test]
+fn the_omitted_command_name_clears_last_arg() {
+    // bash 5.3.9 (measured 2026-11-05) sets `$_` to the **empty command name** for
+    // the omitted-name command — the same rule as the assignment above. Both spellings
+    // of the arm clear it: the parse-built redirect-only statement (`>g`, task #303)
+    // and the word that expanded to no word (`$(true) >g`, task #426). The file lands
+    // in a scratch dir.
+    let dir = scratch("omitted_name");
+    for script in [
+        "true a; >g; builtin echo [$_]",
+        "true a; $(true) >g; builtin echo [$_]",
+    ] {
+        let (out, err, code) = run(&format!("cd {}; {}", dir.display(), script));
+        assert_eq!(code, 0, "stderr={err:?}");
+        assert_eq!(out, "[]\n", "{script}");
+        assert_eq!(err, "", "{script}: bash is silent");
+        std::fs::remove_file(dir.join("g")).ok();
+    }
+}
+
+#[test]
 fn for_loop_inner_commands_update_last_arg() {
     // Like bash, the loop body's last command sets `$_` (no clear at loop end).
     let (out, err, code) = run("for i in 1 2; do true p q; done; builtin echo [$_]");

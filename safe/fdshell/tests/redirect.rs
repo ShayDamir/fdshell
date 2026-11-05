@@ -2536,6 +2536,79 @@ fn a_redirect_only_statement_creates_its_file_and_exits_zero() {
     assert!(std::path::Path::new(dir).join("f").exists(), "{dir}");
 }
 
+/// The **post-expansion** member of the family (task #426): a word 0 that expands
+/// to **no word at all** — `$(true) >f`, `` `false` >f ``, `$unset >g`, `"$@" >f`
+/// with no positionals — is bash's command with the *command name omitted*
+/// (POSIX #2.9.1): the redirections apply, nothing launches, no fork happens, and
+/// the status is that of the **last command substitution performed**, 0 when none
+/// ran; `$_` takes the empty command name and a `NAME=value` prefix persists. Every
+/// value below is `bash -c` 5.3.9's measurement, and every row asserts the report
+/// too — a pin that only asserts the rc passes for the wrong reason (LESSONS,
+/// "Word 0 is a substitution surface", rule 7). The quoted-empty family (`"" >f`,
+/// bash 127) stays the documented lookup divergence, pinned by
+/// `a_quoted_operator_or_heredoc_word_stays_a_command`; the `$_` rows live in
+/// `tests/last_arg.rs`.
+#[test]
+fn a_word_that_expands_to_no_word_is_the_omitted_command_name() {
+    let dir = seeded("omitted_name");
+    let dir = dir.to_str().unwrap();
+    let rows: [(&str, &str, i32, &[&str]); 15] = [
+        ("$(true) >f", "", 0, &["f"]),
+        ("$(false) >f", "", 1, &["f"]),
+        ("$(true)", "", 0, &[]),
+        ("$(false)", "", 1, &[]),
+        ("`false` >f", "", 1, &["f"]),
+        ("n=; $n >g", "", 0, &["g"]),
+        ("set --; \"$@\" >f; echo rc=$?", "rc=0\n", 0, &["f"]),
+        ("$(false); $unset; echo rc=$?", "rc=0\n", 0, &[]),
+        (
+            "$(false) >f; $(true) >g; echo rc=$?",
+            "rc=0\n",
+            0,
+            &["f", "g"],
+        ),
+        (
+            "$(true) >f; $(false) >g; echo rc=$?",
+            "rc=1\n",
+            0,
+            &["f", "g"],
+        ),
+        ("VAR=x $(true); echo \"VAR=[$VAR]\"", "VAR=[x]\n", 0, &[]),
+        ("cat | $(false) >f; echo rc=$?", "rc=1\n", 0, &["f"]),
+        ("if $(false); then echo T; else echo F; fi", "F\n", 0, &[]),
+        ("set -e; $(false) >f; echo after", "", 1, &["f"]),
+        (">$(echo f; exit 3); echo rc=$?", "rc=3\n", 0, &["f"]),
+    ];
+    for (script, stdout, rc, want) in rows {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!(
+            (out.as_str(), code, created(&files)),
+            (stdout, rc, names(want)),
+            "{script}: stderr={err:?}"
+        );
+        assert_eq!(err, "", "{script}: bash is silent");
+    }
+    // The pipeline row whose vanished word is **not** the last stage: the stage
+    // keeps its fork, and the pipeline's code is the last stage's (`cat` → 0, as
+    // bash). The message is the residual of the state carrier — the child's copy
+    // is the parent's, taken after every stage's word 0 was expanded, so a middle
+    // stage carries the last stage's value and falls back to the lookup; bash is
+    // silent here. The mirror row above (`cat | $(false) >f`) is the same shape
+    // with the vanished word **last**, and it is full parity.
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "$(false) >f | cat; echo rc=$?");
+    assert_eq!(
+        (out.as_str(), code, created(&files)),
+        ("rc=0\n", 0, names(&["f"])),
+        "stderr={err:?}"
+    );
+    assert!(
+        err.contains("\"\""),
+        "the middle stage still reports: {err:?}"
+    );
+}
+
 /// The status is 0 and the statement is a full member of the lists: `$?`, the
 /// `&&` / `||` chains, the `;` segments, the scoped prefix (which **persists**,
 /// as bash keeps `VAR=x` from `VAR=x >f`), and the plain-command regression

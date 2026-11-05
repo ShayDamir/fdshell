@@ -189,8 +189,11 @@ fn quoted_empty_expansion_is_the_empty_name() {
     assert_eq!(bytes(out.args.first().unwrap()), b"echo");
 }
 
-/// Nothing left to consume: the command is the empty name (fdshell reports a
-/// missing command; bash reports `: command not found`).
+/// Nothing left to consume: the word **vanished** — no field at all — so bash's
+/// command name is omitted (POSIX #2.9.1): no lookup, no report, and the status is
+/// the last substitution's (bash: rc 0 here, since `echo` succeeded). The command
+/// line carries the empty name; [`ShellState::word0_vanished`] carries the fact
+/// that there is no word, and the run side decides (task #426).
 #[test]
 fn empty_expansion_with_no_words_left_is_the_empty_name() {
     let cell = cell();
@@ -199,6 +202,29 @@ fn empty_expansion_with_no_words_left_is_the_empty_name() {
         .into_owned();
     assert_eq!(bytes(&out.command), b"");
     assert!(out.args.is_empty());
+    assert!(cell.borrow().unwrap().word0_vanished);
+}
+
+/// The two sides of the marker (task #426): an **unquoted** word that expands to
+/// nothing produced no field, so the name is omitted and the flag is set; a
+/// **quoted** one yields exactly one (empty) field — a word, so a lookup, bash 127
+/// — and the flag stays clear. The gate's `word0_vanished` half has a pin on each
+/// side.
+#[test]
+fn only_a_vanished_word_marks_the_name_omitted() {
+    let vanished = cell();
+    expand(&cmdline("$(echo )", &[]), &vanished).unwrap();
+    assert!(
+        vanished.borrow().unwrap().word0_vanished,
+        "no field = no name"
+    );
+
+    let quoted = cell();
+    expand(&quoted_cmd("$(true)"), &quoted).unwrap();
+    assert!(
+        !quoted.borrow().unwrap().word0_vanished,
+        "a quoted empty expansion is a word"
+    );
 }
 
 /// IFS splitting applies to word 0's expansion, with the shell's own `IFS`.

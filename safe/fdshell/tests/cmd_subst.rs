@@ -457,22 +457,24 @@ fn word0_multi_field_expansion_leads_the_arguments() {
 
 /// An unquoted word 0 whose expansion is empty is not a word: the next field
 /// becomes the command. A *quoted* empty expansion is a word, so it is the
-/// (empty) command name and the arguments stay put; with nothing left to
-/// consume, the command name is empty. fdshell reports the empty name as a
-/// missing command (bash prints `: command not found`).
+/// (empty) command name and the arguments stay put — fdshell reports it as a
+/// missing command (bash prints `: command not found`, rc 127). With nothing left
+/// to consume, the word **vanishes**: the command name is omitted, nothing
+/// launches, and the status is the last substitution's — bash rc 0 and silent here,
+/// since `echo` succeeded (task #426, POSIX #2.9.1).
 #[test]
 fn word0_empty_expansion_consumes_the_next_field() {
     let (out, err, rc) = run("$(true) echo hi");
     assert_eq!(rc, 0, "stderr={err}");
     assert_eq!(out, "hi\n");
-    for script in ["\"$(true)\" echo hi", "$(echo )"] {
-        let (_out, err, rc) = run(script);
-        assert_ne!(rc, 0, "{script:?} must have an empty command name");
-        assert!(
-            err.contains("\"\""),
-            "{script:?} must name the empty word, {err}"
-        );
-    }
+
+    let (_out, err, rc) = run("\"$(true)\" echo hi");
+    assert_ne!(rc, 0, "a quoted empty word stays a lookup, stderr={err}");
+    assert!(err.contains("\"\""), "must name the empty word, {err}");
+
+    let (out, err, rc) = run("$(echo )");
+    assert_eq!((out.as_str(), rc), ("", 0), "bash: rc 0, silent, {err:?}");
+    assert_eq!(err, "");
 }
 
 /// A fully quoted whole-word `$@` with no positionals is **no word at all**
@@ -487,16 +489,50 @@ fn empty_dollar_at_in_word_zero_leaves_the_next_word_as_command() {
     assert_eq!(out, "hi\n");
 }
 
-/// The residual divergence of that shape: with nothing left to consume, the
-/// command name is empty and fdshell reports it (rc 1 in the report, the
-/// script continues at rc 0), where bash runs no command at all and prints
-/// nothing. Pinned like the `$(echo )` pins above: the message, not the path.
+/// The word-0 family's status rule (POSIX #2.9.1, task #426): a command whose word
+/// list ends up empty reports the status of the **last command substitution
+/// performed**, and 0 when none ran — both spellings go through the same reap site,
+/// so both answer. The reset rows are the load-bearing half: a substitution recorded
+/// by an earlier command must not answer for a command that ran none (the `$unset`,
+/// `"$@"` and `n=` rows). Every row is a `bash -c` 5.3.9 measurement; the
+/// file-creating shapes live in `tests/redirect.rs`.
 #[test]
-fn empty_dollar_at_alone_in_word_zero_reports_the_empty_name() {
+fn the_omitted_command_name_reports_the_last_substitution_status() {
+    for (script, stdout, rc) in [
+        ("$(true)", "", 0),
+        ("$(false)", "", 1),
+        ("`true`", "", 0),
+        ("`false`", "", 1),
+        ("$(true); echo rc=$?", "rc=0\n", 0),
+        ("$(false); echo rc=$?", "rc=1\n", 0),
+        ("`false`; echo rc=$?", "rc=1\n", 0),
+        ("$(true); $(false); echo rc=$?", "rc=1\n", 0),
+        ("$(false); $(true); echo rc=$?", "rc=0\n", 0),
+        ("$(false); $unset; echo rc=$?", "rc=0\n", 0),
+        (r#"set --; "$@"; echo rc=$?"#, "rc=0\n", 0),
+        ("n=; $n; echo rc=$?", "rc=0\n", 0),
+        ("set -e; $(false); echo after", "", 1),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (stdout, rc),
+            "{script:?}: stderr={err:?}"
+        );
+        assert_eq!(err, "", "{script:?}: bash is silent");
+    }
+}
+
+/// The parity case of that shape (task #426): with nothing left to consume, the
+/// word **vanishes**, so bash's command name is omitted — no command runs, nothing
+/// prints, and the status is the last command substitution's (none ran: 0). Measured
+/// against bash 5.3.9 on 2026-11-05: `after`, rc 0, silent.
+#[test]
+fn empty_dollar_at_alone_in_word_zero_omits_the_command_name() {
     let (out, err, rc) = run(r#"set --; "$@"; echo after"#);
     assert_eq!(rc, 0, "stderr={err}");
     assert_eq!(out, "after\n");
-    assert!(err.contains("\"\""), "must name the empty word, {err}");
+    assert_eq!(err, "");
 }
 
 /// Word 0's expansion is split on the shell's `IFS` like any other word:
@@ -615,24 +651,30 @@ fn word0_unbounded_output_is_capped() {
 }
 
 /// A chain of nested substitutions in word 0 is **bounded**: 100 levels run the
-/// innermost command and report its name (`deep`, bash's `deep: command not
-/// found` at rc 127 → fdshell rc 1), and one level more stops at the shell-wide
-/// nesting cap with a *fixed* report count and the empty command name — the
-/// chain never grows with the script, never hangs, never panics.
+/// innermost command and report its name (`deep`, bash's `deep: command not found`
+/// at rc 127 → fdshell rc 1), and one level more stops at the shell-wide nesting
+/// cap — the chain never grows with the script, never hangs, never panics, and the
+/// report count stays fixed. Past the cap the innermost command never runs, so no
+/// substitution reports and no status is recorded: the word vanishes and the
+/// omitted-name arm answers 0 (task #426), where bash — which has no cap — answers
+/// 127 through its own lookup of the name the innermost `echo` produced. Under the
+/// cap, the status now reaches the top through the substitution chain, which is how
+/// bash's 127 travels too.
 #[test]
 fn word0_deep_nesting_is_bounded() {
-    for (depth, name) in [(100, "deep"), (101, "")] {
+    for (depth, name, rc, reports) in [(100, "deep", 1, true), (101, "", 0, false)] {
         let script = format!("{}echo deep{}", "$(".repeat(depth), ")".repeat(depth));
-        let (out, err, rc) = run(&script);
-        assert_ne!(rc, 0, "depth {depth} must fail the command, stdout={out}");
+        let (out, err, code) = run(&script);
+        assert_eq!(code, rc, "depth {depth}, stdout={out} stderr={err}");
         assert_eq!(out, "", "depth {depth} must print nothing");
         assert!(
             !err.contains("panicked"),
             "depth {depth} must not panic, stderr={err}"
         );
-        assert!(
+        assert_eq!(
             err.contains(&format!("\"{name}\"")),
-            "depth {depth} must name {name:?}, stderr={err}"
+            reports,
+            "depth {depth}: stderr={err}"
         );
         // 100 report blocks of 5 lines; the cap keeps the count fixed.
         assert!(

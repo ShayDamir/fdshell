@@ -33,14 +33,18 @@ pub fn child_main(
     setup_shellfd(child_sock.as_ref(), cell)?;
     apply_redirects(redirects)?;
 
-    // A redirections-only stage (the empty command word of task #303): the
-    // redirections just applied **are** the command — `>f | cat` creates `f`
-    // and the stage exits 0 with `cat` reading an empty stdin. No arg
-    // substitution, no `$_` send (bash leaves `$_` alone: there is no command
-    // word) and no exec. A quoted empty word 0 (`"" | cat`, bash 127) stays on
-    // the normal path, as does an expanded-empty word 0.
-    if cmd.name.is_empty() && !cmdline.command_quoted && args.is_empty() {
-        return Ok(0);
+    // A stage whose word list is empty — the parse-built `>f` word 0 of task
+    // #303, or a word that **expanded** to no field (task #426): the
+    // redirections just applied **are** the command. `cat | $(false) >f` creates
+    // `f` and the stage reports the last command substitution's status (bash
+    // rc 1), 0 when none ran. The stage keeps its fork — a stage is a subshell —
+    // and its position **before** the `$_` send, since the child's `$_` dies with
+    // the fork. The state copy is the parent's, taken after every stage's word 0
+    // was expanded, so the value is the **last** stage's — the only stage whose
+    // status the pipeline reports (LESSONS, task #381). A **quoted** empty word 0
+    // (`"" | cat`, bash 127) stays on the normal path.
+    if cmd.name.is_empty() && args.is_empty() && omits_the_name(cmdline, cell)? {
+        return recorded_status(cell);
     }
     let resolved = substitute_args(
         args,
@@ -71,4 +75,30 @@ pub(crate) fn apply_redirects(redirects: &[Redirect]) -> Result<(), Report<Child
             .change_context(ChildProcessError::RedirectFailed)?;
     }
     Ok(())
+}
+
+/// The gate of the empty-word-list arm, the same union as `run/cmd.rs`'s: the
+/// parse-built operator word 0 (`command_quoted == false`, task #303) or a word
+/// whose expansion produced **no field** ([`ShellState::word0_vanished`],
+/// task #426). A quoted empty word is a word — a lookup (bash 127).
+fn omits_the_name(
+    cmdline: &CommandLine,
+    cell: &ForkCell<ShellState>,
+) -> Result<bool, Report<ChildProcessError>> {
+    let state = cell
+        .borrow()
+        .change_context(ChildProcessError::BorrowFailed)?;
+    Ok(state.word0_vanished || !cmdline.command_quoted)
+}
+
+/// The arm's status: the last command substitution performed for this command,
+/// or 0 when none ran (POSIX #2.9.1).
+fn recorded_status(cell: &ForkCell<ShellState>) -> Result<i32, Report<ChildProcessError>> {
+    let state = cell
+        .borrow()
+        .change_context(ChildProcessError::BorrowFailed)?;
+    Ok(state
+        .last_substitution
+        .as_ref()
+        .map_or(0, |s| s.exit_code()))
 }

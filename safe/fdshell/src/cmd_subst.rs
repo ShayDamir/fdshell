@@ -36,9 +36,13 @@ pub(crate) fn run_and_capture(
                     sys::Position::new(1, 1),
                     sys::Origin::Shell,
                 );
-                // Command substitution output already read; exit code irrelevant
+                // Command substitution output already read. The exit code is
+                // the script's status: the parent's reap records it for a
+                // command with no name (task #426), which is the only way a
+                // `$(false)` in word-0 position can report 1.
                 let _ = crate::repl::run_script(&text, cell);
-                sys::exit(0)
+                let code = cell.borrow().map_or(0, |s| s.last_status.exit_code());
+                sys::exit(code)
             }
             (_, Some(pidfd)) => {
                 drop(w);
@@ -51,11 +55,14 @@ pub(crate) fn run_and_capture(
                     drop(r);
                     let _ = pidfd.send_signal(sys::signal::SIGKILL);
                 }
-                // Reap child; stdout already consumed (or abandoned) above.
-                if let Ok((_, times)) = pidfd.wait_pidfd_rusage()
+                // Reap child; stdout already consumed (or abandoned) above. The
+                // status is kept in the scratch slot: it is the status of the
+                // command this substitution ran for (task #426).
+                if let Ok((status, times)) = pidfd.wait_pidfd_rusage()
                     && let Ok(mut s) = cell.borrow_mut()
                 {
                     s.add_child_times(times);
+                    s.last_substitution = Some(status);
                 }
                 out
             }

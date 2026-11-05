@@ -339,6 +339,23 @@ above), and `> <<EOF` / `>| <<EOF` keep the operator-token-leading reading rc 1
 rc 1), `for x in <<EOF` and `case x in <<EOF)` (bash rc 2, fdshell rc 0),
 `( <<EOF … )` (bash rc 0, fdshell rc 1: no subshells) — are owner **#488**.
 
+The **post-expansion** member of that family (task **#426**, POSIX #2.9.1) is a
+word 0 that expands to **no word at all**: `$(true) >f`, `` `false` >f ``,
+`$unset >f`, `set --; "$@" >f`. The field machinery already separates it from a
+*quoted* empty expansion — `"" >f` and `"$(true)" >f` produce one empty field, so
+they stay a lookup (fdshell's shell-wide **1**, bash 127, the pinned divergence) —
+while a word that produces **no** field leaves the command name omitted: the
+redirections apply, nothing launches, no fork happens for a simple command, and the
+status is **the last command substitution performed**, or **0** when none ran
+(`$(false) >f` and `` `false` `` exit **1**, `$(false) >f; $(true) >g` exits **0**,
+and a status recorded by an earlier command never answers for the next one). `$_`
+becomes empty and a `NAME=value` prefix persists, as above. Pipeline stages keep
+their forks and answer with their own stage's status — `cat | $(false) >f` gives
+**1**, `$(false) >f | cat` gives **0**, both bash's numbers — with fdshell's lookup
+message left on the stage that is not the last one: the per-command scratch is reset
+by the next stage's expansion before the children are forked, so only the last
+stage's word still knows it vanished.
+
 ## Here-document and here-string descriptor numbers
 
 `[N]<<word` delivers the body to descriptor `N` (`cat 3<<EOF` writes the body

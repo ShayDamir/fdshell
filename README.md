@@ -418,6 +418,22 @@ with one is in this family: `<<EOF` + body, `3<<EOF` + body, `cat | <<EOF` + bod
 feed the body to the empty command's stdin, print nothing and exit **0** (see
 *Here-documents*).
 
+A word 0 that **expands to no word at all** is the same command (POSIX #2.9.1,
+task #426): `$(true) >f`, `` `false` >f ``, `$unset >f` and `"$@" >f` with no
+positionals leave the shell with an omitted command name, so the redirections
+apply, nothing launches, and the status is **the last command substitution's** —
+`$(false) >f` exits **1**, `` `false` `` exits 1, and the status a substitution
+recorded for an *earlier* command never answers for this one (`$(false) >f;
+$(true) >g` exits **0**). Nothing runs, so the status is **0** when no
+substitution ran (`$unset >f`, `set --; "$@" >f`), and an async spelling keeps its
+fork — a `&` job is a fork in bash too — with the arm running inside the job.
+`$_` becomes empty, and everything else the paragraph
+above says — the persisted `NAME=value` prefix, its export divergence, the silent
+`set -x` line, the pipeline stage that keeps its fork — is that same rule. Only a
+*quoted* empty expansion stays a word, hence a lookup: `"" >f` and `"$(true)" >f`
+are bash's `: command not found` at **127** against fdshell's shell-wide **1**
+(an accepted divergence; the unquoted spellings are not words at all).
+
 A **keyword block** takes a redirection written after its closing keyword and
 applies it to the whole block: `while :; do echo a; break; done > f` files the
 loop's output in `f`, and so does `until … done > f`, `if … fi > f`,
@@ -814,6 +830,14 @@ $( echo true )       # runs `true` (word 0), not a parse error
 $( echo echo ) hi    # hi
 x=$( echo a )$( echo b )   # x is `ab`
 ```
+
+Word 0 is where an expansion can **vanish**: `$(true)`, `` `false` ``, `$unset` and
+`"$@"` with no positionals produce no word at all, so bash's command name is
+*omitted* — nothing runs, a redirection written on the same command still applies,
+and the status is the last substitution's (`$(false) >f` exits **1**, `$(true) >f`
+exits 0). A *quoted* expansion that comes out empty (`"$(true)"`) is a word, so it
+is the empty name and a lookup. The whole rule is under
+[Redirection](#redirection) (POSIX #2.9.1, task #426).
 
 A word that carries a substitution region is never the `name(` definer of a
 function definition — the shapes bash writes as definitions carry no region. An

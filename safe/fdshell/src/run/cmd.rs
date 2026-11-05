@@ -3,6 +3,7 @@
 
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
+use crate::redirect::Scope;
 use crate::run_env::EnvSave;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
@@ -22,31 +23,35 @@ pub(crate) fn run_cmd(
     // itself after arg substitution).
     let env = crate::run_env::expand(cmdline, text, cell)?;
     let save = crate::run_env::apply(&env, cell)?;
-    // POSIX #2.9: a redirections-only command (an empty command word, the
-    // shape `parse::command::redirect_first` builds) runs in the **current**
-    // shell: the scope opens and closes around nothing, the status is 0, and a
-    // `NAME=value` prefix **persists** — there is no command for it to scope
-    // to, so bash keeps `VAR=x` from `VAR=x >f` and the scoped `save` is
-    // deliberately not restored here. `command_quoted == false` is the guard
-    // that keeps a **quoted** empty word 0 (`"" >f`, bash 127) and an
-    // expanded-empty word 0 (`command_word::with_fields` sets the flag) out.
-    if is_redirect_only(cmdline) {
-        crate::redirect::Scope::open(&cmdline.redirects, cell)?.run(|| {
-            cell.borrow_mut()
-                .change_context(CmdError::Never)?
-                .set_last_exit(0);
-            Ok(())
-        })?;
-        return Ok(None);
-    }
     // Word 0 is expanded with the prefix applied, so the command name sees the
     // scoped values (`E=echo; $(echo $E) hi` runs `echo`), as bash expands it.
     // The prefix is restored before the launch: the child applies it itself,
     // after substituting its args (`IFS=: echo a:b` splits in the parent).
-    let (cmdline, control) = with_env(save, cell, || {
-        let cmdline = crate::command_word::expand(cmdline, cell)?;
-        let control = super::parent::run_parent(text, &cmdline, cell)?;
-        Ok((cmdline, control))
+    let cmdline = crate::command_word::expand(cmdline, cell)?;
+    // POSIX #2.9 and #2.9.1: a command whose word list is empty — the parse-built
+    // `>f` word 0, or a word that **expanded** to no field (`$(true) >f`) — has
+    // its command name **omitted**: the redirections apply, nothing launches,
+    // `$_` takes the empty command name, and the status is the last command
+    // substitution's, 0 when none ran. A **quoted** empty word 0 (`"" >f`) is a
+    // word, so it stays a lookup (bash 127, fdshell's rc 1) — the gate's
+    // `command_quoted` clause is what keeps it out. The prefix **persists**:
+    // there is no command for it to scope to, so bash keeps `VAR=x` from
+    // `VAR=x >f` and the scoped `save` is deliberately not restored here.
+    if omits_the_name(&cmdline, cell)? {
+        Scope::open(&cmdline.redirects, cell)?.run(|| {
+            let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+            let code = state
+                .last_substitution
+                .as_ref()
+                .map_or(0, |s| s.exit_code());
+            state.clear_last_arg();
+            state.set_last_exit(code);
+            Ok(())
+        })?;
+        return Ok(None);
+    }
+    let control = with_env(save, cell, || {
+        super::parent::run_parent(text, &cmdline, cell)
     })?;
     if let Some(control) = control {
         return Ok(control);
@@ -64,15 +69,29 @@ pub(crate) fn run_cmd(
     Ok(None)
 }
 
-/// The redirections-only command: an empty command word (a **quoted** empty
-/// one is a command lookup — `"" >f` is bash 127), no argument word (one makes
-/// the statement `>f g`, a command with a redirection), and at least one
-/// redirection.
-fn is_redirect_only(cmdline: &crate::parse::CommandLine) -> bool {
-    cmdline.command.is_empty()
-        && !cmdline.command_quoted
-        && cmdline.args.is_empty()
-        && !cmdline.redirects.is_empty()
+/// The gate of the omitted-name arm: an empty command word with no argument
+/// word and no background suffix, reached either by the parser-built `>f` word 0
+/// (whose `command_quoted` is false) or by a word whose expansion produced **no
+/// field** ([`ShellState::word0_vanished`], carried in the state because
+/// `expand`'s `Cow<CommandLine>` return cannot carry it). Both arms run in the
+/// current shell, and neither requires a redirection: `$(true)` alone is in the
+/// family. A **quoted** empty word 0 (`"" >f`) is a word — a lookup (bash 127).
+fn omits_the_name(
+    cmdline: &crate::parse::CommandLine,
+    cell: &ForkCell<ShellState>,
+) -> Result<bool, Report<CmdError>> {
+    if !cmdline.command.is_empty() || !cmdline.args.is_empty() || is_async(cmdline) {
+        return Ok(false);
+    }
+    let state = cell.borrow().change_context(CmdError::Never)?;
+    Ok(state.word0_vanished || !cmdline.command_quoted)
+}
+
+/// A background statement keeps its fork — `&` is a job, so the arm runs inside
+/// the forked job — and the pid-var form `&>&x` is registered under its name.
+/// Both are pinned as a family (`tests/redirect.rs`, `tests/heredoc.rs`).
+fn is_async(cmdline: &crate::parse::CommandLine) -> bool {
+    cmdline.bg_force || cmdline.pidvar.is_some()
 }
 
 /// Run `f` with the scoped prefix applied, restoring it on both paths (the

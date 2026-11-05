@@ -2,6 +2,11 @@
 use alloc::vec;
 
 use sys::Origin;
+use sys::fork_cell::ForkCell;
+
+use crate::command_word::expand;
+use crate::mask::MaskBit;
+use crate::parse::{BuiltinPrefix, CommandLine};
 
 use super::ctor::{seeded_environ, seeded_strings};
 use super::*;
@@ -236,4 +241,67 @@ fn value_of(rows: &[(ShortCStr, ShortCStr)], name: &[u8]) -> Option<ShortCStr> {
     rows.iter()
         .find(|(key, _)| key.eq_bytes(name))
         .map(|(_, value)| value.clone())
+}
+
+/// A command line whose word 0 is raw (unquoted) text and which has no other word
+/// — the shape whose expansion produces no field (task #426).
+fn word0(command: &str) -> CommandLine {
+    let word = ShortCStr::from_vec(command.as_bytes().to_vec()).unwrap();
+    CommandLine {
+        prefix: BuiltinPrefix::None,
+        command_mask: vec![MaskBit::Unquoted; command.len()],
+        command_span: vec![],
+        command_quoted: false,
+        command: word,
+        env_assigns: vec![],
+        args: vec![],
+        args_mask: vec![],
+        args_span: vec![],
+        args_quoted: vec![],
+        captures: vec![],
+        redirects: vec![],
+        pidvar: None,
+        bg_force: false,
+    }
+}
+
+/// The per-command scratch (task #426). The reap site's value survives the
+/// expansion of the word that **ran** the substitution — a `$(false)` in word-0
+/// position answers 1 — and `expand`'s top clears both fields, so a substitution
+/// recorded for one command never answers for the next: bash's rule is the status
+/// of the last substitution performed, 0 when none ran (`$(false); $unset;
+/// echo rc=$?` → `rc=0`, measured). Both directions are pinned: the marker is the
+/// word's own, the status is the word's own.
+#[test]
+fn the_word_scratch_is_per_command() {
+    let cell = ForkCell::new(ShellState::new());
+    expand(&word0("$(false)"), &cell).unwrap();
+    assert!(cell.borrow().unwrap().word0_vanished, "no field = no name");
+    assert_eq!(
+        recorded(&cell),
+        Some(1),
+        "the value recorded at the reap site survives to the arm"
+    );
+
+    // A word that vanishes **without** running a substitution of its own: the
+    // marker is set, the recorded status from the earlier word is gone.
+    expand(&word0("$unset"), &cell).unwrap();
+    assert!(cell.borrow().unwrap().word0_vanished);
+    assert_eq!(
+        recorded(&cell),
+        None,
+        "the earlier word's substitution leaked"
+    );
+
+    // And a word whose own substitution ran is answered by it again (bash 0).
+    expand(&word0("$(true)"), &cell).unwrap();
+    assert_eq!(recorded(&cell), Some(0));
+}
+
+fn recorded(cell: &ForkCell<ShellState>) -> Option<i32> {
+    cell.borrow()
+        .unwrap()
+        .last_substitution
+        .as_ref()
+        .map(|s| s.exit_code())
 }

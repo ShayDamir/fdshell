@@ -5560,8 +5560,9 @@ redirections apply, the shell's descriptors come back, the status is **0**, and
 command word; `run/cmd.rs` runs that shape in-process through
 `redirect::Scope` (the `: >f` machinery, so a failed open fails the command rc 1
 with the fds put back) and `child/run.rs` has the matching arm for forked
-pipeline stages, placed **before** the `$_` send because bash leaves `$_` alone
-when there is no command word.
+pipeline stages, placed **before** the `$_` send because the child's `$_` dies
+with the fork (the arm's `$_` rule is at the end of this entry: bash does **not**
+leave `$_` alone).
 
 **The load-bearing condition is `specs.is_empty()`.** The gate fires on the raw
 word-0 token through the **same three predicates the collection loop uses, in
@@ -5613,6 +5614,65 @@ so the row became
 row). Re-measure every name that mentions the old rule, and update the owner
 lists that name this task (`POSIX_COMPATIBILITY.md`, `tests/heredoc.rs`,
 `tests/redirect.rs`) in the same commit.
+
+**Task #426 took the expanded-empty family and made it the same arm** (POSIX
+#2.9.1): a word 0 whose expansion produces **no field** — `$(true) >f`,
+`` `false` >f ``, `$unset >f`, `set --; "$@" >f` — is bash's *omitted* command
+name, so the arm applies the redirections, launches nothing, and answers with
+**the status of the last command substitution performed, 0 when none ran**. The
+`command_quoted` clause above stays load-bearing: `with_fields` sets the flag for
+anything an expansion produced, so `!command_quoted` is the parse-shape half only,
+and the zero-field half arrives as a `ShellState` scratch pair —
+`word0_vanished` + `last_substitution` — because `expand`'s `Cow<CommandLine>`
+return cannot carry it ("Keep execution-context counters in `ShellState`, not
+threaded parameters"). Both fields reset at the top of `command_word::expand`, i.e.
+per command and per pipeline stage, and the reset is load-bearing in **both**
+directions: `$(false); $unset; echo rc=$?` answers 0 only because the earlier
+substitution is forgotten, and `$(false) >f; $(true) >g` answers 0 only because the
+*last* one wins. A *quoted* empty expansion (`"" >f`, `"$(true)" >f`) yields one
+empty field, so it stays a lookup — bash 127 against fdshell's rc 1 — and the
+clause is what keeps it there.
+
+**The status rule needs the substitution child's exit code.**
+`cmd_subst::run_and_capture` reaped its child and threw the `WaitStatus` away
+("exit code irrelevant"); the reap site is the one path both `$( … )` and
+`` ` … ` `` share, so it records the status in the scratch slot and the child exits
+with its script's status — the only way a `$(false)` in word-0 position can report
+1. The *general* "`$?` is the last substitution" rule (`x=$(false); echo rc=$?`) is
+a different owner; do not decide it from here.
+
+**The arm must not swallow an async statement.** A `&` job is a fork in bash too,
+so the gate says "not background" (`bg_force`/`pidvar`) and the forked job runs the
+arm through `child/run.rs`; the pid-var spelling `&>&x` is registered under its
+name. Both are pinned as a family (`an_ampersand_operand_follows_the_loops_own_vocabulary`,
+`tests/heredoc.rs`).
+
+**The per-stage reset means only the last stage's word still knows it vanished**:
+the parent expands every stage's word 0 before forking any of them, so a stage's
+state copy holds the *last* stage's values — which is exactly the stage whose status
+the pipeline reports (task #381). `cat | $(false) >f` is full bash parity at rc 1,
+while `$(false) >f | cat` answers bash's rc 0 but keeps fdshell's lookup message:
+the measured residual, pinned on rc only.
+
+**Correction, measured 2026-11-05: bash sets `$_` to the empty command name** for
+this arm — which is what `tests/last_arg.rs::plain_assignment_clears_last_arg` has
+always pinned for the assignment arm — so the arm clears it; both spellings are
+pinned by `tests/last_arg.rs::the_omitted_command_name_clears_last_arg`.
+
+**Pins of the old rule moved**, each on the plan's list:
+`word0_empty_expansion_consumes_the_next_field` split its loop — the quoted
+`"$(true)" echo hi` keeps the message, the unquoted `$(echo )` row is silent rc 0;
+`empty_dollar_at_alone_in_word_zero_reports_the_empty_name` became
+`empty_dollar_at_alone_in_word_zero_omits_the_command_name` (bash prints nothing at
+rc 0); `word0_deep_nesting_is_bounded`'s depth-101 row answers **0** with no report,
+because past the cap no substitution runs to record a status — bash, which has no
+cap, answers 127 through its own lookup, and *under* the cap the status now travels
+up the chain, which is how bash's 127 travels. New pins:
+`command_word/tests.rs::only_a_vanished_word_marks_the_name_omitted` (both sides of
+the flag), `state/tests.rs::the_word_scratch_is_per_command`,
+`cmd_subst/tests.rs::the_reap_records_the_substitution_status`,
+`tests/redirect.rs::a_word_that_expands_to_no_word_is_the_omitted_command_name`,
+`tests/cmd_subst.rs::the_omitted_command_name_reports_the_last_substitution_status`.
 
 ## A function-definition body is a block body for the region rule too: claim at the branch, re-attach at the builder (task #305)
 

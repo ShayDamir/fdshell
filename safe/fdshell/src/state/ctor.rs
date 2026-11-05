@@ -69,6 +69,8 @@ pub(crate) fn build() -> ShellState {
         program_name: ImportedStr::shell(ShortCStr::from(c"fdshell")),
         frames: Vec::new(),
         last_status: WaitStatus::Exited(0),
+        word0_vanished: false,
+        last_substitution: None,
         shell_pid: sys::env::getpid(),
         last_bg_pid: None,
         child_utime: 0,
