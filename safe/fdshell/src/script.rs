@@ -9,6 +9,7 @@ use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
 mod merge;
+mod segments;
 mod unclosed;
 
 pub(crate) fn run_script(
@@ -41,35 +42,8 @@ pub(crate) fn run_script(
     }
     for unit in merge::units(&segments) {
         match unit.segment {
-            Segment::Statement {
-                cmd,
-                off,
-                bodies,
-                background,
-                // The mid-run flag is the REPL's continuation signal, not a
-                // bail: the parse layer produces the pinned missing-closer
-                // diagnostic and its rc (tasks #232/#236), so the script
-                // runner runs the buffer as written (task #294).
-                midrun_open: _,
-                // The join flag and the join points are read by `merge::units`
-                // before the loop; an unmerged statement runs the text as written.
-                join_next: _,
-                joins: _,
-            } => {
-                // A statement whose list a here-doc region split runs as the
-                // joined statement `script/merge.rs` built for it.
-                let (bytes, bodies, background) = match &unit.joined {
-                    Some(joined) => (joined.text.as_slice(), &joined.bodies, joined.background),
-                    None => (*cmd, bodies, *background),
-                };
-                crate::verbose::trace(bytes, cell);
-                let part = match &unit.joined {
-                    Some(joined) => merge::text_at(&joined.text, *off, text)?,
-                    None => sub(text, *off, bytes.len())?,
-                };
-                if let Some(control) =
-                    crate::cond::run_cond_list(&part, bodies, cell, false, background)?
-                {
+            Segment::Statement { .. } => {
+                if let Some(control) = segments::run_statement(&unit, text, cell)? {
                     return Ok(Some(control));
                 }
             }
@@ -79,31 +53,12 @@ pub(crate) fn run_script(
                 closed,
                 // The group span's tail-closedness flag is the REPL's signal
                 // (task #401); the parse layer owns the runner's report, exactly
-                // as the `Statement` arm's flag above (tasks #232/#236/#294).
+                // as the `Statement` arm's flag (tasks #232/#236/#294).
                 midrun_open: _,
                 bodies,
             } => {
-                if !closed {
-                    // Named, not bare: `'if' is missing its closing 'fi'` with
-                    // the caret under the opener (task #277, STYLE §4.7).
-                    return Err(unclosed::report(line, *block_start));
-                }
-                let raw = line.get(*block_start..*end_pos).unwrap_or(b"");
-                crate::verbose::trace(raw.trim_ascii(), cell);
-                let lead = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
-                let cmd_start = *block_start + lead;
-                // The block's text is its **command** bytes only, and its body
-                // bytes travel as `run_cond_list`'s bodies exactly like a
-                // statement's (task #234): `cond::parts::take_bodies` gives the
-                // part that owns the `<<` operator its own body, so a split
-                // past the closing keyword never leaves a heredoc part bodyless.
-                // An extension-mode block (a condition's bodies are inside the
-                // span) claims no bodies here and keeps its verbatim text.
-                let full = sub(text, cmd_start, raw.trim_ascii().len())?;
-                // A block statement's own `&` runs it foreground (measured
-                // divergence, task #326 — compound background is a follow-up).
                 if let Some(control) =
-                    crate::cond::run_cond_list(&full, bodies, cell, false, false)?
+                    segments::run_block(line, text, cell, block_start, end_pos, closed, bodies)?
                 {
                     return Ok(Some(control));
                 }
@@ -114,12 +69,6 @@ pub(crate) fn run_script(
         }
     }
     Ok(None)
-}
-
-/// Subslice of a validated offset range; `None` is an internal invariant breach.
-fn sub(text: &ScriptText, off: usize, len: usize) -> Result<ScriptText, Report<CmdError>> {
-    let t = text.subslice(off, len).ok_or(CmdError::Never)?;
-    Ok(t)
 }
 
 #[cfg(test)]
