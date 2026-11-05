@@ -13,18 +13,13 @@
 mod args;
 mod fields;
 
-use args::{consume, leading_args};
-
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
-use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
-use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use crate::error::cmd::CmdError;
-use crate::mask::MaskBit;
 use crate::parse::{CommandLine, ExpandedStage, Pipeline, Stage};
 use crate::state::ShellState;
 
@@ -55,7 +50,7 @@ pub(crate) fn expand<'a>(
         cmdline.command_quoted,
         cell,
     )?;
-    Ok(Cow::Owned(with_fields(cmdline, word, cell)?))
+    Ok(Cow::Owned(fields::with_fields(cmdline, word, cell)?))
 }
 
 /// Word 0 of every pipeline stage (a pipeline launches as a whole, so its
@@ -77,48 +72,6 @@ pub(crate) fn expand_pipeline<'a>(
         }
     }
     Ok(stages)
-}
-
-/// Rebuild the command line from word 0's field list: `fields[0]` is the command
-/// name — for a **quoted** word whose expansion is empty that is the empty name
-/// bash reports as `: command not found` — its mask fully quoted so the child's
-/// word-0 rules are no-ops on it, and `fields[1..]` become leading arguments.
-/// **No field at all** is the other family: the word vanished, so bash's command
-/// name is *omitted* (POSIX #2.9.1, task #426) and the run side decides;
-/// [`ShellState::word0_vanished`] is the carrier.
-fn with_fields(
-    cmdline: &CommandLine,
-    fields: Vec<ShortCStr>,
-    cell: &ForkCell<ShellState>,
-) -> Result<CommandLine, Report<CmdError>> {
-    let (fields, consumed) = consume(cmdline, fields, cell)?;
-    let mut fields = fields.into_iter();
-    let command = match fields.next() {
-        Some(field) => field,
-        None => {
-            cell.borrow_mut()
-                .change_context(CmdError::Never)?
-                .word0_vanished = true;
-            ShortCStr::new()
-        }
-    };
-    let (args, args_mask, args_span, args_quoted) = leading_args(fields, cmdline, consumed)?;
-    Ok(CommandLine {
-        prefix: cmdline.prefix,
-        command: command.clone(),
-        command_mask: vec![MaskBit::Quoted; command.len()],
-        command_span: Vec::new(),
-        command_quoted: true,
-        env_assigns: cmdline.env_assigns.clone(),
-        args,
-        args_mask,
-        args_span,
-        args_quoted,
-        captures: cmdline.captures.clone(),
-        redirects: cmdline.redirects.clone(),
-        pidvar: cmdline.pidvar.clone(),
-        bg_force: cmdline.bg_force,
-    })
 }
 
 #[cfg(test)]
