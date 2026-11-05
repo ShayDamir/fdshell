@@ -119,31 +119,63 @@ fn timeout_returns_child_exit_code() {
     );
 }
 
-/// `timeout` with no seconds is a clean error (exit 1).
+/// `timeout` with no seconds is a clean error (exit 1). The print is the
+/// statement layer's `parse error` frame with the actionable message as its
+/// source — the accepted shape of the `timeout` family (task #526, LESSONS
+/// "`.change_context()` with same-message variants causes duplicate Display
+/// output"); the rc alone cannot tell these paths apart, every one exits 1.
 #[test]
 fn timeout_missing_seconds_errors() {
     let out = run("timeout");
     assert_eq!(out.status.code(), Some(1));
     let err = str::from_utf8(&out.stderr).unwrap();
     assert!(err.contains("timeout"), "stderr={err}");
+    assert!(err.contains("parse error"), "stderr={err}");
+    assert!(err.contains("missing seconds argument"), "stderr={err}");
 }
 
-/// `timeout 5` with no command is a clean error (exit 1).
+/// `timeout 5` with no command is a clean error (exit 1); the actionable message
+/// survives under the statement layer's `parse error` headline.
 #[test]
 fn timeout_missing_command_errors() {
     let out = run("timeout 5");
     assert_eq!(out.status.code(), Some(1));
     let err = str::from_utf8(&out.stderr).unwrap();
     assert!(err.contains("timeout"), "stderr={err}");
+    assert!(err.contains("parse error"), "stderr={err}");
+    assert!(err.contains("missing command argument"), "stderr={err}");
 }
 
-/// `timeout abc true` with a bad seconds value is a clean error (exit 1).
+/// `timeout abc true` with a bad seconds value is a clean error (exit 1); the
+/// actionable message survives under the statement layer's `parse error`
+/// headline.
 #[test]
 fn timeout_bad_seconds_errors() {
     let out = run("timeout abc true");
     assert_eq!(out.status.code(), Some(1));
     let err = str::from_utf8(&out.stderr).unwrap();
+    assert!(err.contains("parse error"), "stderr={err}");
+    assert!(err.contains("'abc' is not a seconds value"), "stderr={err}");
     assert!(err.contains("seconds"), "stderr={err}");
+}
+
+/// `builtin timeout 1 ls` answers with the message **twice** — once as the
+/// source of the statement layer's `parse error` frame, once as its own
+/// caret-framed print. The count is the pin: the duplicate is the accepted
+/// shape of a split error type bridged by one `.change_context()` at the
+/// dispatch boundary (task #526, LESSONS "`.change_context()` with
+/// same-message variants causes duplicate Display output"), so collapsing the
+/// chain must fail here.
+#[test]
+fn builtin_prefix_on_timeout_prints_the_message_twice() {
+    let out = run("builtin timeout 1 ls");
+    assert_eq!(out.status.code(), Some(1));
+    let err = str::from_utf8(&out.stderr).unwrap();
+    assert_eq!(
+        err.matches("prefix is not supported").count(),
+        2,
+        "stderr={err}"
+    );
 }
 
 /// POSIX #4.1: `timeout`'s target word is word 0 of the command it launches, so

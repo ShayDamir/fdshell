@@ -82,6 +82,20 @@ does not make it bash's rc 2. Pins: `script/tests.rs`, `tests/cond_blocks.rs::un
 ## `.change_context()` with same-message variants causes duplicate Display output
 Outer variant should describe *what* failed, inner describes *why*. Avoid "Y → because Y" chains.
 
+Accepted instance of the "Y → because Y" chain, adjudicated as decided (task #526):
+the `timeout` family. Splitting the flat `CmdError` was the only §2.6 move for its
+file, §4.3 forbids nesting, and `error_stack` 0.7 has no `From<Report<A>> for
+Report<B>`, so `?` cannot bridge two error types — the split enum has to be bridged
+by the one `.change_context()` at the intercept dispatch boundary, and a bridge frame
+heads the print. So `timeout abc true` answers the statement layer's `parse error`
+frame with the actionable `TimeoutError` message as its source, and under a
+`builtin`/`command` prefix that message prints twice. Pins pin the printed shape
+(headline + actionable message; the count), so collapsing the chain fails them:
+`tests/timeout.rs::timeout_bad_seconds_errors`,
+`tests/timeout.rs::timeout_missing_command_errors`,
+`tests/timeout.rs::timeout_missing_seconds_errors`,
+`tests/timeout.rs::builtin_prefix_on_timeout_prints_the_message_twice`.
+
 ## A NUL byte is reachable only at the entry points that ingest outside bytes
 
 `ShortCStr::from_vec` fails for exactly one byte, so a `NulByte` is an invariant
