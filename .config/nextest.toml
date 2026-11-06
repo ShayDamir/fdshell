@@ -16,6 +16,19 @@ slow-timeout = { period = "10s", terminate-after = 1 }
 filter = 'test(times_children_total_time_increases_after_wait)'
 slow-timeout = { period = "10s", terminate-after = 4 }
 
+# The pinned 100/101 nesting-cap pair is the smallest pair that pins
+# `MAX_NESTING = 100`, and its cost is real product CPU (a fork + pipe + reap
+# round trip per level), so — unlike a burn — it cannot be shrunk: the kill is
+# what moves. Keep the 10 s "slow" period and widen only the kill (10 s -> 40 s)
+# for this one test: 32-core host, 0.23-0.35 s quiet (12 runs) and 1.82-7.75 s
+# (median 4.68) across 160 runs of the 8-concurrent full-suite harness (the
+# `cargo mutants -j8` profile); pre-override it sat at 8.08-8.78 s there and was
+# killed at 10.006 s in 2 of 8 runs, so the plain period left a 1.3x margin and
+# 40 s leaves >5x.
+[[profile.default.overrides]]
+filter = 'test(word0_deep_nesting_is_bounded)'
+slow-timeout = { period = "10s", terminate-after = 4 }
+
 # Cap each test binary at 128MB of virtual address space (RLIMIT_AS).
 # Allocation failures abort the test cleanly instead of tripping the host
 # OOM killer, which filters out infinite-allocation mutants (e.g. in semi.rs).
