@@ -1616,7 +1616,10 @@ closing keyword (`while :; do echo a; break; done # c && echo y` prints `a`
 alone, and the mid-run block `true && while :; do :; break; done # c && echo y`
 prints nothing), and the gate of a short-circuited `||` ends at the comment's
 newline — `true || if :; then :; fi # c ; echo tail` never resumes inside the
-comment and runs nothing. A `#` inside a word (`echo a#b`) is data.
+comment and runs nothing. The rule reaches a here-doc operator on a
+comment-terminated line too: `cat <<Q # c` + `body` + `Q` prints `body`, because
+the comment's newline is where the body starts and the line keeps its own region.
+A `#` inside a word (`echo a#b`) is data.
 
 ### Aliases
 

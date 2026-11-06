@@ -1441,12 +1441,12 @@ fn a_wait_block_arm_heredoc_region_is_a_body_region() {
 /// (a region claimed by a word of the block's body is opaque) is pinned above;
 /// its **statement-level** half — a `#` comment written behind a here-doc
 /// delimiter word, which reproduces with no block at all — reached parity in
-/// task **#333** and is pinned by
-/// `a_comment_terminated_line_owns_its_body_stream` (`cat <<Q # c` + body +
-/// `Q` prints `q && y` at rc 0, the block twin likewise); the starved-stream
-/// twins of the same shape keep their owners in
+/// tasks **#333** and **#429** and is pinned by
+/// `a_comment_terminated_line_owns_its_body_stream` and here (`cat <<Q # c` +
+/// body + `Q` prints `q && y` at rc 0, the block twin likewise); the
+/// starved-stream twins of the same shape keep their owners in
 /// `a_comment_terminated_line_starved_rows_reach_parity_and_deferred_rows_keep_their_owners`.
-/// Measured 2026-10-26 against bash 5.3.9 and `target/debug/fdshell`.
+/// Measured 2026-11-06 against bash 5.3.9 and `target/debug/fdshell`.
 #[test]
 fn a_comment_behind_a_heredoc_line_is_the_statement_level_parity() {
     let (out, err, code) = run("if :; then cat <<Q # c\nq && y\nQ\nfi");
@@ -1454,6 +1454,14 @@ fn a_comment_behind_a_heredoc_line_is_the_statement_level_parity() {
     // The statement twin, with no block at all: the comment's newline is where
     // the body starts, so `q && y` is region data.
     let (out, err, code) = run("cat <<Q # c\nq && y\nQ");
+    assert_eq!((out.as_str(), code), ("q && y\n", 0), "stderr={err}");
+    // The same shape with a body that is a single word: one body line, no
+    // operator inside it, and the delimiter line still arrives on its own line.
+    let (out, err, code) = run("cat <<Q # c\nq\nQ");
+    assert_eq!((out.as_str(), code), ("q\n", 0), "stderr={err}");
+    // The loop-body twin: the comment ends the command line inside the loop body,
+    // so the loop's body line owns its region and `q && y` stays body data.
+    let (out, err, code) = run("while :; do cat <<Q # c\nq && y\nQ\nbreak\ndone");
     assert_eq!((out.as_str(), code), ("q && y\n", 0), "stderr={err}");
 }
 
