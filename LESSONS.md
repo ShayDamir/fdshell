@@ -123,6 +123,14 @@ the NUL came from substituted data is a §4.7 wording fix for its own task, not 
 needs a borrow *held* across a nested borrow of the same cell — see
 LESSONS: "Never hold a ForkCell borrow across a recursive call that re-borrows".
 
+Chore #529 adds two closure facts to this adjudication. A variant with **zero
+producers repo-wide** is the trivially-unreproducible case: no script can print it,
+the proof is a repo-wide grep, and AGENTS.md's `dead_code` allowance is what keeps
+the variant. And a dispatch catch-all is proven at the dispatch level:
+`validate_intercept` produces exactly two variants, both mapped explicitly at the
+`timeout` call site, so its `_ =>` arm there is completeness padding, not a
+reachable error.
+
 Pins: the printed-words row
 `tests/cli_args.rs::script_file_with_a_nul_byte_names_the_nul_and_not_an_impossible_state`
 — the rc alone cannot tell these paths apart, every one of them exits 1 — beside

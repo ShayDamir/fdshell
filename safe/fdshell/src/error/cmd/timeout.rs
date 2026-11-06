@@ -29,6 +29,15 @@ pub(crate) enum TimeoutError {
     /// resolution error
     Resolve,
     /// impossible error state (should never occur)
+    // Truly never: the four sites sit in proven classes — `timeout_cmd.rs`'s `_` arm
+    // is a dispatch-completeness fallback (`validate_intercept` produces exactly two
+    // variants, both mapped); its `Never -> Never` arm is the §4.17 re-context of
+    // `CmdError::Never`, reachable only if that variant is; `borrow_mut()` clashes
+    // need a borrow held across a nested borrow of the same cell, which the tree's
+    // rule forbids; and `parse.rs`'s `as_bytes()` on a local word fails only with
+    // `ShortCStrError::BadState`, the type's own bookkeeping invariant.
+    // Chore #529: excluded from later respawns.
+    // LESSONS: "Never hold a ForkCell borrow across a recursive call that re-borrows"
     Never,
 }
 
