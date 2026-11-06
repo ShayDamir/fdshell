@@ -133,3 +133,51 @@ fn one_byte_operand_glued_to_the_pair_keeps_the_gate_behind_the_pair() {
     let (out, err, code) = run_bounded(": || echo b; echo after");
     assert_eq!((out.as_str(), code), ("after\n", 0), "stderr={err}");
 }
+
+/// Task #530 (bug #474): a **quoted** separator word is word content, so it is never a
+/// pair half and never a payload — POSIX §2.9.1 builds the pair, the pipeline byte and the
+/// payload out of **unquoted** bytes only. The rule is the ONE quotedness gate, now called
+/// at every recognition site bug #474 names: the glue rule
+/// (`parse/semi/closing/word.rs::glue_at`), the pair-payload row (`keywords::pair_payload`)
+/// and the pipeline-`|` payload row (`keywords/position/payload.rs`).
+///
+/// These shapes are bash-equal **before and after** the gate — what the gate moves is
+/// pinned in-process (`parse/semi/closing/tests.rs::a_quoted_operator_word_is_no_pair_half`
+/// runs red on the ungated code, and the two payload pins each answer both sides of the
+/// mask). This is the fence bug #474 names: the shapes its report lists stay bash's
+/// answers, so a future change to any of the three sites cannot drift silently.
+///
+/// Measured 2026-11-06 against bash 5.3.9, each shape on its own. `a"&&"if` and `x"|"` run
+/// as the **whole** word — bash's `command not found` and fdshell's own chain agree on the
+/// number only through the following `echo` (STYLE §4.7), so the asserts are stdout and rc.
+#[test]
+fn a_quoted_separator_word_is_word_content_end_to_end() {
+    // The quoted word feeds a real pipe, and the escaped spelling keeps its `|` inside
+    // the word (no gate needed there: the pair stays in the text).
+    assert_eq!(
+        run_bounded("echo \"|\" | cat </dev/null"),
+        (String::new(), String::new(), 0)
+    );
+    assert_eq!(
+        run_bounded("echo \"|\" \\| cat").0,
+        "| | cat\n",
+        "the escaped `|` is a word byte, so echo gets three arguments"
+    );
+    // A quoted operator word in a command position is an argument, and the real operator
+    // behind it is the pair.
+    for (script, want_stdout) in [
+        ("echo \"&&\" && echo Y; echo after", "&&\nY\nafter\n"),
+        ("echo \"&\" && echo Y; echo after", "&\nY\nafter\n"),
+        ("echo \"||\" || echo Y; echo after", "||\nafter\n"),
+        ("echo \"|\" | \"|\"; echo after", "after\n"),
+        ("if :; then a\"&&\"if; echo Y; fi; echo after", "Y\nafter\n"),
+        ("if :; then x\"|\"; echo Y; fi; echo after", "Y\nafter\n"),
+    ] {
+        let (out, err, code) = run_bounded(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (want_stdout, 0),
+            "{script}: stderr={err}"
+        );
+    }
+}
