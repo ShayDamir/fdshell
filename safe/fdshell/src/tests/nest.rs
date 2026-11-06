@@ -95,6 +95,15 @@ fn nesting_restored_after_failure() {
     });
 }
 
+/// Sizing: 99 wrapper levels plus this construct is the smallest row pinning
+/// `MAX_NESTING = 100`, and what it costs is parse CPU at that boundary, so it
+/// cannot be shrunk. Measured on a 32-core host over 12 quiet runs and 320 runs of
+/// the 8-concurrent full-suite harness (the `cargo mutants -j8` profile):
+/// 1.18-2.29 s quiet (median 1.40), 6.36-15.98 s loaded (median 9.08) — a quarter
+/// of the loaded runs pass the plain 10 s period, so only this test's kill is
+/// widened in `.config/nextest.toml`, never the global 10 s period the suite
+/// bounds itself by (LESSONS.md: "A CPU-burn timing test measures nothing in a
+/// release build").
 #[test]
 fn while_body_counts_toward_limit() {
     child_test(|| {
@@ -109,6 +118,15 @@ fn while_body_counts_toward_limit() {
     });
 }
 
+/// Sizing: 99 wrapper levels plus this construct is the smallest row pinning
+/// `MAX_NESTING = 100`, and what it costs is parse CPU at that boundary, so it
+/// cannot be shrunk. Measured on a 32-core host over 12 quiet runs and 320 runs of
+/// the 8-concurrent full-suite harness (the `cargo mutants -j8` profile):
+/// 1.30-1.98 s quiet (median 1.35), 5.25-14.17 s loaded (median 9.00) — a quarter
+/// of the loaded runs pass the plain 10 s period, so only this test's kill is
+/// widened in `.config/nextest.toml`, never the global 10 s period the suite
+/// bounds itself by (LESSONS.md: "A CPU-burn timing test measures nothing in a
+/// release build").
 #[test]
 fn for_body_counts_toward_limit() {
     child_test(|| {
@@ -123,6 +141,15 @@ fn for_body_counts_toward_limit() {
     });
 }
 
+/// Sizing: 99 wrapper levels plus this construct is the smallest row pinning
+/// `MAX_NESTING = 100`, and what it costs is parse CPU at that boundary, so it
+/// cannot be shrunk. Measured on a 32-core host over 12 quiet runs and 320 runs of
+/// the 8-concurrent full-suite harness (the `cargo mutants -j8` profile):
+/// 0.59-1.24 s quiet (median 1.18), 5.94-17.29 s loaded (median 9.06) — a quarter
+/// of the loaded runs pass the plain 10 s period, so only this test's kill is
+/// widened in `.config/nextest.toml`, never the global 10 s period the suite
+/// bounds itself by (LESSONS.md: "A CPU-burn timing test measures nothing in a
+/// release build").
 #[test]
 fn case_body_counts_toward_limit() {
     child_test(|| {

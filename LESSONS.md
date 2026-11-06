@@ -487,7 +487,7 @@ cargo-mutants (and any jobserver-driven harness) passes its jobserver pipe into 
 ## A mutant "caught" by a flaky test is a false kill — re-run the gate honestly after fixing the test
 The review gate reported `close_inherited`'s `j == i` skip inversion as caught, but the catch was a false kill from the same racy test that produced the timeout: a flaky test can "kill" a mutant by timing out. Once the test was deterministic, the honest baseline (`cargo mutants` without `--baseline skip`) showed it was genuinely missed — and observable: the inversion closes the stage's *own* capture socketpair, so `true | builtin memfd %>%m` fails `EBADF` where the clean build exits 0. Rule: when a gate reports "N caught, 0 missed" on a run that had flaky tests, distrust the miss list; the fix is a deterministic test that kills the mutant, not a re-skip of the baseline.
 
-The same failure hits a **whole sweep** in **both** directions when `cargo mutants` runs at `-j4` on a shared target dir on a loaded host: mutants come back *caught* with logs full of failures of tests unrelated to the mutation plus nextest 10 s per-test timeouts, and others come back *missed* that hand-application kills in 0.15 s. A sweep's caught/missed split is a hypothesis, not a measurement. Anything landing in the accepted-equivalent registry, a residual census for the next sweep, or a "this mutant is dead" claim must be re-derived by hand — apply the mutation, run the package's suite, revert (one rebuild + ~6 s per mutant) — or be swept at `-j1` and re-verified per mutant. Escape-rate figures from a parallel run are a **lower bound**: the false kills hide escapes. At `-j8` it bites a **pinned-boundary** test hardest, its CPU being unshrinkable: `word0_deep_nesting_is_bounded` hit 9.11-9.76 s against 0.23-0.35 s quiet, and its 10 s kill fake-killed a `safe/builtins/src/argparse.rs` mutant (now on a 40 s override).
+The same failure hits a **whole sweep** in **both** directions when `cargo mutants` runs at `-j4` on a shared target dir on a loaded host: mutants come back *caught* with logs full of failures of tests unrelated to the mutation plus nextest 10 s per-test timeouts, and others come back *missed* that hand-application kills in 0.15 s. A sweep's caught/missed split is a hypothesis, not a measurement. Anything landing in the accepted-equivalent registry, a residual census for the next sweep, or a "this mutant is dead" claim must be re-derived by hand — apply the mutation, run the package's suite, revert (one rebuild + ~6 s per mutant) — or be swept at `-j1` and re-verified per mutant. Escape-rate figures from a parallel run are a **lower bound**: the false kills hide escapes. At `-j8` it bites a **pinned-boundary** test hardest, its CPU being unshrinkable: `word0_deep_nesting_is_bounded` hit 9.11-9.76 s against 0.23-0.35 s quiet, and its 10 s kill fake-killed a `safe/builtins/src/argparse.rs` mutant (now on a 40 s override). The three `safe/fdshell/src/tests/nest.rs` construct rows (`case`/`while`/`for` bodies at the same pinned boundary) are the same mechanism at three sites, and were the worst of them: the plain period killed 33/33/31 of 160 harness runs — a quarter of every sweep's runs, each killing *every* mutant in that copy — and their un-truncated tail runs to 17.3 s (median ~9.0 s, a quarter over the plain period); on a shared 40 s override they log 0 kills in 320 runs.
 
 Hand-application flakes too, and the culprit is a *wall-clock budget* in a test: `safe/fdshell/tests/ignoreeof.rs::run_tty` used to sleep a fixed 500 ms then `try_wait` the `script`-attached shell, so while 86 test binaries competed for the CPU its two tty rows failed on an unmutated tree. Signature: failures at ~0.5 s in the binary, in tests whose code path cannot touch the mutation (a heredoc-region mutation "killed" by an EOF/pty test). Read the failing test names, then re-run the mutant 2-3 times and the clean tree before recording anything. **Rule:** a tty test whose verdict is a fixed sleep needs a bounded *event* to be sweep-safe — the fix made both rows decide by one: `try_wait` for the exit, `poll`+readiness for the hint, a 5 s window under the 10 s slow-timeout, reads only on readiness, none after, and the load loop is the detector a fixed sleep can never pass: 50 runs of the binary while the full package suite runs concurrently.
 
@@ -2072,21 +2072,20 @@ the direction with a lower bound on a sleeping statement (`time -p sleep 1` →
 ## A CPU-burn timing test measures nothing in a release build
 `monotonic_advances_across_a_cpu_burn` (200M-iteration counting loop,
 `core::hint::black_box`) passed every local debug run and failed under
-`nix flake check`: in release LLVM computes the loop's result directly, the burn costs ~0 ms, and asserted 5 ms elapsed for work that never ran.
+`nix flake check`: release LLVM computes the loop's result directly, the burn costs ~0 ms, and 5 ms was asserted for work that never ran.
 **Rule:** measure elapsed time against a blocking syscall
 (`libc::nanosleep`) — it cannot fold — bounded on both sides (≥ 10 ms
 slept, far below the clock reads). The same fold hits `utime` assertions:
 `unsafe/sys/tests/getrusage.rs::self_usage_succeeds` burned
 `n = n.wrapping_add(1)` up to 50M with `black_box(n)` *after* the loop, so
-release builds reported `CpuTimes { utime: 0, stime: 2888 }` in the sandbox
-and `nix flake check --build-all` failed the suite intermittently. A burn must
+release builds reported `CpuTimes { utime: 0, stime: 2888 }` and `nix flake check --build-all`
+failed the suite intermittently. A burn must
 be un-foldable to be assertable: keep the accumulator inside the loop under
-`black_box` (the `burn_cpu()` in `unsafe/sys/tests/getrusage.rs`, self and
-forked-child burns), and never assert a positive CPU count for folded-away work.
+`black_box` (`burn_cpu()` in `unsafe/sys/tests/getrusage.rs`, self and child burns), and never assert a positive CPU count for folded-away work.
 The two signatures, in the sandbox's release profile: an un-folded burn costs
 ~10–18 ms of real user time (`utime ≈ 18_000 µs`); a folded one costs ~0 ms,
 leaving `{ utime: 0, stime: ~3000 }` — ~3 ms of process-startup system time, the
-*folded* signature, not an attribution flip.
+*folded* signature.
 - **For a `getrusage`-style assertion the floor is 1 µs of *reported* CPU: the
 count is bounded below by the release per-iteration cost, above by the debug wall
 under load** (µs mirror of the print-floor rule below). The shipped 5M is sized by
@@ -2094,30 +2093,27 @@ it: sums ≥ 1.2 ms release / ≥ 5.0 ms debug, worst wall 0.24 s under 8× load
 ≥ 40× under the 10 s kill — no override.
 - **How a process's CPU splits between `ru_utime` and `ru_stime` is the
 kernel's choice, no test controls it**; a positive-`utime`
-assertion is a scheduler coin flip (it bit `self_usage` and
-`wait_pidfd_rusage` in the sandbox, with `CpuTimes { utime: 0, stime: 3124 }`).
-Self and reaped-child CPU-time assertions are on `utime + stime`. Keep the burn
-loop — it makes the reported numbers real — but read a `> 0` sum as
-"non-degenerate", never as "the burn ran"; that claim belongs to the
-un-foldability rule, never to the sum.
+assertion is a scheduler coin flip (it bit `self_usage` and `wait_pidfd_rusage`, with `CpuTimes { utime: 0,
+stime: 3124 }`).
+Self and reaped-child CPU-time assertions are on `utime + stime`. Keep the burn —
+it makes the reported numbers real — but read a `> 0` sum as "non-degenerate", never
+as "the burn ran"; that claim belongs to the un-foldability rule.
 - **The same coin flip reaches the `times` builtin's *children* fields:**
 `safe/fdshell/tests/times.rs::times_children_total_time_increases_after_wait`
 burned CPU in a backgrounded child, `wait`ed, asserted the
 *children user time* field `> 0.00`. `times` prints `child_utime` and
-`child_stime` as two separate fields (`safe/fdshell/src/intercept/times.rs`,
+`child_stime` as separate fields (`safe/fdshell/src/intercept/times.rs`,
 fed by `add_child_times` from each reap's `waitid` rusage) — a reaped
-child's CPU attributed wholly to system zeroes the asserted field while the
-child plainly ran. Fixed the same way: assert the printed sum, keep the burn loop, read `> 0` as
+child's CPU attributed wholly to system zeroes the asserted field while the child ran. Fixed the same way: assert the printed sum, keep the burn, read `> 0` as
 "non-degenerate". The centisecond print floor
 is the rule this adds: `centis` truncates the two fields separately
 (`us / 10_000`, `(us / 100) % 100`), so a printed sum is not the truncation of
 the total and its floor sits on a *single* field — one field prints `0.00` below
-100 µs, so the sum is `0.00` only when *both* are, — child CPU under 200 µs.
+100 µs, so the sum is `0.00` only when *both* are, i.e. child CPU under 200 µs.
 **Rule:** measure a `times`-style burn against that print floor, never the
 nominal resolution (the centisecond = 10 ms; resolution a hundredth of it). At
 **500** iterations the worst field is `0.28` = 2800 µs, 28× above the per-field
-floor, so the sum's `> 0` is attribution- and floor-proof; smaller counts clear
-the floor but were rejected for margin.
+floor, so the sum's `> 0` is attribution- and floor-proof.
 - **A burn test's wall time is its CPU ÷ its share of the machine, so an
 over-sized burn is a nextest `slow-timeout` kill under mutation load, and one
 timed-out test is a *false* kill of every mutant in that copy's sweep** (the
@@ -2139,13 +2135,17 @@ pinned-boundary test, whose CPU cannot be shrunk, so the kill moves:**
 `safe/fdshell/tests/cmd_subst.rs::word0_deep_nesting_is_bounded` is the smallest
 pair pinning `MAX_NESTING = 100` (a fork + pipe + reap per level): 0.23–0.35 s
 quiet against 1.82–7.75 s at the same profile — 1.3× under the plain kill, so its
-own 40 s override carries it.
+own 40 s override carries it. Its three `safe/fdshell/src/tests/nest.rs` siblings
+(`case`/`while`/`for` bodies at the same pinned boundary) are the rule at three
+more sites, and were worse: 0.59–2.29 s quiet, 5.25–17.29 s loaded, a quarter of
+harness runs killed by the plain period; one shared 40 s override, 0 kills in
+320 runs.
 - **A CPU-time delta measured around a forked child is the fork's CPU.**
 `time -p sleep 0.2` reports `user 0.20` in fdshell where bash reports `0.00`:
 the child's fork/exec (PATH walk, arg substitution) is the shell's own CPU,
-inside the window. So a test may pin `user`/`sys` to `0.00` only for
-statements that fork nothing (a bare `time`, `:`, an in-process-body `if`);
-asserting `user == 0.00` around a fork is a coin flip.
+inside the window. A test may pin `user`/`sys` to `0.00` only for statements that fork nothing
+(a bare `time`, `:`, an in-process-body `if`); asserting `user == 0.00` around a
+fork is a coin flip.
 - **Two harness facts:** a plain `nix flake check` repeat is a store hit running
 nothing; re-run with `nix build .#checks.x86_64-linux.default --rebuild`; `nix
 build .#coverage --rebuild` exits 1 on its embedded timestamps tripping the
