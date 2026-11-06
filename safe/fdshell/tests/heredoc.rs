@@ -2701,14 +2701,19 @@ fn a_brace_shaped_delimiter_word_of_a_group_body_is_structure() {
             assert_eq!(err.as_str(), "", "{script}");
         }
     }
-    // The control: an ordinary brace argument word still scores, so the group closes
-    // at it — bash prints `}` and `tail` at rc 0, fdshell answers at rc 1 (unchanged
-    // by this rule: no structure positions here).
+    // The control protects the parity pinned by
+    // `tests/group.rs::literal_brace_argument_in_a_block_body`: an ordinary brace
+    // **argument** word must keep scoring, so the gate covers structure positions
+    // only and the group still closes at an argument `}`. This script's own bash
+    // answer is rc 2 (syntax error, no output), so fdshell's rc 1 (the
+    // `expected ';' before '}'` message pinned by
+    // `tests/group.rs::malformed_groups_are_parse_errors`) is what the gate must
+    // leave untouched — there is no structure position here.
     let (out, _err, code) = run("{ echo }\nx\necho tail");
     assert_eq!(
         (out.as_str(), code),
         ("", 1),
-        "bash prints `}}` and `tail` at rc 0"
+        "an ordinary argument brace word keeps scoring (gate is structure positions only)"
     );
 }
 
@@ -3026,6 +3031,15 @@ fn function_body_heredoc_shapes_that_stay_divergent() {
 /// of the same rule are `brace/tests.rs::a_glued_operator_word_moves_no_brace_depth`
 /// and `parse/semi/closing/tests.rs::a_heredoc_structure_word_never_scores`; the
 /// group's matrix is `a_brace_shaped_delimiter_word_of_a_group_body_is_structure`.
+///
+/// The last row is the **definer's move to the shared walk**: inside a def span
+/// whose real closer is followed by a `}`-shaped **structure** word (a here-doc
+/// terminator word past the closer), "last `}` word" (the pre-move `rposition`)
+/// and "first word that empties the pairing" (the walk) are *different* words, so
+/// the row is the detector that the move is load-bearing — reverting it closes the
+/// definition on the terminator word and the body's `}` runs as a stray command
+/// (rc 1). Every other row here has the closer as its last `}` word and cannot
+/// tell the two searches apart (LESSONS: "one rule at every granularity").
 #[test]
 fn a_brace_shaped_delimiter_word_of_a_function_body_is_structure() {
     for (script, want, warns) in [
@@ -3042,6 +3056,9 @@ fn a_brace_shaped_delimiter_word_of_a_function_body_is_structure() {
         ("while cat <<}; do echo t; break; done\n}", "t\n", false),
         ("case x in y) cat <<};; esac\n}", "", false),
         ("if cat << }; then echo t; fi\n}", "t\n", false),
+        // The definer's move to the walk: a terminator word past the closer, so
+        // "last `}` word" and "first word that empties the pairing" differ here.
+        ("f() { cat <<}; echo body; }\n}\nf", "body\n", false),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
