@@ -1985,6 +1985,29 @@ only *looks* like a region) stay word data. Pins: `keywords/function/tests.rs`,
 `keywords/function/tests.rs::carries_region_arms`,
 `tests/function_keyword.rs::a_definer_word_carrying_a_region_reports_the_name`.
 
+**The walk between the definer and its `{` belongs to the parse layer** (task #433).
+A **redirection** word written there — the here-doc (`<<E`, `3<<T`), the path operator
+(bare and attached), the here-string, the dup, the `&>` family, in both definer
+spellings — is bash's `syntax error near unexpected token` at rc 2 and a report here
+(rc 1, naming the word), with no definition made and nothing else in the script run; a
+**plain** word there stays the documented leniency (task #247), so the rule is the
+redirect vocabulary and nothing wider. The report lives at the parse/dispatch layer
+(`parse/function_block/definer_prefix.rs`) while `keywords/function` keeps its span
+claim untouched: the claim is what puts the whole shape in front of the parser, and
+widening the byte rule instead drops the claim, moves the statement boundary and leaves
+the parse layer nothing to report. The word predicate is the same owners the collection
+loop uses, in the loop's own order (the principle `parse/command/redirect_first.rs::leads`
+states) — `parse_bg_redirect`, `parse_here_string`, `parse_redirect`, the here-doc
+`is_operator` — each carrying its own quote gate, so a quoted `">"` word stays word data
+for free and no vocabulary is re-derived. The rows that keep the rule honest are the ones
+on which each owner **passes**, one pin per arm
+(`parse/function_block/tests.rs::a_redirection_in_the_definer_prefix_is_reported`), plus
+the message-order pair `parse/function_block/tests.rs::the_prefix_gate_runs_before_the_empty_body_rule`
+(the gate runs before the builder, so `f() <<E { }` is the prefix message and `f() { }`
+keeps the empty body's) and the non-reporting controls
+`parse/function_block/tests.rs::a_prefix_of_plain_or_quoted_words_stays_a_definition`;
+the e2e family is `tests/function_keyword.rs::a_redirection_before_the_opening_brace_is_a_parse_error`.
+
 ## `cargo mutants` dies with a nutmeg "View mutex" panic when the filesystem is full
 Symptom: the run aborts in its first two minutes with
 `thread '<unnamed>' panicked at .../nutmeg-*/src/lib.rs: View mutex is not poisoned: PoisonError { .. }`,
@@ -5842,11 +5865,13 @@ closed 2026-10-25), `f() { …; }; f | cat` is **#182**'s, the starved first
 operator (`f() { cat <<E; }; f` + body, no delimiter line) was **#429**'s —
 closed by **#364**'s accept-and-warn rule, pinned in
 `tests/heredoc.rs::function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence`
-— and a def-prefix redirection (`f() <<E { cat <<G; }`) prints the def body at
-rc 0 where bash rejects the syntax at rc 2 — task **#433** (**#180** is the
-accepted *trailing* form, `f(){ …; } > a`). Pin each as a measured divergence
-with the bash value beside it; the def-prefix row in particular reads as a fix
-and is a widening.
+— and a def-prefix redirection (`f() <<E { cat <<G; }`) printed the def body at
+rc 0 where bash rejects the syntax at rc 2 — task **#433**, **closed**: the parse
+dispatch now reports the operator word at rc 1 and makes no definition, pinned in
+`tests/function_keyword.rs::a_redirection_before_the_opening_brace_is_a_parse_error`
+(**#180** is the accepted *trailing* form, `f(){ …; } > a`). Pin each as a measured
+divergence with the bash value beside it; the def-prefix row in particular reads as a
+fix and is a widening.
 
 ## A word-list rule lives at **two granularities**: the builder's `List`, and the byte scans' place **plus seed** (task #306)
 

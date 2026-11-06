@@ -60,6 +60,9 @@ pub(crate) enum ParseError {
     /// '{word}' is not a valid function name (a command substitution is not
     /// part of a definer word)
     FunctionNameWithSubstitution { word: sys::ShortCStr },
+    /// '{word}' cannot be written between the function definer and its '{{'
+    /// (a redirection belongs after the closing brace)
+    FunctionRedirectBeforeBrace { word: sys::ShortCStr },
     /// group is missing a closing brace
     GroupMissingCloseBrace,
     /// group is empty

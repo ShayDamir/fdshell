@@ -1,5 +1,7 @@
+mod definer_prefix;
 mod definer_region;
 
+pub(crate) use definer_prefix::redirect_before_the_brace;
 pub(crate) use definer_region::definer_with_region;
 
 use super::Token;

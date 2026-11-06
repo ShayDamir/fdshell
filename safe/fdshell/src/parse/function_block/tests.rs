@@ -410,3 +410,86 @@ fn quoted_definer_words_do_not_define() {
         assert!(def.body.data.eq_bytes(b"echo hi"), "body of {text:?}");
     }
 }
+
+/// A redirection word written **between** the definer and its `{` is a syntax error
+/// in bash (POSIX #2.9 puts the `{` right behind the definer words, rc 2), so the
+/// parse dispatch reports it and makes no definition (task #433). One row per owner,
+/// in the collection loop's own order (the principle
+/// `parse/command/redirect_first.rs::leads` states): the `&>` family, the
+/// here-string, the path/dup operator (bare and attached), and the here-doc (its
+/// io-number form included) — both definer spellings, and the `(`/`)` filler of the
+/// split-paren spellings must not trip the gate. The report names the word, as
+/// bash's own message names it.
+#[test]
+fn a_redirection_in_the_definer_prefix_is_reported() {
+    for (text, want) in [
+        (&b"f() &>f { :; }"[..], b"&>f".as_slice()),
+        (&b"f() <<<x { :; }"[..], b"<<<x".as_slice()),
+        (&b"f() > /dev/null { :; }"[..], b">".as_slice()),
+        (&b"f() >/dev/null { :; }"[..], b">/dev/null".as_slice()),
+        (&b"f() 2>&1 { :; }"[..], b"2>&1".as_slice()),
+        (&b"f() <<E { :; }"[..], b"<<E".as_slice()),
+        (&b"f() 3<<T { :; }"[..], b"3<<T".as_slice()),
+        (&b"function f <<E { :; }"[..], b"<<E".as_slice()),
+        (&b"function f > /dev/null { :; }"[..], b">".as_slice()),
+        (&b"function f ( ) > /dev/null { :; }"[..], b">".as_slice()),
+    ] {
+        // `ParsedLine` is not `Debug`, so map the `Ok` arm to `()` before unwrap_err.
+        let err = try_parse(text).map(|_| ()).unwrap_err();
+        assert!(
+            matches!(
+                err.current_context(),
+                ParseError::FunctionRedirectBeforeBrace { word } if word.eq_bytes(want)
+            ),
+            "{text:?} is not the definer-prefix report: {err:?}"
+        );
+    }
+}
+
+/// The message order: the prefix gate runs **before** the builder, so on
+/// `f() <<E { }` the definer-prefix message wins over the empty body's, and the
+/// plain `f() { }` keeps the empty-body message (the task #424 precedent — both
+/// rows are pinned so the order stays measurable).
+#[test]
+fn the_prefix_gate_runs_before_the_empty_body_rule() {
+    assert!(matches!(
+        try_parse(b"f() <<E { }")
+            .map(|_| ())
+            .unwrap_err()
+            .current_context(),
+        ParseError::FunctionRedirectBeforeBrace { .. }
+    ));
+    assert!(matches!(
+        try_parse(b"f() { }")
+            .map(|_| ())
+            .unwrap_err()
+            .current_context(),
+        ParseError::FunctionEmptyBody
+    ));
+}
+
+/// What the prefix gate must **not** report: the accepted definers (both spellings,
+/// split parens included), the plain-word leniency (task #247 — a plain filler word
+/// is the documented divergence, bash rejects it too), a **quoted** operator word
+/// (word data to every owner's own quote gate), an operator written inside the body,
+/// and the operator sitting in the keyword form's **name slot**, so the prefix
+/// holds only its operand.
+#[test]
+fn a_prefix_of_plain_or_quoted_words_stays_a_definition() {
+    for text in [
+        &b"f() { :; }"[..],
+        &b"function f { :; }"[..],
+        &b"function f ( ) { :; }"[..],
+        &b"f( ) { :; }"[..],
+        &b"function f x { :; }"[..],
+        &b"f() x { :; }"[..],
+        &b"f() \">\" /dev/null { :; }"[..],
+        &b"f() { cat <<E; }"[..],
+        &b"function > /dev/null { :; }"[..],
+    ] {
+        assert!(
+            matches!(parse(text), crate::parse::ParsedLine::Function(_)),
+            "{text:?} stays a definition"
+        );
+    }
+}

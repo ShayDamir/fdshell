@@ -2983,9 +2983,13 @@ fn function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence() {
 /// The shapes the definer claim does **not** reach, pinned with their owners so
 /// the next reader does not half-fix them:
 ///
-/// * a def-prefix redirection (`f() <<E { … }`): bash rejects the syntax rc 2;
-///   fdshell parses it as a definer and the def body's own region prints
-///   (task **#433**, filed by this one — #180 is the accepted trailing form).
+/// * a def-prefix redirection (`f() <<E { … }`) is **closed** by task **#433**: the
+///   parse dispatch reports the operator word at rc 1 and makes no definition, so
+///   the row this test used to pin as measured — `f() <<E { cat <<G; }` plus bodies,
+///   the def body's own region printing at rc 0 where bash rejects the syntax at
+///   rc 2 — is pinned in
+///   `tests/function_keyword.rs::a_redirection_before_the_opening_brace_is_a_parse_error`
+///   (#180 keeps the accepted *trailing* form).
 ///
 /// The **brace-shaped delimiter word** (`f() { cat <<}; }; f`) — this test's
 /// original divergence — is bash parity since task **#432**: a delimiter word is
@@ -3008,12 +3012,6 @@ fn function_body_heredoc_shapes_that_stay_divergent() {
         (out.as_str(), code),
         ("body\n", 0),
         "bash prints body at rc 0 — parity since task #481"
-    );
-    let (out, _err, code) = run("f() <<E { cat <<G; }\nbodyE\nE\nbodyG\nG\nf");
-    assert_eq!(
-        (out.as_str(), code),
-        ("bodyG\n", 0),
-        "bash rejects the def-prefix redirection at rc 2 (task #433)"
     );
 }
 

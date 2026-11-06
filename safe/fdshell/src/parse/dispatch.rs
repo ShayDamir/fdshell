@@ -20,6 +20,19 @@ pub(super) fn dispatch_keyword(
 ) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let line = text.as_bytes().change_context(ParseError::Never)?;
     if function_block::is_function_def(raw, line) {
+        // POSIX #2.9 puts the `{` right behind the definer words, so a
+        // redirection written in between is bash's syntax error at rc 2 and a
+        // report here (task #433). The gate runs **before** the builder, so on
+        // `f() <<E { }` the prefix message wins over the empty body's; both rows
+        // are pinned, and a plain word in the prefix keeps the documented
+        // leniency (task #247).
+        if let Some(word) = function_block::redirect_before_the_brace(raw, line)? {
+            let report =
+                Report::new(ParseError::FunctionRedirectBeforeBrace { word: word.clone() });
+            return Err(report.attach_opaque(Suggestion(
+                "write the `{` right after the definer; a redirection belongs after the closing brace",
+            )));
+        }
         return Ok(Some(ParsedLine::Function(
             function_block::tokens_to_function(raw, text)?,
         )));

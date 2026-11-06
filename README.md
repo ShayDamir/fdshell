@@ -1527,6 +1527,19 @@ family is pinned in
 `tests/function_keyword.rs::a_definition_behind_a_trailing_word_runs_it` (task
 #368).
 
+POSIX and bash put the `{` right behind the definer words, so a **redirection**
+written between them is a syntax error (bash rc 2, naming the token it trips on), and
+fdshell reports it at rc 1: `f() <<E { :; }`, `f() > /dev/null { :; }`,
+`f() >/dev/null { :; }`, `f() <<<x { :; }`, `f() 2>&1 { :; }`, `f() &>f { :; }` and
+the io-number `f() 3<<T { :; }`, each in both definer spellings, are one report each
+— `'<word>' cannot be written between the function definer and its '{'` — with no
+definition made and nothing else in the script run. The **trailing** form
+`f(){ …; } > a` stays the accepted spelling (task #180); a quoted operator word
+stays word data (task #247) and a plain filler word in front of the `{` stays the
+documented leniency (`function f x { …; }`). The family is pinned in
+`tests/function_keyword.rs::a_redirection_before_the_opening_brace_is_a_parse_error`
+(task #433).
+
 ### Pipelines and lists
 
 `cmd1 | cmd2` connects cmd1's stdout to cmd2's stdin. `;` separates

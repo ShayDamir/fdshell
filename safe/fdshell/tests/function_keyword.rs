@@ -350,3 +350,65 @@ fn a_definition_behind_a_trailing_word_runs_it() {
     let (out, err, rc) = run("function f { echo hi; } f");
     assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
 }
+
+/// A redirection word written **between** the definer and its `{` is a syntax error
+/// in bash (POSIX #2.9 puts the `{` right behind the definer words; rc 2, naming the
+/// token). fdshell reports it at its parse-error rc 1 — README "Errors" — names the
+/// word, makes **no** definition, and runs nothing else, so the `echo tail` behind
+/// each row stays unprinted. Both definer spellings, the io-number form, and every
+/// owner of the prefix in the collection loop's order: the here-doc, the path
+/// operator (bare, attached, and the multi-operator row), the here-string, the dup,
+/// and the `&>` family (`parse/function_block/definer_prefix.rs`; its unit pins and
+/// the message order on `f() <<E { }` are in `parse/function_block/tests.rs`). The
+/// quoted-operator control stays word data and the plain-word filler stays the
+/// documented leniency (task #247), so both define and run at rc 0.
+#[test]
+fn a_redirection_before_the_opening_brace_is_a_parse_error() {
+    for (script, word) in [
+        ("f() <<E { :; }\nE\necho tail", "<<E"),
+        ("f() 3<<T { :; }\nT\necho tail", "3<<T"),
+        ("f() > /dev/null { :; }; echo tail", ">"),
+        ("f() >/dev/null { :; }; echo tail", ">/dev/null"),
+        ("f() >>f / >f / <>f { :; }; echo tail", ">>f"),
+        ("f() <<<x { :; }; echo tail", "<<<x"),
+        ("f() 2>&1 { :; }; echo tail", "2>&1"),
+        ("f() &>f { :; }; echo tail", "&>f"),
+        ("f() > { echo hi; }; echo tail", ">"),
+        ("function f <<E { :; }\nE\necho tail", "<<E"),
+        ("function f > /dev/null { :; }; echo tail", ">"),
+        ("function f 3<<T { :; }\nT\necho tail", "3<<T"),
+        ("function f() <<E { :; }\nE\necho tail", "<<E"),
+        // The row task #305 pinned as a measured divergence: the definer now
+        // reports it instead of claiming the def body's region.
+        (
+            "f() <<E { cat <<G; }\nbodyE\nE\nbodyG\nG\nf\necho tail",
+            "<<E",
+        ),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            ("", 1),
+            "bash rc 2; script={script}: stderr={err}"
+        );
+        let want = format!("'{word}' cannot be written between the function definer");
+        assert!(err.contains(&want), "script={script}: stderr={err}");
+    }
+    // The message's suggestion is the shape bash accepts (and task #180's trailing
+    // form is the accepted spelling of a definition redirect).
+    let (out, err, rc) = run("f() <<E { :; }\nE\necho tail");
+    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
+    assert!(err.contains("Suggestion"), "stderr={err}");
+    // The controls that stay definitions: a **quoted** operator word is word data
+    // (task #247), and a plain filler word in the prefix is the documented
+    // leniency (bash rejects it too, rc 2).
+    let (out, err, rc) = run("f() \">\" /dev/null { echo hi; }; f");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
+    let (out, err, rc) = run("function f x { echo hi; }; f");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
+    // The **trailing** definition redirect is the accepted form and stays untouched
+    // (its owner is task #180, which pins the divergence): the prefix gate sees no
+    // operator word there.
+    let (out, err, rc) = run("f(){ echo hi; } > /dev/null; f");
+    assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
+}
