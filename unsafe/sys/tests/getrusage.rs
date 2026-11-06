@@ -17,16 +17,30 @@ fn burn_cpu(iterations: u64) -> u64 {
     n
 }
 
+/// Sizing for both burns: bounded below by the assertions' floor — 1 µs of
+/// *reported* CPU, measured in the release profile the nix flake check uses
+/// — and above by wall time under load, keeping a ≥ 3× margin below nextest's
+/// 10 s slow-timeout kill, because one timed-out test fails the whole binary
+/// and false-kills every mutant in the copy (LESSONS.md). 5M is the smallest
+/// round count clearing both, measured on a 32-core host over ≥ 10 runs per
+/// profile for each test: `utime + stime` stays ≥ 1 158 µs in release and
+/// ≥ 4 996 µs in debug (the sandbox's release figures agree), and the worst
+/// per-test wall under 8-concurrent full-suite load — the `cargo mutants -j8`
+/// profile — is 0.24 s, a ≥ 40× margin, so no per-test `.config/nextest.toml`
+/// override is needed. The old 50M cost ~15 ms of CPU to assert `> 0`.
+const BURN_ITERATIONS: u64 = 5_000_000;
+
 /// `self_usage()` succeeds and reports positive own CPU time (user + system).
 #[test]
 fn self_usage_succeeds() {
     // Burn a little CPU so the reported times are deterministically non-zero
     // (a freshly started process can read `utime: 0`, and an optimizable burn
-    // reads 0 too: 50M un-foldable iterations cost ~347 ms of measured CPU
-    // time in the nix sandbox's release build). Which field the burned time
-    // lands in is the kernel's accounting choice, which this test does not
-    // control, so the assertion is on the sum, not on `utime` alone.
-    burn_cpu(50_000_000);
+    // reads 0 too; the un-foldable BURN_ITERATIONS measure ~3.5–4.3 ms of CPU
+    // in the release build and ~7 ms in debug — see the constant for the full
+    // sizing). Which field the burned time lands in is the kernel's accounting
+    // choice, which this test does not control, so the assertion is on the
+    // sum, not on `utime` alone.
+    burn_cpu(BURN_ITERATIONS);
     let t = getrusage::self_usage().unwrap();
     // u64 fields are finite by construction; the process has burned CPU time
     // by now, so the total must be positive. The sum is the honest claim:
@@ -65,10 +79,11 @@ fn wait_pidfd_rusage_reports_child_times() {
     match pidfd_opt {
         None => {
             // Child: burn a little un-foldable CPU so its reported times are
-            // non-zero in debug and release builds alike. The scheduler
-            // attributes the child's burn to user or system time too, so the
-            // parent's assertion below is on the sum.
-            burn_cpu(50_000_000);
+            // non-zero in debug and release builds alike (the 5M sizing keeps
+            // the smallest release sum at ~1.2 ms — see BURN_ITERATIONS). The
+            // scheduler attributes the child's burn to user or system time
+            // too, so the parent's assertion below is on the sum.
+            burn_cpu(BURN_ITERATIONS);
             sys::exit(0);
         }
         Some(pidfd) => {
