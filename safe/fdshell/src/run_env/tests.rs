@@ -10,7 +10,7 @@ use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::parse::{Assign, BuiltinPrefix, CommandLine};
 use crate::state::ShellState;
 
-use super::{EnvAssign, apply, apply_child, expand, restore};
+use super::{EnvAssign, apply, apply_child, drop_new_exports, expand, restore};
 
 fn cell_with(pairs: &[(&str, &str)]) -> ForkCell<ShellState> {
     let mut state = ShellState::new();
@@ -232,4 +232,87 @@ fn expand_uses_the_value_words_own_quote_mask() {
 fn expand_stores_the_quoted_value_whole() {
     assert_eq!(expanded_value("x", "a b", vec![Quoted; 3]), c"a b".into());
     assert_eq!(expanded_value("x", "*", vec![Quoted]), c"*".into());
+}
+
+/// The store split of the omitted-command-name arm (POSIX 2.9.1: "the shell
+/// variables but not the execution environment shall be adjusted", task #428):
+/// the apply's `strings` half — and the `ifs` field it syncs — persists, and
+/// every export the apply **added** is put back. A name already visible to a
+/// child (an `exports` entry, or an allowed row of the inherited `environ`)
+/// keeps its new value. Each pin asserts both stores, so neither half is
+/// equivalent-mutant food.
+#[test]
+fn drop_new_exports_keeps_the_shell_store_and_undoes_a_fresh_export() {
+    let cell = cell_with(&[]);
+    let save = apply(&[assign("VAR", "x")], &cell).unwrap();
+    drop_new_exports(save, &cell).unwrap();
+    assert_eq!(get(&cell, "VAR", "strings"), Some(c"x".into()));
+    assert_eq!(get(&cell, "VAR", "exports"), None);
+}
+
+#[test]
+fn drop_new_exports_keeps_a_name_the_shell_already_exported() {
+    let cell = cell_with(&[("VAR", "y")]);
+    {
+        let v = cell
+            .borrow()
+            .unwrap()
+            .strings
+            .get::<ShortCStr>(&c"VAR".into())
+            .unwrap()
+            .clone();
+        cell.borrow_mut().unwrap().exports.insert(c"VAR".into(), v);
+    }
+    let save = apply(&[assign("VAR", "x")], &cell).unwrap();
+    drop_new_exports(save, &cell).unwrap();
+    assert_eq!(get(&cell, "VAR", "strings"), Some(c"x".into()));
+    assert_eq!(get(&cell, "VAR", "exports"), Some(c"x".into()));
+}
+
+#[test]
+fn drop_new_exports_keeps_a_name_the_inherited_environment_carried() {
+    let cell = cell_with(&[]);
+    cell.borrow_mut()
+        .unwrap()
+        .environ
+        .push((c"HOME".into(), c"/home".into()));
+    let save = apply(&[assign("HOME", "y")], &cell).unwrap();
+    drop_new_exports(save, &cell).unwrap();
+    assert_eq!(get(&cell, "HOME", "strings"), Some(c"y".into()));
+    assert_eq!(get(&cell, "HOME", "exports"), Some(c"y".into()));
+}
+
+#[test]
+fn drop_new_exports_undoes_an_inherited_name_the_env_filter_denies() {
+    let cell = cell_with(&[]);
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.environ.push((c"FOO".into(), c"old".into()));
+        state.env_filter.deny.push(c"FOO".into());
+    }
+    let save = apply(&[assign("FOO", "x")], &cell).unwrap();
+    drop_new_exports(save, &cell).unwrap();
+    assert_eq!(get(&cell, "FOO", "strings"), Some(c"x".into()));
+    assert_eq!(get(&cell, "FOO", "exports"), None);
+}
+
+#[test]
+fn drop_new_exports_persists_the_ifs_entry_and_the_split_field() {
+    let cell = cell_with(&[]);
+    let save = apply(&[assign("IFS", ":")], &cell).unwrap();
+    drop_new_exports(save, &cell).unwrap();
+    assert_eq!(get(&cell, "IFS", "strings"), Some(c":".into()));
+    assert_eq!(cell.borrow().unwrap().ifs.as_bytes().unwrap_or(&[]), b":");
+    assert_eq!(get(&cell, "IFS", "exports"), None);
+}
+
+#[test]
+fn drop_new_exports_of_nothing_leaves_both_stores() {
+    let cell = cell_with(&[("FOO", "old")]);
+    let save = apply(&Vec::new(), &cell).unwrap();
+    assert!(save.is_none());
+    drop_new_exports(None, &cell).unwrap();
+    drop_new_exports(save, &cell).unwrap();
+    assert_eq!(get(&cell, "FOO", "strings"), Some(c"old".into()));
+    assert_eq!(get(&cell, "FOO", "exports"), None);
 }

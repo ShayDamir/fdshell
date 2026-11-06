@@ -3,8 +3,10 @@
 //! (exported to external children), and never persisted in the shell.
 
 mod apply;
+mod shell_local;
 
 pub use apply::{EnvSave, apply, apply_child, restore};
+pub use shell_local::drop_new_exports;
 
 use crate::error::cmd::CmdError;
 use crate::parse::{Assign, CommandLine, ExpandedStage};

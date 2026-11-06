@@ -34,9 +34,11 @@ pub(crate) fn run_cmd(
     // `$_` takes the empty command name, and the status is the last command
     // substitution's, 0 when none ran. A **quoted** empty word 0 (`"" >f`) is a
     // word, so it stays a lookup (bash 127, fdshell's rc 1) — the gate's
-    // `command_quoted` clause is what keeps it out. The prefix **persists**:
-    // there is no command for it to scope to, so bash keeps `VAR=x` from
-    // `VAR=x >f` and the scoped `save` is deliberately not restored here.
+    // `command_quoted` clause is what keeps it out. The prefix **persists in the
+    // shell's own store**: there is no command for it to scope to, so bash keeps
+    // `VAR=x` from `VAR=x >f` — but with the name omitted it adjusts *no*
+    // execution environment (POSIX 2.9.1), so the exports the apply added are put
+    // back afterwards; a name already visible to a child keeps its new value.
     if omits_the_name(&cmdline, cell)? {
         Scope::open(&cmdline.redirects, cell)?.run(|| {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
@@ -48,6 +50,9 @@ pub(crate) fn run_cmd(
             state.set_last_exit(code);
             Ok(())
         })?;
+        // After the scope: a redirect target is expanded inside it, and that
+        // expansion still sees the full apply (`VAR=x >$(printenv VAR)`).
+        crate::run_env::drop_new_exports(save, cell)?;
         return Ok(None);
     }
     let control = with_env(save, cell, || {

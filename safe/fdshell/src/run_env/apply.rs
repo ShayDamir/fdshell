@@ -15,8 +15,8 @@ use super::EnvAssign;
 /// would leak into the parent on restore. (The loop does cover the `IFS`
 /// *name*, whose seed the startup put in `strings` — task #388.)
 pub struct EnvSave {
-    entries: Vec<(ShortCStr, Option<ImportedStr>, Option<ImportedStr>)>,
-    old_ifs: Option<ShortCStr>,
+    pub(crate) entries: Vec<(ShortCStr, Option<ImportedStr>, Option<ImportedStr>)>,
+    pub(crate) old_ifs: Option<ShortCStr>,
 }
 
 /// Parent-side (functions, intercepts): apply now, return the previous

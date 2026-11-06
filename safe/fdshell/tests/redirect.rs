@@ -2722,6 +2722,116 @@ fn a_redirect_only_statement_leaves_the_status_and_the_prefix() {
     }
 }
 
+/// Run `script` in `dir` (the `run_ls` shape) with the child's environment
+/// spelled out pair by pair — a `"\0"` value **removes** the key, so a row that
+/// reads the *inherited* environment never relies on the harness's (the
+/// `tests/ifs_startup.rs` discipline).
+fn run_env_in(
+    dir: &str,
+    script: &str,
+    pairs: &[(&str, &str)],
+) -> (String, String, i32, Vec<String>) {
+    let mut cmd = Command::new(BIN);
+    cmd.args(["-c", &format!("cd {dir}; {script}")])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    for (key, value) in pairs {
+        if *value == "\0" {
+            cmd.env_remove(key);
+        } else {
+            cmd.env(key, value);
+        }
+    }
+    let output = cmd.output().unwrap();
+    let out = str::from_utf8(&output.stdout).unwrap().to_string();
+    let err = str::from_utf8(&output.stderr).unwrap().to_string();
+    (out, err, output.status.code().unwrap_or(-1), listing(dir))
+}
+
+/// A `NAME=value` prefix on a statement of redirections is a **shell variable
+/// only** (LESSONS: "A statement of redirections **is** a command"; POSIX 2.9.1:
+/// with the command name omitted, "the shell variables but not the execution
+/// environment shall be adjusted"). It persists in the shell — across statements
+/// — but never *adds* the export attribute, so a child sees nothing. A name
+/// **already** visible to a child keeps its new value: the shell exported it, or
+/// the inherited environment carries a row for it, which bash imports as an
+/// export. The `>f g` rows are the control: a command word gives the prefix
+/// something to scope to, so it is restored (`[]` in both shells; the rc-127/1
+/// lookup divergence of that row is pinned elsewhere). Every row measured against
+/// `bash -c` 5.3.9; the two rows that read the inherited environment spell it out
+/// via `run_env_in`.
+#[test]
+fn a_prefix_on_a_redirect_only_statement_stays_shell_local() {
+    let dir = seeded("prefix_shell_local");
+    let dir = dir.to_str().unwrap();
+    let rows: [(&str, &str, i32, &[&str]); 10] = [
+        ("VAR=x >f; printenv VAR; echo rc=$?", "rc=1\n", 0, &["f"]),
+        ("x=1 >f; env | grep -c '^x=1$'", "0\n", 1, &["f"]),
+        (
+            "VAR=x >f; echo $VAR; >g; echo $VAR",
+            "x\nx\n",
+            0,
+            &["f", "g"],
+        ),
+        ("VAR=x >f; echo $VAR; echo $?", "x\n0\n", 0, &["f"]),
+        ("VAR=x >f g; echo [$VAR]", "[]\n", 0, &["f"]),
+        (
+            "VAR=x $(true) >f; printenv VAR; echo rc=$?",
+            "rc=1\n",
+            0,
+            &["f"],
+        ),
+        (
+            "export VAR=y; VAR=x >f; printenv VAR; echo rc=$?",
+            "x\nrc=0\n",
+            0,
+            &["f"],
+        ),
+        (
+            "export FOO=orig; FOO=1 FOO=2 >f; printenv FOO; echo [$FOO]",
+            "2\n[2]\n",
+            0,
+            &["f"],
+        ),
+        (
+            "FOO=1 FOO=2 >f; printenv FOO; echo [$FOO]",
+            "[2]\n",
+            0,
+            &["f"],
+        ),
+        ("IFS=x >f; v=\"axb\"; set -- $v; echo $#", "2\n", 0, &["f"]),
+    ];
+    for (script, stdout, rc, want) in rows {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!(
+            (out.as_str(), code, created(&files)),
+            (stdout, rc, names(want)),
+            "{script}: stderr={err:?}"
+        );
+    }
+    // A name the inherited environment already carried stays visible: the apply
+    // did not *add* that export, it updated one.
+    clean(dir);
+    let (out, err, code, files) = run_env_in(dir, "HOME=y >f; printenv HOME", &[("HOME", "/seed")]);
+    assert_eq!(
+        (out.as_str(), code, created(&files)),
+        ("y\n", 0, names(&["f"])),
+        "bash measures the same: {err:?}"
+    );
+    // And `IFS` — a name the shell seeds on its own, so the inherited row is
+    // absent — keeps no export either (grep's no-match status, which bash
+    // reports too).
+    clean(dir);
+    let (out, err, code, files) =
+        run_env_in(dir, "IFS=x >f; env | grep -c '^IFS='", &[("IFS", "\0")]);
+    assert_eq!(
+        (out.as_str(), code, created(&files)),
+        ("0\n", 1, names(&["f"])),
+        "bash measures the same: {err:?}"
+    );
+}
+
 /// A redirection that cannot open its target fails the statement at rc 1 with a
 /// chain naming the path. The opens run in the order the redirections were
 /// **written**, so the side effect of the earlier open survives the later

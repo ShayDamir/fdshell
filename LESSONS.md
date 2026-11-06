@@ -882,7 +882,7 @@ In `safe/fdshell/src/child/verity/dump_read.rs`, the streaming read buffer for `
 A leading `NAME=value` word on a command is scoped to that command (POSIX 2.9.1): expanded against the shell, applied to the command's execution environment (exported to external children), never persisted. Three traps, all pinned by `safe/fdshell/tests/env_assign.rs` and `run_env/tests.rs` (task #120):
 
 1. **Apply after substitution, in the forked child.** `child_main` calls `run_env::apply_child` *after* `substitute_args` and `last_arg::send`, before xtrace/dispatch. Applying earlier would let a scoped `IFS` re-split the command's *own* words: `IFS=: echo a:b` must print `a:b` (the words were split with the parent IFS); only the command's execution environment sees `:`. The parent never applies for forked commands — it expands once (`run_env::expand`), applies/restore **only** around the parent-side handlers (functions, intercepts), and passes the expanded `EnvAssigns` to `launch` → `child_main`.
-2. **Expansion must not hold a `RefCell` borrow.** `expand_one` substitutes each value word with no borrow held — a `$(…)` in a value *forks* (command substitution runs a child that borrows the same cell; a held `borrow_mut` would panic). `apply`/`restore`/`apply_child` are the only functions that borrow, and only around plain map ops.
+2. **Expansion must not hold a `RefCell` borrow.** `expand_one` substitutes each value word with no borrow held — a `$(…)` in a value *forks* (command substitution runs a child that borrows the same cell; a held `borrow_mut` would panic). `apply`/`restore`/`apply_child`/`drop_new_exports` are the only functions that borrow, and only around plain map ops.
 3. **`restore` saves the first-touch values, and the old `state.ifs` separately.** `EnvSave` records, per name, the previous `strings` and `exports` values on **first touch only** — `FOO=pre; FOO=1 FOO=2 cd /tmp; echo $FOO` must restore `pre`, not `1`. And `IFS` is special: `set_var` syncs `state.ifs`, and the split set is a **field** of the state, so the per-name entry restore cannot reach it — without `old_ifs` a scoped `IFS=:` would leak into the parent through `state.ifs`. `record` therefore captures `old_ifs: Option<ShortCStr>` when the name is `IFS`, and `restore` writes it back after the entry loop. (Since task #388 the entry loop covers the name as well: the shell seeds `IFS` in `strings` at the default split set at startup — POSIX XCU 2.5.1, bash — so a scoped `IFS=:` is an ordinary entry shadow; the field still needs its own slot.)
 
 Parse-side invariants: a statement of *all* assignment words (up to `;`) stays a bare assignment (`AssignStr` / new `AssignStrs`); a non-assignment word following the assignments makes it a command with a scoped prefix (`parse/envassign.rs::has_command_word` drives the detect fall-through, `prefix_len` + `collect_range` extract the words). `FOO=bar | cat` (all-assignment pipeline stage) is a clean `expected command` parse error — accepted divergence from bash's no-op subshell component, documented in the README's "Shell variables" section.
@@ -5601,11 +5601,21 @@ the file is created) and from an **expanded**-empty word 0
 (`command_word::with_fields` sets `command_quoted: true`, the family **#426**
 owns). A guard on `command.is_empty()` alone turns `"" >f` into rc 0.
 
-**Persistence is a deliberate skipped restore.** `run_env::apply` is applied,
-the scope runs, and the `EnvSave` is **not** restored: bash keeps `VAR=x` from
-`VAR=x >f`, because there is no command for the prefix to scope to. The store
-split (bash keeps it a shell variable, `run_env::apply` also exports it) is the
-documented micro-divergence; a follow-up that separates the two stores owns it.
+**Persistence is a deliberate skipped restore — of the shell store only.**
+`run_env::apply` is applied, the scope runs, and the `EnvSave` is **not**
+restored: bash keeps `VAR=x` from `VAR=x >f`, because there is no command for the
+prefix to scope to. POSIX 2.9.1 adjusts "the shell variables but not the execution
+environment", so the exports the apply **added** are put back after the scope by
+`run_env::drop_new_exports` (`run_env/shell_local.rs`): the arm keeps the
+`strings` store and the `ifs` field, plus every name already visible to a child —
+an `exports` entry, or a row of the inherited `environ` the env filter allows, the
+same predicate `exec/environ.rs::export_entry` applies so the two cannot drift.
+The drop lands **after** the scope because a redirect target is expanded inside it
+(`VAR=x >$(printenv VAR)`). Two rows must not regress: `export VAR=y; VAR=x >f;
+printenv VAR` answers `x` and `HOME=y >f; printenv HOME` answers `y` — the apply
+updated an export that already existed instead of adding one. Pinned by
+`safe/fdshell/tests/redirect.rs::a_prefix_on_a_redirect_only_statement_stays_shell_local`
+and the `drop_new_exports` pins in `safe/fdshell/src/run_env/tests.rs`.
 
 **Inheriting a parser's vocabulary inherits its divergences — measure the
 inherited rows, not only the fixed ones.** `>>&x` is a path redirect in

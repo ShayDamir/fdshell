@@ -407,9 +407,14 @@ A statement of **redirections only** — `>f`, `>>f`, `2>f`, `<f`, `>&2`, `>&-`,
 redirections are applied, the shell's descriptors come back, and the status is
 **0**. It runs in the current shell, so no process is launched and a
 `NAME=value` prefix **persists** (`VAR=x >f` leaves `VAR=x` set, as bash does) —
-there is no command for the prefix to scope to. Two side effects of that
-in-process run are accepted divergences: the prefix is also **exported** (bash
-keeps such an assignment shell-local), and a `set -x` trace prints nothing for
+there is no command for the prefix to scope to. The persistence is the shell's
+own store only: with the command name omitted, POSIX #2.9.1 adjusts "the shell
+variables but not the execution environment", so the assignment never *adds* the
+export attribute — `VAR=x >f; printenv VAR` prints nothing — while a name
+**already** visible to a child keeps its new value, whether the shell exported it
+(`export VAR=y; VAR=x >f; printenv VAR` prints `x`) or the inherited environment
+carries it (`HOME=y >f; printenv HOME` prints `y`). One side effect of that
+in-process run stays an accepted divergence: a `set -x` trace prints nothing for
 the statement (bash prints a line for the command it traces). A word behind the
 redirections is the command word — `>f g` runs `g` with the redirection — and a
 quoted operator word (`'>f'`, `"&>f"`) is a command name, never a redirection.
@@ -428,9 +433,9 @@ $(true) >g` exits **0**). Nothing runs, so the status is **0** when no
 substitution ran (`$unset >f`, `set --; "$@" >f`), and an async spelling keeps its
 fork — a `&` job is a fork in bash too — with the arm running inside the job.
 `$_` becomes empty, and everything else the paragraph
-above says — the persisted `NAME=value` prefix, its export divergence, the silent
-`set -x` line, the pipeline stage that keeps its fork — is that same rule. Only a
-*quoted* empty expansion stays a word, hence a lookup: `"" >f` and `"$(true)" >f`
+above says — the persisted `NAME=value` prefix and its shell-only store, the
+silent `set -x` line, the pipeline stage that keeps its fork — is that same rule.
+Only a *quoted* empty expansion stays a word, hence a lookup: `"" >f` and `"$(true)" >f`
 are bash's `: command not found` at **127** against fdshell's shell-wide **1**
 (an accepted divergence; the unquoted spellings are not words at all).
 
