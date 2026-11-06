@@ -1,6 +1,8 @@
 //! Unit pins for the shared command-position rule: every [`Place`] transition
 //! of [`after`], every gate arm of [`scores`] (the two word-list places of
-//! [`list`] included), and the asymmetries the rule encodes (opener vs closer,
+//! [`list`] included), the clause-keyword set that [`super::clause`] shares with
+//! the cond-boundary scan (the mode stack's own [`arm_clause_block`] row
+//! included), and the asymmetries the rule encodes (opener vs closer,
 //! `case` list vs `for` list vs argument, brace carve-out, `time [-p]`
 //! transparency).
 
@@ -8,8 +10,8 @@
 
 use super::list;
 use super::{
-    Glue, Place, after, body_keyword, clause_keyword, list_keyword, list_opener, scores,
-    separator_data, separator_shape, word_place,
+    Glue, Place, after, arm_clause_block, body_keyword, clause_keyword, list_keyword, list_opener,
+    scores, separator_data, separator_shape, word_place,
 };
 use crate::keywords::{Closer, first_word_end};
 use crate::mask::MaskBit;
@@ -34,6 +36,13 @@ fn after_in(word: &[u8], place: Place, top: Closer) -> Place {
 /// `scores` on the whole word.
 fn scores_word(word: &[u8], place: Place) -> bool {
     scores(word, word, word.len(), place)
+}
+
+/// The mode stack's block-kind predicate ([`arm_clause_block`], task #430) on the
+/// whole word: `line` is the word itself, so nothing stands behind it and only a
+/// word the recognition table reads as an arm-ending block's opener answers yes.
+fn arm(word: &[u8]) -> bool {
+    arm_clause_block(word, word, word.len())
 }
 
 #[test]
@@ -85,7 +94,9 @@ fn clause_keywords_restart_command_position_only_from_command_place() {
 }
 
 /// The `case` clause `)` is usually glued to its pattern (`x)`), so the
-/// transition reads the word's *last* byte.
+/// transition reads the word's *last* byte. This row stays **ungated**: the
+/// block-kind gate belongs to the mode stack's `)` row alone (task #430, see
+/// [`super::clause::arm_clause_block`] and the pin above).
 #[test]
 fn glued_case_clause_close_moves_the_place_to_command() {
     assert_eq!(after_word(b"x)", Place::Data), Place::Command);
@@ -240,7 +251,11 @@ fn nothing_scores_at_a_for_word_list() {
 /// The keyword rows `after` reads are **one set** with the cond-boundary scan's
 /// clause/body mode stack (`cond/boundary/block/clause`): each predicate answers
 /// exactly the words of its own arm, and every other word — including a `time`
-/// prefix and a glued payload — answers none of them.
+/// prefix and a glued payload — answers none of them. The fifth predicate,
+/// [`arm_clause_block`], is the documented exception (task #430): it is the mode
+/// stack's own `)` row and `after`'s `)` row stays ungated, so it answers alone —
+/// its arm is the two blocks whose clause ends with an arm `)`, `case` and the
+/// event-`wait` block.
 #[test]
 fn the_clause_keyword_set_is_one_set_with_after() {
     for word in [b"then".as_slice(), b"else", b"do"] {
@@ -248,6 +263,7 @@ fn the_clause_keyword_set_is_one_set_with_after() {
         assert!(!clause_keyword(word), "{word:?} opens no clause");
         assert!(!list_keyword(word), "{word:?} opens no word list");
         assert!(!list_opener(word), "{word:?} opens no list-owning block");
+        assert!(!arm(word), "{word:?} opens no arm-`)` block");
         assert_eq!(
             after_word(word, Place::Command),
             Place::Command,
@@ -256,18 +272,33 @@ fn the_clause_keyword_set_is_one_set_with_after() {
     }
     assert!(clause_keyword(b"elif"), "`elif` opens a clause");
     assert!(!body_keyword(b"elif"), "`elif` opens no body");
+    assert!(!arm(b"elif"), "`elif` opens no arm-`)` block");
     assert_eq!(after_word(b"elif", Place::Command), Place::Command);
     assert!(list_keyword(b"in"), "`in` opens a word list");
     assert!(!body_keyword(b"in"), "`in` opens no body");
+    assert!(!arm(b"in"), "`in` opens no arm-`)` block");
     assert_eq!(after_word(b"in", Place::Command), Place::Pattern);
     assert!(list_opener(b"for"), "`for` owns a word list");
     assert!(!list_keyword(b"for"), "`for` is no list keyword");
+    assert!(!arm(b"for"), "a `for` clause does not end with an arm `)`");
+    assert!(
+        arm(b"case"),
+        "`case` is the predicate's own row: its clause ends at an arm `)`"
+    );
+    // The event-`wait` block is the row's second arm, and it needs the **line**:
+    // the table maps it to `Done`, shared with `for`/`while`/`until`, so the row
+    // re-runs the table's own `wait` disambiguation.
+    let event = b"wait\n readable %rd)";
+    assert!(
+        arm_clause_block(b"wait", event, 4),
+        "the event-`wait` opener ends its clause at an arm `)`"
+    );
     assert_eq!(
         after_word(b"for", Place::Command),
         Place::Words,
         "`after` reads `for` through the same row"
     );
-    // None of the four reads anything else: the openers and closers are
+    // None of the five reads anything else: the openers and closers are
     // `keyword_delta`'s rows, and a word that merely *starts* like a keyword
     // stays out of the set.
     for word in [
@@ -288,9 +319,10 @@ fn the_clause_keyword_set_is_one_set_with_after() {
         assert!(!clause_keyword(word), "{word:?} is no clause keyword");
         assert!(!list_keyword(word), "{word:?} is no word-list keyword");
         assert!(!list_opener(word), "{word:?} opens no list-owning block");
+        assert!(!arm(word), "{word:?} opens no arm-`)` block");
     }
     // The glued arithmetic `for ((…))` (task #396): the word is read by the
-    // boundary-reading `list_opener` row and by no other of the four.
+    // boundary-reading `list_opener` row and by no other of the five.
     let glued = b"for((i=0;i<2;i++))";
     assert!(!body_keyword(glued), "the glued head is no body keyword");
     assert!(
@@ -304,6 +336,10 @@ fn the_clause_keyword_set_is_one_set_with_after() {
     assert!(
         list_opener(glued),
         "the glued head opens the list (task #396)"
+    );
+    assert!(
+        !arm(glued),
+        "the glued head's block does not end its clause at an arm `)`"
     );
 }
 

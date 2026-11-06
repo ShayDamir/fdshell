@@ -1396,32 +1396,70 @@ fn a_clause_position_region_still_splits_the_block_text() {
     }
 }
 
-/// Task #304, the divergence its plan predicted and its sweep measured: a word
-/// that **ends** with `)` sets the innermost block's mode to body (the row is
-/// `keywords/position::after`'s own, ungated, and the mode stack mirrors it), so
-/// in a block's *clause* a following heredoc region stops splitting and fdshell
-/// runs text bash rejects: bash rc 2, master rc 1, here rc 0. Task **#430** owns
-/// the block-kind knowledge that separates a `case` arm's `)` from a subshell
-/// `)`; the mode stack keeps the ungated row until then.
+/// Task #430, the row task #304 pinned as measured-and-divergent and left to this
+/// task: a word that **ends** with `)` ends a block's clause — so its mode is
+/// **Body** and a heredoc region behind it stops splitting — only in a block whose
+/// clause *ends* with an arm `)`: a `case`, and the event-`wait` block. In an `if`
+/// clause such a word is a subshell tail and the clause stays open, so the headline
+/// shape is back in the accepted rc-1-vs-bash-2 family: bash's syntax error at rc 2,
+/// fdshell's parse error (`missing 'fi'`) at rc 1. Measured 2026-11-06 against bash
+/// 5.3.9(1)-release, `master` 4cef3009 and `task430`; the gate's own pins are the
+/// `keywords/position/tests.rs` set and
+/// `cond/boundary/block/clause/tests.rs::the_close_paren_row_is_gated_on_the_block_kind`.
+/// The rows below stay divergent **by rule**, and their mechanism is not the gate:
+/// their Body answer arrives one word later, through `keywords/position::after`'s
+/// still-ungated `)` row — `a)` is judged there, so the `then` behind it is a
+/// recognised clause keyword in command position and the region stays opaque.
 #[test]
-fn a_word_ending_in_close_paren_in_a_clause_stops_the_split() {
-    // bash: `syntax error near unexpected token 'fi'` / `')'`; master: rc 1
-    // `missing 'fi'` for all three (the region split); here: rc 0.
+fn a_word_ending_in_close_paren_in_an_if_clause_splits_the_region_again() {
+    // The gated row: no clause keyword sits between the `)`-ending word and the
+    // `<<`, so the mode stays `Clause`, the region is scanned, and the split lands
+    // where bash also rejects (bash: `syntax error near unexpected token 'fi'`).
     let (out, err, code) = run("if (cat) && cat <<X; then\nz && y\nX\nfi");
-    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
+    assert_eq!((out.as_str(), code), ("", 1), "bash rc 2: stderr={err}");
+    assert!(err.contains("missing 'fi'"), "stderr={err}");
+    // Stays at rc 0: the ungated `)` row above puts the `then` behind `a)` in
+    // command position, so the mode is `Body` and the region is opaque; fdshell runs
+    // what bash rejects and reports the subshell word.
+    let (out, err, code) = run("if (echo a); then cat <<X; then\nz && y\nX\nfi");
+    assert_eq!((out.as_str(), code), ("", 0), "bash rc 2: stderr={err}");
     assert!(
         err.contains("failed to resolve command path"),
         "stderr={err}"
     );
-    let (out, err, code) = run("if (echo a); then cat <<X; then\nz && y\nX\nfi");
-    assert_eq!((out.as_str(), code), ("", 0), "stderr={err}");
+    // Stays: the same `then` row answers `Body` here too, and the acceptance half of
+    // the shape prints what it runs (bash rejects the `)` at rc 2).
+    let (out, err, code) = run("if echo a); then cat <<X; then\nz && y\nX\nfi");
+    assert_eq!(
+        (out.as_str(), code),
+        ("a )\nz && y\n", 1),
+        "bash rc 2: stderr={err}"
+    );
+    assert!(
+        err.contains("failed to resolve command path"),
+        "stderr={err}"
+    );
+    // Stays, and it is the row LESSONS names for this task: `then` set the `Body`
+    // mode **before** the word, so the gate never applies and fdshell prints both
+    // lines at rc 0 where bash is rc 2 — a documented accepted divergence.
     let (out, err, code) = run("if :; then echo a); cat <<X\nz && y\nX\nfi");
-    assert_eq!((out.as_str(), code), ("a )\nz && y\n", 0), "stderr={err}");
-    // The heredoc-free twins are the *pre-existing* half of the shape (fdshell
-    // accepts the second `then`; master and here agree): the divergence this pin
-    // records is the region-scan class, not the acceptance.
-    let (_out, _err, code) = run("if (echo a); then echo t; then echo u; fi");
-    assert_eq!(code, 0, "bash rc 2, accepted on master and here alike");
+    assert_eq!(
+        (out.as_str(), code),
+        ("a )\nz && y\n", 0),
+        "bash rc 2: stderr={err}"
+    );
+    // The heredoc-free twins — no region, so no mode: unchanged. fdshell accepts the
+    // second `then` (the place rule's acceptance half); master and here agree.
+    let (_out, err, code) = run("if (echo a); then echo t; then echo u; fi");
+    assert_eq!(
+        code, 0,
+        "bash rc 2, accepted before and after the gate: stderr={err}"
+    );
+    let (_out, err, code) = run("if echo a); then echo t; then echo u; fi");
+    assert_eq!(
+        code, 1,
+        "bash rc 2, rc 1 before and after the gate: stderr={err}"
+    );
 }
 
 /// Task #304: the event-case `wait` block's arm pattern ends with `)` too, so its

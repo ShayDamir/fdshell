@@ -12,14 +12,20 @@
 //! The discriminating rows are the clause keywords, i.e. the twin rule
 //! `keywords::position::after` runs on the same words, read here as a mode:
 //! `then`/`else`/`do` and a `case` arm's `)` open a **body**, `elif` and `in`
-//! open a **clause**, an opener pushes a clause, a closer pops its block.
+//! open a **clause**, an opener pushes a clause, a closer pops its block. The
+//! `)` row is the one row this stack **gates** and `after` does not (task #430):
+//! a `)`-ending word ends the clause only in a block whose clause ends with an
+//! arm `)` — a `case`, and the event-`wait` block — decided per frame at the
+//! push by [`arm_clause_block`], the shared predicate of that set.
 //!
 //! Braces push nothing: a `{ …; }` group is counted by `cond/boundary.rs`'s own
 //! `group_depth` and never by the block pairing ([`super::word_delta`] excludes
 //! brace words), so a group written in a block's clause keeps the clause mode
 //! and a group written in its body keeps the body mode.
 
-use crate::keywords::{Place, body_keyword, clause_keyword, first_word_end, list_keyword};
+use crate::keywords::{
+    Place, arm_clause_block, body_keyword, clause_keyword, first_word_end, list_keyword,
+};
 use alloc::vec::Vec;
 
 use super::glue::strip_at;
@@ -48,8 +54,10 @@ impl Mode {
 /// the same walk that already scores the words), and the region rule asks one
 /// question of it ([`Modes::mode_at`]).
 pub(in crate::cond) struct Modes {
-    /// One entry per open keyword block, innermost last: that block's mode.
-    stack: Vec<Mode>,
+    /// One entry per open keyword block, innermost last: whether that block's
+    /// clause ends with an arm `)` (the gate of the `)` row, task #430 —
+    /// [`arm_clause_block`], decided once at the push), and that block's mode.
+    stack: Vec<(bool, Mode)>,
     /// `(byte index, mode)` of every change of the innermost mode, in order.
     transitions: Vec<(usize, Mode)>,
 }
@@ -74,19 +82,18 @@ impl Modes {
             return;
         }
         let tail = line.get(i..).unwrap_or(b"");
-        let w = line
-            .get(i..first_word_end(tail, i))
-            .unwrap_or(b"")
-            .trim_ascii();
+        let word_end = first_word_end(tail, i);
+        let w = line.get(i..word_end).unwrap_or(b"").trim_ascii();
         if delta > 0 {
-            self.stack.push(Mode::Clause);
+            self.stack
+                .push((arm_clause_block(w, line, word_end), Mode::Clause));
         } else if delta < 0 {
             self.stack.pop();
         } else if !matches!(place, Place::Data) && body_keyword(w) {
             self.set_top(Mode::Body);
         } else if !matches!(place, Place::Data) && (clause_keyword(w) || list_keyword(w)) {
             self.set_top(Mode::Clause);
-        } else if w.ends_with(b")") {
+        } else if w.ends_with(b")") && self.stack.last().is_some_and(|&(arm, _)| arm) {
             self.set_top(Mode::Body);
         }
         self.sync(i);
@@ -106,14 +113,14 @@ impl Modes {
 
     /// The innermost block's mode; `Clause` with no open block.
     fn top(&self) -> Mode {
-        self.stack.last().copied().unwrap_or(Mode::Clause)
+        self.stack.last().map_or(Mode::Clause, |&(_, mode)| mode)
     }
 
     /// Move the innermost block to `mode`. No open block: nothing moves, the
     /// [`Mode::Clause`] fallback keeps such a site scanned.
     fn set_top(&mut self, mode: Mode) {
         if let Some(top) = self.stack.last_mut() {
-            *top = mode;
+            top.1 = mode;
         }
     }
 

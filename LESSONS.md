@@ -2521,14 +2521,20 @@ the depth fires at the keyword behind it.
    a block closer written **inside** a body region never reaches the stack (the
    region is skipped whole) —
    `cond/boundary/body/tests.rs::a_block_closer_inside_a_body_region_never_reaches_the_stack`;
-   (2) a word **ending** with `)` sets the body mode — that is
-   `keywords/position::after`'s own ungated `)` rule (its glue and payload rows are
-   mask-gated since task #530), which the mode stack mirrors —
-   so in a block's *clause* a `)` from a subshell (`if (cat) && cat <<X; then`)
-   stops the split and fdshell runs text bash rejects (rc 0 vs 2,
-   `tests/heredoc.rs::a_word_ending_in_close_paren_in_a_clause_stops_the_split`).
-   Separating a `case` arm's `)` from a subshell `)` needs block-kind knowledge the
-   mode stack does not have, tracked as task #430. The `# c` row of the same family
+   (2) a word **ending** with `)` sets the body mode only in a block whose clause
+   *ends* with an arm `)` — a `case` arm and the event-`wait` arm (task **#430**): the
+   mode stack gates that one row on the kind of the block its frame belongs to,
+   decided once at the push through the shared recognition table, while
+   `keywords/position::after`'s `)` rule stays ungated (its glue and payload rows are
+   mask-gated since task #530) because it answers **command position**, not the mode.
+   So in an `if` *clause* a `)` from a subshell (`if (cat) && cat <<X; then`) moves
+   nothing, the region behind it stays scanned, and the shape is back in the accepted
+   rc-1-vs-bash-2 family, fdshell rc 1 `missing 'fi'` against bash's rc 2
+   (`tests/heredoc.rs::a_word_ending_in_close_paren_in_an_if_clause_splits_the_region_again`).
+   The rows of the family that still run at rc 0 against bash's rc 2 get their body
+   answer one word later, from `after`'s ungated row (the `then` behind `a)` puts the
+   clause keyword in command position), and that same pin names them as such. The
+   `# c` row of the same family
    (`if :; then cat <<Q # c`) is **not** a region-rule row: it reproduces without
    any block (`cat <<Q # c` + body + `Q` → rc 1 on `master` where bash prints the
    body), so it split into two halves — the `missing 'fi'` half closed by #304's
@@ -2605,9 +2611,13 @@ parity gap, not a new divergence.
 `group_depth`, never by `block_depth`, so a group written in a block's
 **clause** keeps the clause mode (`if { cat <<Q; } then` stays in the
 rc-1-vs-bash-2 family) and a group in its **body** keeps the body mode
-(`if :; then { cat <<Q` gains parity). A `)`-ending word is the one row that
-does **not** discriminate cleanly: it is `after`'s own ungated rule, so a
-subshell `)` in a clause also opens a body — `keywords/position`, task #430.
+(`if :; then { cat <<Q` gains parity). A `)`-ending word is the one row the two
+rules do **not** share (task **#430**): the mode stack gates it on the kind of the
+block its frame belongs to — only a block whose clause *ends* with an arm `)`, a
+`case` and the event-`wait` — while `after`'s `)` row stays ungated, because it
+answers command position and the pinned
+`keywords/position/tests.rs::glued_case_clause_close_moves_the_place_to_command`
+keeps it that way.
 
 **Parity is carried by pins, not by a table.** Every body-position shape
 (keyword block, nested block, group in a body, `case` arm, loop body, `else`
@@ -2625,9 +2635,15 @@ bash and fdshell alike (a definition group is no block, so no mode). The
 **unbounded** `while :; do cat <<Q` / `z && y` / `Q` / `done && echo tail`
 twin loops forever on bash and on fdshell alike (rc 124 under a timeout): not
 pinnable in this suite, so the pinned shape is the bounded one (`break` in the
-body, rc 0). Two families are owned elsewhere: the ungated `)` rows
-`if (cat) && cat <<X; then` and `if :; then echo a); cat <<X` (task #430), and
-the comment-terminated delimiter row `if :; then cat <<Q # c` / `cat <<Q # c`
+body, rc 0). Two families are owned elsewhere: the `)` rows — task **#430** gated
+the mode stack's row on the kind of the block its frame belongs to, so
+`if (cat) && cat <<X; then` joined the accepted rc-1-vs-bash-2 rows above, while
+`if (echo a); then cat <<X; then` and `if :; then echo a); cat <<X` stay
+**documented accepted divergences** (rc 0 against bash's rc 2, because their body
+answer arrives one word later through `after`'s still-ungated `)` row — the `then`
+behind `a)`) — all of them pinned by
+`tests/heredoc.rs::a_word_ending_in_close_paren_in_an_if_clause_splits_the_region_again`;
+and the comment-terminated delimiter row `if :; then cat <<Q # c` / `cat <<Q # c`
 (task **#364** brings it to bash's side: both shells run at rc 0 with the
 end-of-file warning; the pins are the parity rows of
 `tests/heredoc.rs::a_comment_terminated_line_starved_rows_reach_parity_and_deferred_rows_keep_their_owners`).

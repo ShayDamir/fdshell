@@ -43,7 +43,9 @@ mod payload;
 mod place;
 mod score;
 
-pub(crate) use clause::{body_keyword, clause_keyword, list_keyword, list_opener};
+pub(crate) use clause::{
+    arm_clause_block, body_keyword, clause_keyword, list_keyword, list_opener,
+};
 pub(crate) use paren::closer_payload;
 pub(crate) use place::{Glue, Place};
 pub(crate) use score::{closer_matches, scores};

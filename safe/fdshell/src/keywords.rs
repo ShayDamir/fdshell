@@ -16,8 +16,8 @@ pub(crate) use kind::{Closer, Keyword, keyword_kind};
 pub(crate) use pair::pair_payload;
 pub(crate) use pairing::Pairing;
 pub(crate) use position::{
-    Glue, Place, after, body_keyword, clause_keyword, closer_payload, list_keyword, list_opener,
-    scores, separator_data, separator_shape, word_place,
+    Glue, Place, after, arm_clause_block, body_keyword, clause_keyword, closer_payload,
+    list_keyword, list_opener, scores, separator_data, separator_shape, word_place,
 };
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
 

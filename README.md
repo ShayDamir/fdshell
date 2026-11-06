@@ -589,6 +589,21 @@ prints `z && y` at rc 0, as bash, in every block shape: `then`/`else` arms,
 `a_body_position_heredoc_region_in_every_block_shape_prints_its_body`, and
 `a_clause_position_region_still_splits_the_block_text` for the clause rows).
 
+The `)` row of that rule is **gated on the kind of the open block** (task #430):
+a `)`-ending word ends the clause only in a block whose clause *ends* with an arm
+`)` — a `case` arm and the event-`wait` block — so in an `if` clause such a word
+moves nothing and the region behind it stays scanned: `if (cat) && cat <<X; then`
++ `z && y` + `X` + `fi` is rc 1 `missing 'fi'`, bash rc 2
+(`tests/heredoc.rs::a_word_ending_in_close_paren_in_an_if_clause_splits_the_region_again`,
+unit pins in `cond/boundary/block/clause/tests.rs` and
+`keywords/position/tests.rs::the_clause_keyword_set_is_one_set_with_after`). Two
+rows of that family stay divergent **by rule**, both because their body answer
+arrives one word later, through `keywords/position`'s `)` row — which stays
+ungated, since it answers command position: `if (echo a); then cat <<X; then` +
+`z && y` + `X` + `fi` runs at rc 0 and `if :; then echo a); cat <<X` + `z && y` +
+`X` + `fi` prints both lines at rc 0, where bash is rc 2 at both
+(same pin).
+
 The stream is read **greedily, one body per operator**, as bash reads it: each
 operator's body starts where the previous operator's delimiter line ended, and
 an operator whose delimiter line never arrives — **the first one included** —

@@ -1,10 +1,12 @@
 //! Unit pins for the clause/body mode stack: every opener pushes a clause,
-//! `then`/`else`/`do` and a `case` arm's `)` move the innermost block to its
-//! body, `elif` and `in` move it back to a clause, a closer pops and a stray
+//! `then`/`else`/`do` and a `)`-ending word move the innermost block to its body,
+//! `elif` and `in` move it back to a clause, a closer pops and a stray
 //! closer clamps, an argument-position keyword and a word inside a glued cond
 //! pair never transition, and [`Modes::mode_at`] answers the last change at or
 //! before the site — with the [`Mode::Clause`] fallback for a site the walk
-//! never recorded.
+//! never recorded. The `)` row is **gated** on the pushed frame's block kind
+//! (task #430): only a block whose clause ends with an arm `)` — `case`, the
+//! event-`wait` block — is moved by such a word.
 
 use super::{Mode, Modes};
 use crate::keywords::Place;
@@ -122,7 +124,9 @@ fn a_body_keyword_moves_the_innermost_block_to_body() {
 }
 
 /// A `case` clause: its word list is a clause, the arm behind its pattern `)`
-/// is a body, and `esac` pops the block.
+/// is a body, and `esac` pops the block. The arm row is the gate's **true** side:
+/// the pushed `case` frame carries the arm kind (`keywords::position::clause`'s
+/// predicate).
 #[test]
 fn a_case_clause_closes_at_its_arm_pattern() {
     let list = b"case q in q) cat <<Q\nz && y\nQ\n;;\nesac";
@@ -157,7 +161,8 @@ const IF_CASE: (usize, Place, i32) = (0, Place::Command, 1);
 
 /// The clause gate is `after`'s own: a keyword written as an **argument**
 /// (`place == Place::Data`) moves nothing. The `)` row is the one row `after`
-/// leaves ungated, and the stack mirrors it (task #430 owns its clause case).
+/// leaves ungated and the stack does **not** mirror: the stack gates it on the
+/// frame's block kind, and an `if` frame keeps its clause open (task #430).
 #[test]
 fn an_argument_position_keyword_moves_nothing() {
     let line = b"if :; then echo in q) cat <<Q\nz\nQ\nfi";
@@ -175,11 +180,11 @@ fn an_argument_position_keyword_moves_nothing() {
         Mode::Clause,
         "the same word in command position opens the word list"
     );
-    let close = modes_of(&line[..], &[IF, (19, Place::Data, 0)]);
+    let close_paren = modes_of(&line[..], &[IF, (19, Place::Data, 0)]);
     assert_eq!(
-        close.mode_at(26),
-        Mode::Body,
-        "a word ending in `)` opens a body in argument position too"
+        close_paren.mode_at(26),
+        Mode::Clause,
+        "a word ending in `)` moves nothing in an `if` clause, argument position included"
     );
 }
 
@@ -214,4 +219,63 @@ fn mode_at_answers_the_last_change_at_or_before_the_site() {
     assert_eq!(modes.mode_at(21), Mode::Body, "the body site (21)");
     assert_eq!(modes.mode_at(0), Mode::Clause, "a site before every change");
     assert_eq!(Modes::new().mode_at(0), Mode::Clause, "the empty stack");
+}
+
+/// Task #430, the gate both ways at the helper's granularity: a `)`-ending word
+/// moves the innermost block only in a block whose clause **ends** with an arm
+/// `)` — a `case`, and the event-`wait` block — and moves nothing in an
+/// `if`/`while`/`for` clause, where such a word is a subshell tail or a word-list
+/// argument and the clause stays open. The kind is decided on the **opener** word at
+/// the push, through the shared recognition table (the `time case` row is the
+/// opener the table — not a literal word compare — resolves), and each row hands
+/// the `(index, place, delta)` triples the production walk hands for the opener and
+/// the `)`-ending word.
+#[test]
+fn the_close_paren_row_is_gated_on_the_block_kind() {
+    for (line, words, site, want, why) in [
+        (
+            b"case q in q) cat <<Q\nz && y\nQ\nesac".as_slice(),
+            &[(0, Place::Command, 1), (10, Place::Pattern, 0)][..],
+            17,
+            Mode::Body,
+            "a `case` arm's `)` ends the clause",
+        ),
+        (
+            b"wait readable %s) cat <<Q\nz && y\nQ\n;;\ndone".as_slice(),
+            &[(0, Place::Command, 1), (14, Place::Data, 0)][..],
+            22,
+            Mode::Body,
+            "the event-`wait` block's arm mirrors a `case` arm",
+        ),
+        (
+            b"time case x in a) cat <<Q\nz && y\nQ\n;;\nesac".as_slice(),
+            &[(5, Place::Command, 1), (15, Place::Pattern, 0)][..],
+            22,
+            Mode::Body,
+            "the `time` prefix is the recognition table's, and the `case` behind it decides the frame",
+        ),
+        (
+            b"if (cat) && cat <<Q\nz && y\nQ\nfi".as_slice(),
+            &[(0, Place::Command, 1), (3, Place::Command, 0)][..],
+            16,
+            Mode::Clause,
+            "an `if` clause stays open: the word is a subshell tail",
+        ),
+        (
+            b"while a) cat <<Q\nz && y\nQ\nbreak\ndone".as_slice(),
+            &[(0, Place::Command, 1), (6, Place::Command, 0)][..],
+            13,
+            Mode::Clause,
+            "a `while` clause stays open too",
+        ),
+        (
+            b"for a) cat <<Q\nz && y\nQ\ndone".as_slice(),
+            &[(0, Place::Command, 1), (4, Place::Words, 0)][..],
+            11,
+            Mode::Clause,
+            "and so does a `for` word list: the word is a list argument",
+        ),
+    ] {
+        assert_eq!(modes_of(line, words).mode_at(site), want, "{why}");
+    }
 }
