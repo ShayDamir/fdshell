@@ -2071,88 +2071,87 @@ the direction with a lower bound on a sleeping statement (`time -p sleep 1` →
 
 ## A CPU-burn timing test measures nothing in a release build
 `monotonic_advances_across_a_cpu_burn` (200M-iteration counting loop,
-`core::hint::black_box`) passed every local debug run and failed under
-`nix flake check`, where the crate is built in release: LLVM computes the
-loop's result directly and the burn costs ~0 ms, so the clock test asserted a
-5 ms elapsed time for work that never ran. **Rule:** measure elapsed time
-against a syscall that blocks (`libc::nanosleep`), which cannot be folded
-away, and bound it on both sides (at least 10 ms slept, far less than the
-clock reads). The same fold hits `utime` assertions:
+`core::hint::black_box`) passed every local debug run, failed under
+`nix flake check`, built in release: LLVM computes the loop's result directly,
+the burn costs ~0 ms, and the test asserted 5 ms elapsed for work that never
+ran. **Rule:** measure elapsed time against a blocking syscall
+(`libc::nanosleep`) — it cannot fold — bounded on both sides (≥ 10 ms
+slept, far below the clock reads). The same fold hits `utime` assertions:
 `unsafe/sys/tests/getrusage.rs::self_usage_succeeds` burned
 `n = n.wrapping_add(1)` up to 50M with `black_box(n)` *after* the loop, so
-release builds report `CpuTimes { utime: 0, stime: 2888 }` in the nix sandbox
-and `nix flake check --build-all` fails the suite intermittently. A burn must
+release builds reported `CpuTimes { utime: 0, stime: 2888 }` in the nix sandbox
+and `nix flake check --build-all` failed the suite intermittently. A burn must
 be un-foldable to be assertable: keep the accumulator inside the loop under
 `black_box` (task #171's `burn_cpu()` in `unsafe/sys/tests/getrusage.rs`, self
-burn and forked-child burn), and never assert a positive CPU count for
+and forked-child burns), and never assert a positive CPU count for
 folded-away work. The two signatures, measured in the sandbox's release
-profile: an un-folded burn costs ~10–18 ms of real user time
-(`utime ≈ 18_000 µs`, four orders above a `> 0` assertion); the same loop with
-`black_box` moved back after the loop costs ~0 ms, leaving
-`{ utime: 0, stime: ~3000 }` — ~3 ms of process-startup system time, which is
-the *folded* signature, not a measured attribution flip.
+profile: the old 50M un-folded burn cost ~10–18 ms of real user
+time (`utime ≈ 18_000 µs`); the same loop with `black_box` moved back after
+the loop costs ~0 ms, leaving `{ utime: 0, stime: ~3000 }` — ~3 ms of
+process-startup system time, which is the *folded* signature, not an attribution flip.
+- **For a `getrusage`-style assertion the floor is 1 µs of *reported* CPU: the
+count is bounded below by the release per-iteration cost, above by the debug
+wall under load** (µs mirror of the print-floor rule below). #449 sized the shipped 5M by it: sums ≥ 1.2 ms release / ≥ 5.0 ms debug,
+worst wall 0.24 s under 8× load (32 cores), ≥ 40× under the 10 s kill — no
+override.
 - **How a process's CPU splits between `ru_utime` and `ru_stime` is the
-kernel's accounting choice, which no test controls**, so a positive-`utime`
+kernel's choice, no test controls it**; a positive-`utime`
 assertion is a scheduler coin flip (it bit `self_usage` and
 `wait_pidfd_rusage` in the sandbox, with
 `CpuTimes { utime: 0, stime: 3124 }`). Self and reaped-child CPU-time
-assertions are on `utime + stime`. Keep the burn loop — it is what makes the
-reported numbers real — but read a `> 0` sum as
+assertions are on `utime + stime`. Keep the burn loop — it makes the reported
+numbers real — but read a `> 0` sum as
 "the report is non-degenerate", never as "the burn ran"; that claim belongs to
-the un-foldability rule above, never to the sum.
+the un-foldability rule, never to the sum.
 - **The same coin flip reaches the `times` builtin's *children* fields (task
 #267):**
 `safe/fdshell/tests/times.rs::times_children_total_time_increases_after_wait`
-burned CPU in a backgrounded child, `wait`ed for it, and asserted the
+burned CPU in a backgrounded child, `wait`ed, asserted the
 *children user time* field `> 0.00`. `times` prints `child_utime` and
 `child_stime` as two separate fields (`safe/fdshell/src/intercept/times.rs`,
-fed by `add_child_times` from each reap's `waitid` rusage), so a reaped
+fed by `add_child_times` from each reap's `waitid` rusage) — a reaped
 child's CPU attributed wholly to system zeroes the asserted field while the
 child plainly ran. Fixed the same way: assert the printed sum (user + system),
 keep the burn loop, read `> 0` as "non-degenerate". The centisecond print
 floor is the rule this adds: `centis` truncates the two fields
-**independently** (`us / 10_000`, `(us / 100) % 100`), so a printed sum is not
+separately (`us / 10_000`, `(us / 100) % 100`), so a printed sum is not
 the truncation of the total and its floor sits on a *single* field — one field
-prints `0.00` below 100 µs, and the printed sum is `0.00` only when *both*
-fields are, i.e. only when the whole child CPU is under 200 µs. **Rule:**
-measure a `times`-style burn against that print floor, never against the
-printed unit's nominal resolution (the printed unit is the centisecond = 10
-ms; the resolution is a hundredth of it). At **500** iterations the children
+prints `0.00` below 100 µs, so the sum is `0.00` only when *both* are, — child CPU under 200 µs. **Rule:**
+measure a `times`-style burn against that print floor, never the
+nominal resolution (the centisecond = 10 ms; resolution a hundredth of it). At
+**500** iterations the children
 line is `5.65`–`7.19` user + `0.73`–`1.36` system centiseconds in debug and
 `3.73`–`4.24` + `0.28`–`0.50` in release — worst field `0.28` = 2800 µs, 28×
 above the per-field floor, so the sum's `> 0` is attribution- and
-floor-independent; 100 and 250 iterations clear the floor (`0.05`/`0.13` worst
-field in release) and were rejected for margin, not for failure.
+floor-proof; 100 and 250 iterations clear the floor (`0.05`/`0.13` worst
+field in release), rejected for margin, not failure.
 - **A burn test's wall time is its CPU ÷ its share of the machine, so an
 over-sized burn is a nextest `slow-timeout` kill under mutation load, and one
 timed-out test is a *false* kill of every mutant in that copy's sweep** (the
 entry "A mutant caught by a flaky test is a false kill"). The `times` children
-burn's 5000-iteration form (~0.65 s of child CPU) took **25.8–26.4 s** of wall
-in 8 concurrent full-suite runs — the `cargo mutants -j8` profile, 32 cores —
+burn's 5000-iteration form (~0.65 s of child CPU) took **25.8–26.4 s** wall in
+8 concurrent full-suite runs (the `cargo mutants -j8` profile, 32 cores)
 against the 10 s period. **Rule:** size the burn to the assertion's floor and
 measure both margins — floor (worst observed field vs the print floor) and
 timeout (wall time under the load profile vs the kill). 500 iterations:
-0.16–0.20 s for the script, 0.33–3.99 s for the test, so the kill is widened
-for that one test only (`[[profile.default.overrides]]` +
+0.16–0.20 s for the script, 0.33–3.99 s for the test, so the kill was widened
+for that test only (`[[profile.default.overrides]]` +
 `slow-timeout = { period = "10s", terminate-after = 4 }`), never by
-lengthening the global 10 s period: that period is the suite's self-bound
+lengthening the global 10 s period — the suite's self-bound
 (`safe/fdshell/tests/loops.rs::run_bounded` bounds its child at 5 s *because*
-the kill sits at 10 s), and widening it delays every hang regression. Verify a
-per-test override fires — set the period to `1ms` and watch exactly the named
-test die; a filter matching nothing is a comment, not a fix.
+the kill sits at 10 s); widening it delays every hang regression. Verify a
+per-test override fires: period `1ms`, exactly the named test must die; a
+filter matching nothing is a comment, not a fix.
 - **A CPU-time delta measured around a forked child is the fork's CPU.**
 `time -p sleep 0.2` reports `user 0.20` in fdshell where bash reports `0.00`:
-the fork/exec of the child (PATH walk, arg substitution) is the shell's own
-CPU and is inside the measurement window. So a test may pin `user`/`sys` to
-`0.00` only for statements that fork nothing (a bare `time`, `:`, an `if` with
-an in-process body); asserting `user == 0.00` around a fork is a timing coin
-flip.
-- **Two harness facts for repeat measurement:** a plain `nix flake check`
-repeat is a store hit that runs nothing, so re-run the check phase with
+the child's fork/exec (PATH walk, arg substitution) is the shell's own CPU,
+inside the measurement window. So a test may pin `user`/`sys` to
+`0.00` only for statements that fork nothing (a bare `time`, `:`, an in-process-body `if`); asserting `user == 0.00` around a fork is a coin flip.
+- **Two harness facts:** a plain `nix flake check`
+repeat is a store hit running nothing; re-run with
 `nix build .#checks.x86_64-linux.default --rebuild`; and
-`nix build .#coverage --rebuild` exits 1 on the coverage report's embedded
-timestamps tripping nix's output-determinism check, which is not a test
-failure.
+`nix build .#coverage --rebuild` exits 1 on the report's embedded timestamps
+tripping nix's determinism check, not a test failure.
 
 ## A pid-derived test port is a shared name; "passes on re-run" is pid luck, not timing
 `connect_listen_accept_in_one_script_inet` failed once in the
