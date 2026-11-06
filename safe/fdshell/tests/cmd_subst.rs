@@ -660,9 +660,17 @@ fn word0_unbounded_output_is_capped() {
 /// 127 through its own lookup of the name the innermost `echo` produced. Under the
 /// cap, the status now reaches the top through the substitution chain, which is how
 /// bash's 127 travels too.
+///
+/// Sizing: the pair is the smallest one that pins `MAX_NESTING = 100`, and each
+/// level costs a fork + pipe + reap round trip, so the cost cannot shrink.
+/// Measured on a 32-core host over 12 quiet runs and 160 harness runs: 0.23-0.35 s
+/// quiet, 1.82-7.75 s (median 4.68) under 8-concurrent full-suite load — the
+/// `cargo mutants -j8` profile — so only this test's kill is widened in
+/// `.config/nextest.toml`, never the global 10 s period the suite bounds itself by
+/// (LESSONS.md: "A CPU-burn timing test measures nothing in a release build").
 #[test]
 fn word0_deep_nesting_is_bounded() {
-    for (depth, name, rc, reports) in [(100, "deep", 1, true), (101, "", 0, false)] {
+    for (depth, name, rc, reports, blocks) in [(100, "deep", 1, true, 1), (101, "", 0, false, 0)] {
         let script = format!("{}echo deep{}", "$(".repeat(depth), ")".repeat(depth));
         let (out, err, code) = run(&script);
         assert_eq!(code, rc, "depth {depth}, stdout={out} stderr={err}");
@@ -676,11 +684,14 @@ fn word0_deep_nesting_is_bounded() {
             reports,
             "depth {depth}: stderr={err}"
         );
-        // 100 report blocks of 5 lines; the cap keeps the count fixed.
-        assert!(
-            err.lines().count() <= 520,
-            "depth {depth} must stay bounded, got {} lines",
-            err.lines().count()
+        // The cap fixes the report count: exactly one block at the cap, none past
+        // it (measured: 5 lines at depth 100, 0 at depth 101). Counted by the
+        // message marker — the source-location lines move with the code, so they
+        // must not be the counter.
+        assert_eq!(
+            err.matches("failed to resolve command path").count(),
+            blocks,
+            "depth {depth} must keep the report count fixed, stderr={err}"
         );
     }
 }

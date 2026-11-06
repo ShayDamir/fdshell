@@ -485,11 +485,11 @@ the rewritten body (resolved by task #525, item 3). And the new count lives in i
 cargo-mutants (and any jobserver-driven harness) passes its jobserver pipe into every spawned test process as an inherited fd. Pipeline stages and other forked children inherit that fd for their whole lifetime, so a `/proc/<pid>/fd` assertion that counts "exactly N pipes" passes under nextest alone but never holds under the harness. Rule: a test that inspects a child's fd table must first snapshot its own `pipe:[…]` targets from `/proc/self/fd` and count only pipes it did *not* open. Second half of the same lesson: `/proc`-based checks need a stable steady state to inspect, so identify the state by the full assertion itself (poll until some child satisfies it) rather than by process position or a sleep — transient states (pre-exec, mid-cleanup) are not inspectable and must simply be re-polled.
 
 ## A mutant "caught" by a flaky test is a false kill — re-run the gate honestly after fixing the test
-The review gate reported `close_inherited`'s `j == i` skip inversion as caught, but the catch was a false kill from the same racy test that produced the timeout: a flaky test can "kill" a mutant by timing out. After the test was made deterministic, the honest baseline (`cargo mutants` without `--baseline skip`) showed the mutant was genuinely missed — and it is observable: the inversion closes the stage's *own* capture socketpair, so `true | builtin memfd %>%m` fails `EBADF` where the clean build exits 0. Rule: when a gate reports "N caught, 0 missed" on a run that contained flaky tests, distrust the miss list; the fix is a deterministic test that kills the mutant, not a re-skip of the baseline.
+The review gate reported `close_inherited`'s `j == i` skip inversion as caught, but the catch was a false kill from the same racy test that produced the timeout: a flaky test can "kill" a mutant by timing out. Once the test was deterministic, the honest baseline (`cargo mutants` without `--baseline skip`) showed it was genuinely missed — and observable: the inversion closes the stage's *own* capture socketpair, so `true | builtin memfd %>%m` fails `EBADF` where the clean build exits 0. Rule: when a gate reports "N caught, 0 missed" on a run that had flaky tests, distrust the miss list; the fix is a deterministic test that kills the mutant, not a re-skip of the baseline.
 
-The same failure hits a **whole sweep** in **both** directions when `cargo mutants` runs at `-j4` against a shared target dir on a loaded host: mutants come back *caught* with logs full of failures of tests unrelated to the mutation plus a pile of nextest 10 s per-test timeouts, and other mutants come back *missed* that hand-application kills in 0.15 s. A sweep's caught/missed split is a hypothesis, not a measurement. Anything that lands in the accepted-equivalent registry, in a residual census handed to the next sweep, or in a "this mutant is dead" claim, must be re-derived by hand — apply the mutation, run the package's suite, revert (one rebuild + ~6 s per mutant, so a nine-mutant scope is minutes) — or be swept at `-j1` and re-verified per mutant. Escape-rate figures from a parallel run are a **lower bound**: the false kills hide escapes.
+The same failure hits a **whole sweep** in **both** directions when `cargo mutants` runs at `-j4` on a shared target dir on a loaded host: mutants come back *caught* with logs full of failures of tests unrelated to the mutation plus nextest 10 s per-test timeouts, and others come back *missed* that hand-application kills in 0.15 s. A sweep's caught/missed split is a hypothesis, not a measurement. Anything landing in the accepted-equivalent registry, a residual census for the next sweep, or a "this mutant is dead" claim must be re-derived by hand — apply the mutation, run the package's suite, revert (one rebuild + ~6 s per mutant) — or be swept at `-j1` and re-verified per mutant. Escape-rate figures from a parallel run are a **lower bound**: the false kills hide escapes. At `-j8` it bites a **pinned-boundary** test hardest, its CPU being unshrinkable: `word0_deep_nesting_is_bounded` hit 9.11-9.76 s against 0.23-0.35 s quiet, and its 10 s kill fake-killed a `safe/builtins/src/argparse.rs` mutant (now on a 40 s override).
 
-Hand-application flakes too, and the culprit is a *wall-clock budget* in a test: `safe/fdshell/tests/ignoreeof.rs::run_tty` used to sleep a fixed 500 ms and then `try_wait` the `script`-attached shell, so while 86 test binaries competed for the CPU its two tty rows failed on an **unmutated** tree (seen once in ~15 full-package runs of a `cond/boundary` mutant, 20/20 and 5/5 clean in the same session). Signature: failures at ~0.5 s in the binary, in tests whose code path cannot touch the mutation (a heredoc-region mutation "killed" by an EOF/pty test). Read the failing test names, then re-run the mutant 2-3 times and the clean tree before recording anything. **Rule:** a tty test whose verdict is a fixed sleep needs a bounded *event* to be sweep-safe — task #444 made both rows of that helper decide by one (`try_wait` for the exit, `poll`-readiness for the hint, a 5 s window under the 10 s slow-timeout, reads only on readiness and none after the hint), and the load loop is the detector a fixed sleep can never pass: 50 consecutive runs of the binary while the full package suite runs concurrently.
+Hand-application flakes too, and the culprit is a *wall-clock budget* in a test: `safe/fdshell/tests/ignoreeof.rs::run_tty` used to sleep a fixed 500 ms then `try_wait` the `script`-attached shell, so while 86 test binaries competed for the CPU its two tty rows failed on an unmutated tree. Signature: failures at ~0.5 s in the binary, in tests whose code path cannot touch the mutation (a heredoc-region mutation "killed" by an EOF/pty test). Read the failing test names, then re-run the mutant 2-3 times and the clean tree before recording anything. **Rule:** a tty test whose verdict is a fixed sleep needs a bounded *event* to be sweep-safe — the fix made both rows decide by one: `try_wait` for the exit, `poll`+readiness for the hint, a 5 s window under the 10 s slow-timeout, reads only on readiness, none after, and the load loop is the detector a fixed sleep can never pass: 50 runs of the binary while the full package suite runs concurrently.
 
 ## `git checkout <file>` on an intent-to-add file wipes the file
 `git add -N` (intent-to-add) records an *empty* blob for the path. `git checkout <file>` restores the worktree from the index, so it replaces the file with empty content — this bit twice in one session. For a file that is only intent-to-add (never committed), git holds no committed copy to restore from; to revert a change, rewrite the known-clean content (or keep a backup copy). Same root as the nix `cleanSource` trap: until the path is actually staged, the file is invisible to nix builds, and a half-staged (intent-to-add) file is the worst state — present in git status, empty in the index.
@@ -2071,60 +2071,53 @@ the direction with a lower bound on a sleeping statement (`time -p sleep 1` →
 
 ## A CPU-burn timing test measures nothing in a release build
 `monotonic_advances_across_a_cpu_burn` (200M-iteration counting loop,
-`core::hint::black_box`) passed every local debug run, failed under
-`nix flake check`, built in release: LLVM computes the loop's result directly,
-the burn costs ~0 ms, and the test asserted 5 ms elapsed for work that never
-ran. **Rule:** measure elapsed time against a blocking syscall
+`core::hint::black_box`) passed every local debug run and failed under
+`nix flake check`: in release LLVM computes the loop's result directly, the burn costs ~0 ms, and asserted 5 ms elapsed for work that never ran.
+**Rule:** measure elapsed time against a blocking syscall
 (`libc::nanosleep`) — it cannot fold — bounded on both sides (≥ 10 ms
 slept, far below the clock reads). The same fold hits `utime` assertions:
 `unsafe/sys/tests/getrusage.rs::self_usage_succeeds` burned
 `n = n.wrapping_add(1)` up to 50M with `black_box(n)` *after* the loop, so
-release builds reported `CpuTimes { utime: 0, stime: 2888 }` in the nix sandbox
+release builds reported `CpuTimes { utime: 0, stime: 2888 }` in the sandbox
 and `nix flake check --build-all` failed the suite intermittently. A burn must
 be un-foldable to be assertable: keep the accumulator inside the loop under
-`black_box` (task #171's `burn_cpu()` in `unsafe/sys/tests/getrusage.rs`, self
-and forked-child burns), and never assert a positive CPU count for
-folded-away work. The two signatures, measured in the sandbox's release
-profile: the old 50M un-folded burn cost ~10–18 ms of real user
-time (`utime ≈ 18_000 µs`); the same loop with `black_box` moved back after
-the loop costs ~0 ms, leaving `{ utime: 0, stime: ~3000 }` — ~3 ms of
-process-startup system time, which is the *folded* signature, not an attribution flip.
+`black_box` (the `burn_cpu()` in `unsafe/sys/tests/getrusage.rs`, self and
+forked-child burns), and never assert a positive CPU count for folded-away work.
+The two signatures, in the sandbox's release profile: an un-folded burn costs
+~10–18 ms of real user time (`utime ≈ 18_000 µs`); a folded one costs ~0 ms,
+leaving `{ utime: 0, stime: ~3000 }` — ~3 ms of process-startup system time, the
+*folded* signature, not an attribution flip.
 - **For a `getrusage`-style assertion the floor is 1 µs of *reported* CPU: the
-count is bounded below by the release per-iteration cost, above by the debug
-wall under load** (µs mirror of the print-floor rule below). #449 sized the shipped 5M by it: sums ≥ 1.2 ms release / ≥ 5.0 ms debug,
-worst wall 0.24 s under 8× load (32 cores), ≥ 40× under the 10 s kill — no
-override.
+count is bounded below by the release per-iteration cost, above by the debug wall
+under load** (µs mirror of the print-floor rule below). The shipped 5M is sized by
+it: sums ≥ 1.2 ms release / ≥ 5.0 ms debug, worst wall 0.24 s under 8× load,
+≥ 40× under the 10 s kill — no override.
 - **How a process's CPU splits between `ru_utime` and `ru_stime` is the
 kernel's choice, no test controls it**; a positive-`utime`
 assertion is a scheduler coin flip (it bit `self_usage` and
-`wait_pidfd_rusage` in the sandbox, with
-`CpuTimes { utime: 0, stime: 3124 }`). Self and reaped-child CPU-time
-assertions are on `utime + stime`. Keep the burn loop — it makes the reported
-numbers real — but read a `> 0` sum as
-"the report is non-degenerate", never as "the burn ran"; that claim belongs to
-the un-foldability rule, never to the sum.
-- **The same coin flip reaches the `times` builtin's *children* fields (task
-#267):**
+`wait_pidfd_rusage` in the sandbox, with `CpuTimes { utime: 0, stime: 3124 }`).
+Self and reaped-child CPU-time assertions are on `utime + stime`. Keep the burn
+loop — it makes the reported numbers real — but read a `> 0` sum as
+"non-degenerate", never as "the burn ran"; that claim belongs to the
+un-foldability rule, never to the sum.
+- **The same coin flip reaches the `times` builtin's *children* fields:**
 `safe/fdshell/tests/times.rs::times_children_total_time_increases_after_wait`
 burned CPU in a backgrounded child, `wait`ed, asserted the
 *children user time* field `> 0.00`. `times` prints `child_utime` and
 `child_stime` as two separate fields (`safe/fdshell/src/intercept/times.rs`,
 fed by `add_child_times` from each reap's `waitid` rusage) — a reaped
 child's CPU attributed wholly to system zeroes the asserted field while the
-child plainly ran. Fixed the same way: assert the printed sum (user + system),
-keep the burn loop, read `> 0` as "non-degenerate". The centisecond print
-floor is the rule this adds: `centis` truncates the two fields
-separately (`us / 10_000`, `(us / 100) % 100`), so a printed sum is not
-the truncation of the total and its floor sits on a *single* field — one field
-prints `0.00` below 100 µs, so the sum is `0.00` only when *both* are, — child CPU under 200 µs. **Rule:**
-measure a `times`-style burn against that print floor, never the
+child plainly ran. Fixed the same way: assert the printed sum, keep the burn loop, read `> 0` as
+"non-degenerate". The centisecond print floor
+is the rule this adds: `centis` truncates the two fields separately
+(`us / 10_000`, `(us / 100) % 100`), so a printed sum is not the truncation of
+the total and its floor sits on a *single* field — one field prints `0.00` below
+100 µs, so the sum is `0.00` only when *both* are, — child CPU under 200 µs.
+**Rule:** measure a `times`-style burn against that print floor, never the
 nominal resolution (the centisecond = 10 ms; resolution a hundredth of it). At
-**500** iterations the children
-line is `5.65`–`7.19` user + `0.73`–`1.36` system centiseconds in debug and
-`3.73`–`4.24` + `0.28`–`0.50` in release — worst field `0.28` = 2800 µs, 28×
-above the per-field floor, so the sum's `> 0` is attribution- and
-floor-proof; 100 and 250 iterations clear the floor (`0.05`/`0.13` worst
-field in release), rejected for margin, not failure.
+**500** iterations the worst field is `0.28` = 2800 µs, 28× above the per-field
+floor, so the sum's `> 0` is attribution- and floor-proof; smaller counts clear
+the floor but were rejected for margin.
 - **A burn test's wall time is its CPU ÷ its share of the machine, so an
 over-sized burn is a nextest `slow-timeout` kill under mutation load, and one
 timed-out test is a *false* kill of every mutant in that copy's sweep** (the
@@ -2139,19 +2132,24 @@ for that test only (`[[profile.default.overrides]]` +
 `slow-timeout = { period = "10s", terminate-after = 4 }`), never by
 lengthening the global 10 s period — the suite's self-bound
 (`safe/fdshell/tests/loops.rs::run_bounded` bounds its child at 5 s *because*
-the kill sits at 10 s); widening it delays every hang regression. Verify a
-per-test override fires: period `1ms`, exactly the named test must die; a
-filter matching nothing is a comment, not a fix.
+the kill sits at 10 s); widening it delays every hang regression. Verify an
+override fires: period `1ms`, exactly the named test must die; a filter matching
+nothing is a comment, not a fix. **The mirror is the
+pinned-boundary test, whose CPU cannot be shrunk, so the kill moves:**
+`safe/fdshell/tests/cmd_subst.rs::word0_deep_nesting_is_bounded` is the smallest
+pair pinning `MAX_NESTING = 100` (a fork + pipe + reap per level): 0.23–0.35 s
+quiet against 1.82–7.75 s at the same profile — 1.3× under the plain kill, so its
+own 40 s override carries it.
 - **A CPU-time delta measured around a forked child is the fork's CPU.**
 `time -p sleep 0.2` reports `user 0.20` in fdshell where bash reports `0.00`:
 the child's fork/exec (PATH walk, arg substitution) is the shell's own CPU,
-inside the measurement window. So a test may pin `user`/`sys` to
-`0.00` only for statements that fork nothing (a bare `time`, `:`, an in-process-body `if`); asserting `user == 0.00` around a fork is a coin flip.
-- **Two harness facts:** a plain `nix flake check`
-repeat is a store hit running nothing; re-run with
-`nix build .#checks.x86_64-linux.default --rebuild`; and
-`nix build .#coverage --rebuild` exits 1 on the report's embedded timestamps
-tripping nix's determinism check, not a test failure.
+inside the window. So a test may pin `user`/`sys` to `0.00` only for
+statements that fork nothing (a bare `time`, `:`, an in-process-body `if`);
+asserting `user == 0.00` around a fork is a coin flip.
+- **Two harness facts:** a plain `nix flake check` repeat is a store hit running
+nothing; re-run with `nix build .#checks.x86_64-linux.default --rebuild`; `nix
+build .#coverage --rebuild` exits 1 on its embedded timestamps tripping the
+determinism check, not a test failure.
 
 ## A pid-derived test port is a shared name; "passes on re-run" is pid luck, not timing
 `connect_listen_accept_in_one_script_inet` failed once in the
