@@ -660,9 +660,19 @@ fn function_def_beats_the_block_keyword() {
 /// `function 'f'`) is untouched, as the pins of that rule insist.
 #[test]
 fn a_keyword_named_definer_stops_being_a_definer() {
+    // Task #436 moves the two closer-named rows: the definer word is a closing
+    // keyword with nothing open, so the preflight names it — bash rc 2 with a
+    // syntax error, fdshell rc 1 (and the message now *is* the recognition the
+    // test's name claims). The non-closer names keep their lookup message.
     for (script, msg) in [
-        ("done() { echo d; }; done", "\"done\" not found"),
-        ("fi() { echo e; }; fi", "\"fi\" not found"),
+        (
+            "done() { echo d; }; done",
+            "stray 'done' — it closes no open block",
+        ),
+        (
+            "fi() { echo e; }; fi",
+            "stray 'fi' — it closes no open block",
+        ),
         ("in() { echo f; }; in", "\"in\" not found"),
         ("then() { echo g; }; then", "\"then\" not found"),
     ] {
@@ -937,8 +947,13 @@ fn a_compound_closer_before_the_group_brace_is_accepted() {
     assert!(err.contains("\"(\" not found"), "{err}");
     // The rule answers only the closer's **predecessor** question (README): the
     // parse accepts `{ echo A; fi }`, the body runs, and its `fi` reports like
-    // top-level `echo A; fi` — bash rejects this line at parse (rc 2).
+    // top-level `echo A; fi` — bash rejects this line at parse (rc 2). Task #436
+    // moves the row to the preflight: the stray `fi` is reported before the body
+    // runs, so nothing runs — bash's shape, at fdshell's house rc 1.
     let (out, err, rc) = run("{ echo A; fi }");
-    assert_eq!((out.as_str(), rc), ("A\n", 1), "{err}");
-    assert!(err.contains("\"fi\" not found"), "{err}");
+    assert_eq!((out.as_str(), rc), ("", 1), "{err}");
+    assert!(
+        err.contains("stray 'fi' — it closes no open block"),
+        "{err}"
+    );
 }

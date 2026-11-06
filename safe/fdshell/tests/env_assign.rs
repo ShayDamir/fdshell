@@ -132,12 +132,22 @@ fn scoped_prefix_before_pipeline_is_a_parse_error() {
 
 #[test]
 fn scoped_prefix_before_keyword_runs_keyword_as_command() {
-    // Divergence from bash: `if` becomes a plain (not found) command.
-    let (_out, err, code) = run("FOO=bar if true; then :; fi");
+    // Divergence from bash: `if` becomes a plain (not found) command — the row
+    // without a closer keeps it.
+    let (_out, err, code) = run("FOO=bar if true");
     assert_ne!(code, 0);
     assert!(
         err.contains(r#"failed to resolve command path: "if""#),
         "stderr={err:?}"
+    );
+    // With the `fi` behind it, task #436's preflight refuses the whole line —
+    // bash rc 2 (it stops at `then`, the assignment cannot precede a keyword),
+    // fdshell rc 1 naming the closer that closes no block.
+    let (_out, err, code) = run("FOO=bar if true; then :; fi");
+    assert_ne!(code, 0);
+    assert!(
+        err.contains("stray 'fi' — it closes no open block"),
+        "bash rc 2; nothing runs, stderr={err:?}"
     );
 }
 

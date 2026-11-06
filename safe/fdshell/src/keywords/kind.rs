@@ -67,7 +67,7 @@ fn boundary(word: &[u8], len: usize) -> bool {
 /// the **one word-break set** ([`crate::bytes::word_break`]). For a word that is
 /// nothing but its keyword the run is the whole word, and the gate measures the whole
 /// word's own bytes (task #413).
-fn keyword_len(word: &[u8]) -> usize {
+pub(crate) fn keyword_len(word: &[u8]) -> usize {
     word.iter()
         .position(|&b| word_break(b))
         .unwrap_or(word.len())

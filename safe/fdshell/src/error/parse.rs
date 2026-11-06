@@ -8,7 +8,8 @@ pub(crate) mod position;
 mod types;
 
 pub(crate) use position::{
-    ParsePosition, report_case_arm_close_paren, report_unbalanced_quote, report_unexpected_eof,
+    ParsePosition, report_case_arm_close_paren, report_stray_closer, report_unbalanced_quote,
+    report_unexpected_eof,
 };
 pub(crate) use types::ParseError;
 

@@ -12,9 +12,9 @@ pub(crate) use reserved::reserved_word;
 
 pub(crate) use function::{carries_region, definer_len, function_def_name, leading_ws, name_len};
 pub(crate) use kind::arith_for::{is_run_head, opens_a_block};
-pub(crate) use kind::{Closer, Keyword, keyword_kind};
+pub(crate) use kind::{Closer, Keyword, keyword_kind, keyword_len};
 pub(crate) use pair::pair_payload;
-pub(crate) use pairing::Pairing;
+pub(crate) use pairing::{Decision, Pairing};
 pub(crate) use position::{
     Glue, Place, after, arm_clause_block, body_keyword, clause_keyword, closer_payload,
     list_keyword, list_opener, scores, separator_data, separator_shape, word_place,

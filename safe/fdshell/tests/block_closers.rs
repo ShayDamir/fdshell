@@ -343,19 +343,44 @@ fn the_rc_1_family_stays_a_parse_error() {
 /// and so do the structural braces (`f() { if :; then :; fi }`, `tests/block_bodies.rs`).
 #[test]
 fn a_closer_shaped_word_directly_behind_a_closer_reports() {
+    // Task #436 moved these three messages: the second closer word is in command
+    // position with nothing open, and bash refuses the line (rc 2) with
+    // `unexpected token` on that word — the stray report is the closer-to-bash
+    // message of the house rc-1 family. The last row keeps its old message: the
+    // stray word there is the brace, and the group scanner owns the brace.
     err(
         "if :; then :; fi done",
-        "'fi' must be followed by a separator",
+        "stray 'done' — it closes no open block",
     );
     err(
         "case x in x) echo c;; esac fi",
-        "'esac' must be followed by a separator",
+        "stray 'fi' — it closes no open block",
     );
     bounded_err(
         "while :; do echo a; break; done done",
-        "'done' must be followed by a separator",
+        "stray 'done' — it closes no open block",
     );
     err("if :; then :; fi }", "'fi' must be followed by a separator");
+}
+
+/// The **preflight order** of task #436: a line carrying a stray closer *and* one
+/// of the two lines the preflight already refuses runs nothing, and the message is
+/// the earlier arm's — the `&` split first, the stray `;;` second, the stray closer
+/// third (the order `script.rs` states; bash 5.3.9 refuses every row at rc 2).
+#[test]
+fn a_stray_closer_reports_at_preflight() {
+    // A stray closer and a stray `;;`: the `;;` arm rides first.
+    err(
+        "echo a; fi; echo b;;",
+        "stray ';;' — it only separates 'case' clauses",
+    );
+    // A stray closer and an invalid plain-`&` split: the async arm rides first.
+    err(
+        "echo a; fi & & echo b",
+        "unexpected character in this context",
+    );
+    // Alone, the stray closer answers with its own message and names its block.
+    err("echo a; fi; echo b", "stray 'fi' — it closes no open block");
 }
 
 /// The **accepted divergence** this rule opens: a nested block whose own body
@@ -449,10 +474,14 @@ fn a_double_semi_body_is_the_separator_rule_not_this_one() {
 /// the reserved list (task **#316** owns the general break).
 #[test]
 fn a_glued_keyword_word_is_recognized_at_the_boundary() {
+    // Task #436 moved the three closer rows to the stray report: a glued keyword
+    // word IS recognized at the boundary (the point of this test), and bash 5.3.9
+    // refuses the line at rc 2 because nothing is open. The three non-closer
+    // reserved words run as command words and keep their lookup message.
     for (script, msg) in [
-        ("fi(x)", "\"fi\" not found"),
-        ("done(x)", "\"done\" not found"),
-        ("esac(x)", "\"esac\" not found"),
+        ("fi(x)", "stray 'fi' — it closes no open block"),
+        ("done(x)", "stray 'done' — it closes no open block"),
+        ("esac(x)", "stray 'esac' — it closes no open block"),
         ("then(x)", "\"then\" not found"),
         ("do(x)", "\"do\" not found"),
         ("in(x)", "\"in\" not found"),

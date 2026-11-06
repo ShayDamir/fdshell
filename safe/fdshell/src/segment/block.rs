@@ -25,9 +25,15 @@ pub(super) fn open<'a>(line: &'a [u8], raw: &[u8], book: &mut Book<'a>) {
     let (start, line_start) = (book.start, book.line_start);
     let part = raw.trim_ascii();
     let pre_resume = line::flush::flush_line(book, line, line_start, start + raw.len());
-    let (segment, resume, floor, new_start) =
+    let (segment, resume, floor, new_start, stray) =
         open_block(line, raw, part, start, &book.state, pre_resume, line_start);
     book.segments.push(segment);
+    // The span walk's decision (task #436): the scan marks the line, and
+    // `script.rs`'s preflight bails on it before anything runs. The marker rides
+    // beside the segment the walk belonged to.
+    if let Some(off) = stray {
+        book.segments.push(Segment::StrayCloser { off });
+    }
     // `open_block`'s line start is the resume itself exactly when the block
     // ends the physical line, which is the case [`Book::rewind`] floors.
     book.rewind(resume, new_start, floor, new_start == resume);
@@ -57,12 +63,12 @@ pub(super) fn open_block<'a>(
     state: &ScanState,
     pre_resume: usize,
     line_start: usize,
-) -> (Segment<'a>, usize, usize, usize) {
+) -> (Segment<'a>, usize, usize, usize, Option<usize>) {
     // The definer gate walks `line` from `part`'s own first byte, not the run's.
     let def_start = start + leading_ws(raw);
     let span = scan_function_block(line, part, def_start, state.quotes())
         .or_else(|| scan_arith_for_block(line, part, def_start, state.quotes()));
-    let (segment, resume, floor) = match span {
+    let (segment, resume, floor, stray) = match span {
         // The definer and the arithmetic-`for` head (task #394) share the block
         // builder: both are head words whose `{ …; }` body the span swallows.
         Some((end, closed)) => function_block(line, start, end, closed, pre_resume, line_start),
@@ -83,7 +89,7 @@ pub(super) fn open_block<'a>(
     } else {
         resume
     };
-    (segment, resume, floor, new_start)
+    (segment, resume, floor, new_start, stray)
 }
 
 /// The `name() { … }` branch. Its span is the definition's text, and it claims
@@ -109,7 +115,7 @@ fn function_block(
     closed: bool,
     pre_resume: usize,
     line_start: usize,
-) -> (Segment<'_>, usize, usize) {
+) -> (Segment<'_>, usize, usize, Option<usize>) {
     let line_end = heredoc::line_end_after(line, start);
     // `line_resume` is the end of the line's last body region past the block
     // (the line end when the bodies are missing) — the same anchor the keyword
@@ -141,5 +147,8 @@ fn function_block(
         },
         resume,
         floor,
+        // The definer's own scanner owns the brace count, so it never reads the
+        // pairing's decision (task #436): nothing to report here.
+        None,
     )
 }

@@ -35,6 +35,7 @@ fn stamps(book: &Book<'_>) -> Vec<bool> {
             Segment::Block { .. } => panic!("expected Statement"),
             Segment::AsyncInvalid => panic!("expected Statement"),
             Segment::UnexpectedSemiSemi => panic!("expected Statement"),
+            Segment::StrayCloser { .. } => panic!("expected Statement"),
         })
         .collect()
 }
@@ -55,6 +56,7 @@ fn check_statement(segment: &Segment<'_>, cmd: &[u8], off: usize, bodies: &[Vec<
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("expected Statement"),
         Segment::UnexpectedSemiSemi => panic!("expected Statement"),
+        Segment::StrayCloser { .. } => panic!("expected Statement"),
     }
 }
 
@@ -80,6 +82,7 @@ fn flush_line_attaches_bodies_in_operator_order() {
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("expected Statement"),
         Segment::UnexpectedSemiSemi => panic!("expected Statement"),
+        Segment::StrayCloser { .. } => panic!("expected Statement"),
     }
     match &book.segments[1] {
         Segment::Statement {
@@ -92,6 +95,7 @@ fn flush_line_attaches_bodies_in_operator_order() {
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("expected Statement"),
         Segment::UnexpectedSemiSemi => panic!("expected Statement"),
+        Segment::StrayCloser { .. } => panic!("expected Statement"),
     }
     assert_eq!(resume, 34);
 }
@@ -178,6 +182,7 @@ fn flush_line_no_operator_run_gets_no_bodies() {
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("expected Statement"),
         Segment::UnexpectedSemiSemi => panic!("expected Statement"),
+        Segment::StrayCloser { .. } => panic!("expected Statement"),
     }
     match &book.segments[1] {
         Segment::Statement {
@@ -190,6 +195,7 @@ fn flush_line_no_operator_run_gets_no_bodies() {
         Segment::Block { .. } => panic!("expected Statement"),
         Segment::AsyncInvalid => panic!("expected Statement"),
         Segment::UnexpectedSemiSemi => panic!("expected Statement"),
+        Segment::StrayCloser { .. } => panic!("expected Statement"),
     }
     assert_eq!(resume, 26);
 }
@@ -252,6 +258,7 @@ fn flush_line_stamps_only_the_run_the_join_decision_made_for() {
             Segment::Block { .. } => panic!("expected Statement"),
             Segment::AsyncInvalid => panic!("expected Statement"),
             Segment::UnexpectedSemiSemi => panic!("expected Statement"),
+            Segment::StrayCloser { .. } => panic!("expected Statement"),
         }
     }
 }
@@ -275,6 +282,7 @@ fn flush_hands_each_run_its_own_join_points() {
             Segment::Block { .. } => panic!("expected Statement"),
             Segment::AsyncInvalid => panic!("expected Statement"),
             Segment::UnexpectedSemiSemi => panic!("expected Statement"),
+            Segment::StrayCloser { .. } => panic!("expected Statement"),
         }
     }
 }

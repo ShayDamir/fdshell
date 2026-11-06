@@ -166,4 +166,6 @@ pub(crate) enum ParseError {
     /// '{closer}' must be followed by a separator (';', a newline, '&', '|') —
     /// unexpected word
     BlockTrailingWord { closer: sys::ShortCStr },
+    /// stray '{closer}' — it closes no open block
+    StrayCloser { closer: sys::ShortCStr },
 }

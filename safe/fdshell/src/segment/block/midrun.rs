@@ -91,8 +91,10 @@ pub(super) fn span_end(
         // The same word-list seed and the same opener-closer seed
         // [`super::keyword::keyword_block`] gives the run-start span, so a `for`
         // list word never ends this span and a closer of another kind never ends
-        // it either (tasks #306, #309).
-        let (_end, closed) = scan_block(
+        // it either (tasks #306, #309). Task #436's decision belongs to the
+        // top-level scan: this span is a mid-run construct, so its report is not
+        // recorded (the third field is dropped on purpose).
+        let (_end, closed, _) = scan_block(
             line,
             after_kw,
             quotes,

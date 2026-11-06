@@ -15,6 +15,23 @@ use crate::keywords::{Glue, Pairing, Place, after, closer_payload, pair_payload,
 /// a closer pops only the block it belongs to, and a closer of another kind
 /// scores `0` — the sum is the run's depth delta, its kind pairing is what the
 /// scan of a block span needs.
+///
+/// The pairing's [`Pairing::observe`] carries task #436's record: the word's own
+/// start offset, once per scan (a `time [-p]` prefix written in front of the
+/// closer belongs to the same word run, and [`crate::error::parse`] resolves the
+/// keyword behind it for the caret and the message),
+/// for a closer word in **command position** with **nothing open** — the scan's
+/// top level, where bash's grammar has no command that is a lone closing keyword.
+/// The gate is the empty stack, not the mismatch arm of [`Pairing`]: a closer
+/// that mismatches the innermost open block only says the *scanner* did not pair
+/// it, and its score-0 answer is load-bearing exactly there — a glued pipeline
+/// stage, a cond-pair word and a `case` word slot all hide an opener bash sees
+/// (`tests/cond_blocks.rs::block_stage_in_a_loop_body_ends_the_loop`,
+/// `short_circuit_gate_skips_the_gated_list_and_resumes_behind_it`,
+/// `a_closer_shaped_case_pattern_list_word_is_a_word`, all bash rc 0).
+/// The score is unchanged by the decision, and only the top-level scan passes a
+/// sink that is not `None` — the nested scorers walk text that never runs, and a
+/// scan records the word once (`comment/tests.rs`, `keywords/pairing/tests.rs`).
 pub(crate) fn word_step(
     frag: &[u8],
     line: &[u8],
@@ -26,6 +43,10 @@ pub(crate) fn word_step(
     // read **before** this word is applied: a closer pairs with the block it
     // closes (task #309).
     let top = pairing.top();
+    // The **decision** of task #436 is read at the same moment, for a word the
+    // place gate puts in command position — a `case` word list keeps its
+    // closer-shaped words, and an argument word never asks.
+    pairing.observe(frag, line, word_end, *place);
     let delta = if scores(frag, line, word_end, *place) {
         pairing.apply(frag, line, word_end)
     } else {

@@ -402,13 +402,25 @@ fn quoted_block_openers_are_command_words() {
     // quoted opener runs as a command and the *rest of the line* runs too; bash
     // parses the whole line first and dies on the syntax error (rc 2, runs
     // nothing). Pinning the fallout keeps the multi-statement blast radius visible.
-    for script in [
-        "'while' :; do echo a; break; done",
-        "'if' true; then echo b; fi",
-    ] {
+    for script in ["'while' :", "'if' true"] {
         let (_out, err, code) = run(script);
         assert_eq!(code, 1, "{script}: stderr={err:?}");
         assert!(err.contains("not found"), "{script}: stderr={err:?}");
+    }
+    // Task #436 moves the multi-statement shape: the quoted opener still runs as
+    // a command word, but the *unquoted* closer behind it closes no block, and the
+    // preflight refuses the whole line before any segment runs — bash's own shape
+    // (rc 2, runs nothing), fdshell at its house rc 1 with its own message.
+    for (script, closer) in [
+        ("'while' :; do echo a; break; done", "done"),
+        ("'if' true; then echo b; fi", "fi"),
+    ] {
+        let (_out, err, code) = run(script);
+        assert_eq!(code, 1, "{script}: stderr={err:?}");
+        assert!(
+            err.contains(&format!("stray '{closer}' — it closes no open block")),
+            "bash rc 2; nothing runs, {script}: stderr={err:?}"
+        );
     }
 }
 
@@ -1343,13 +1355,19 @@ fn a_quoted_semicolon_does_not_split_a_block() {
 /// `do`/`done` run as commands here (rc 1), exactly as on `master`.
 #[test]
 fn a_quoted_keyword_glued_to_a_metacharacter_stays_a_command_word() {
+    // Task #436 moves both rows: the glued word is still no keyword, but the
+    // `done` behind it closes no block, and the preflight refuses the line before
+    // the lookup runs — bash rc 2, fdshell rc 1 naming the closer. The command-word
+    // reading these rows carried is pinned by the kill rows named above.
     for script in [
         "'for'((i=0;i<2;i++));do :;done",
         "\"for\"((i=0;i<2;i++));do :;done",
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
-        assert!(err.contains("\"do\" not found"), "{script}: {err:?}");
-        assert!(err.contains("\"done\" not found"), "{script}: {err:?}");
+        assert!(
+            err.contains("stray 'done' — it closes no open block"),
+            "bash rc 2; nothing runs, {script}: {err:?}"
+        );
     }
 }

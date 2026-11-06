@@ -502,11 +502,21 @@ fn keyword_recognition_runs_on_the_raw_token() {
         assert_eq!(code, 1, "{script}: stderr={err:?}");
         assert!(err.contains(name), "{script}: stderr={err:?}");
     }
-    let (_out, err, code) = run("i\\if true; then builtin echo yes; fi");
+    // Task #436 splits this row in two: the folded name on its own still runs as
+    // a command (bash rc 1, `bash: iif: command not found`), and with the `fi`
+    // behind it the line is refused before anything runs — bash rc 2 with a syntax
+    // error, fdshell rc 1 naming the closer that closes no block.
+    let (_out, err, code) = run("i\\if true");
     assert_eq!(code, 1, "stderr={err:?}");
     assert!(
         err.contains("iif"),
         "the folded name runs as a command, stderr={err:?}"
+    );
+    let (_out, err, code) = run("i\\if true; then builtin echo yes; fi");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(
+        err.contains("stray 'fi' — it closes no open block"),
+        "bash rc 2; the closer closes nothing, stderr={err:?}"
     );
 }
 
@@ -534,9 +544,17 @@ fn command_keyword_keeps_the_name_word_out_of_the_env_prefix() {
 /// is what `master` gave.
 #[test]
 fn an_escaped_keyword_glued_to_a_metacharacter_stays_a_command_word() {
-    let (out, err, code) = run("\\for((i=0;i<2;i++));do :;done");
+    // The escape pair alone: the word stays the command the tokenizer saw (bash
+    // rc 2 on the syntax error, fdshell's rc-1 lookup message).
+    let (out, err, code) = run("\\for((i=0;i<2;i++))");
     assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
     assert!(err.contains("\"for((i=0\" not found"), "{err:?}");
-    assert!(err.contains("\"do\" not found"), "{err:?}");
-    assert!(err.contains("\"done\" not found"), "{err:?}");
+    // With `do`/`done` behind it, task #436's preflight refuses the whole line
+    // before the lookup — bash rc 2, fdshell rc 1 on the stray closer.
+    let (out, err, code) = run("\\for((i=0;i<2;i++));do :;done");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(
+        err.contains("stray 'done' — it closes no open block"),
+        "bash rc 2; nothing runs, {err:?}"
+    );
 }

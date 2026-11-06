@@ -2248,7 +2248,14 @@ fn closer_shaped_list_words_keep_the_measured_messages_and_the_seed_is_for_only(
             "for i in done; do echo x",
             "'for' is missing its closing 'done'",
         ),
-        ("while done; do echo W; break; done", "expected 'do'"),
+        // Task #436: the seed keeps the list word's score, and the *last* `done`
+        // — the block's own closer in fdshell's model — sits in command position
+        // with nothing open, so the preflight names it. bash rc 2 (it stops at the
+        // first `done`, which is data for bash); the seed's own pin is above.
+        (
+            "while done; do echo W; break; done",
+            "stray 'done' — it closes no open block",
+        ),
     ] {
         let (_out, err, rc) = run_bounded(script);
         assert_eq!(rc, 1, "{script}: stderr={err}");

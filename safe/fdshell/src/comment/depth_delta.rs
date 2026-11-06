@@ -45,6 +45,10 @@ pub(crate) use word_step::word_step;
 /// *which* block. A caller that only reads the sum (a depth counter clamped at
 /// `0`) keeps its arithmetic; a block-span scan reads the pairing, because the
 /// sum of a mismatched closer is `0` and the block stays open.
+///
+/// The pairing carries task #436's record (see [`Pairing::observe`] and
+/// [`word_step`]) — the walk that
+/// scans the **top level** reads it, every other walk leaves it alone.
 pub(crate) fn depth_delta(
     line: &[u8],
     raw: &[u8],

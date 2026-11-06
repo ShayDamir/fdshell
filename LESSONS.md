@@ -4335,20 +4335,36 @@ closer's *kind*. All measured against bash.
    class where one `block_depth` let any closer close any block (worst row
    `while :; do echo a | case x in a) echo y;; esac; break; done; echo after`
    ran forever, rc 124, where bash exits 0 printing `after`). Such rows run at
-   rc 0 printing their body and report the stray closer as an unresolvable
-   command (`failed to resolve command path: "fi"`, rc 127 in the body) where
-   bash refuses the line at rc 2; with no closer of the block's own kind left the
+   rc 0 printing their body — and the word stays an argument only while it *is*
+   one (`echo fi`, a `case`/`for` word-list word, `failed to resolve command
+   path: "fi"`, rc 127 in the body) where bash refuses the line at rc 2. Task
+   **#436** closes the other half: a closing keyword word in **command position**
+   with an **empty** pairing — the scan's own top level — closes no block, bash's
+   grammar has no command that is a lone `fi`/`done`/`esac`, it refuses the line
+   at rc 2 and runs nothing, and fdshell answers at its house rc 1 with the closer
+   named (`stray '"'"'fi'"'"' — it closes no open block`, plus a `Suggestion`) and nothing
+   run. The decision is a read of **this** stack and of the **one** keyword table,
+   never a second rule, and it moves no score: `Pairing::decision` answers
+   `Paired`/`Stray` and `Pairing::apply` keeps the arithmetic exactly as before, so
+   the mismatch arm (a block of another kind open) stays word data — it only says
+   the scanner did not pair the word, and those rows are bash rc 0. The **brace**
+   closer is never asked: the group scanner owns it and bash has a rule for a lone
+   `}` that fdshell does not. With no closer of the block's own kind left the
    line is the "unclosed mid-run construct" report. Two shapes stay divergent
    **by rule**, both pinned: a body whose **own** closer ends it above the
    `break` runs forever — **bash parity** where the line has no second closer
-   (`while :; do echo while; done; echo after` hangs in bash too), acceptance
-   divergence where it keeps one (bash rc 2, fdshell hangs). Pins
-   `tests/cond_blocks.rs::mismatched_closers_in_a_loop_body_are_word_data`,
+   (`while :; do echo while; done; echo after` hangs in bash too) — and the rows
+   that keep a second closer of the block's kind now report (they ran forever
+   before, which was the acceptance divergence; bash rc 2 both ways). Pins
+   `tests/cond_blocks.rs::a_stray_closer_in_command_position_reports`,
+   `mismatched_closers_in_a_loop_body_are_word_data`,
    `a_mismatched_closer_that_leaves_no_closer_is_a_parse_error`,
    `a_closer_shaped_case_pattern_list_word_is_a_word`,
    `a_loop_body_that_never_returns_is_bash_parity` (the hang **is** the parity:
    terminating these rows is a regression),
-   `a_loop_body_that_never_returns_where_bash_refuses_the_line`; the README's
+   `a_loop_body_that_never_returns_reports_where_bash_refuses_the_line`,
+   `keywords/pairing/tests.rs::the_decision_reads_the_same_stack`,
+   `comment/tests.rs::the_scan_records_a_top_level_closer`; the README's
    "Conditionals and loops" pairing paragraph carries the disclosure. Disclose
    the family by rule and pin a sample — the sample is never the extent (a
    sweep's count is a lower bound). `Place::Pattern` pays the same type-blindness
@@ -4415,6 +4431,23 @@ bounded child (`run_capped` where 124 is the expectation, `run_bounded` where it
 is a failure): a pinned hang must be able to fail *with the script*, never stall
 the suite, and a hang pin whose expectation flips is a disclosure, not a
 test-failure to be patched.
+
+Task #436 re-measured the same sweep and moved one arm of it. Where the closer
+word stands in **command position** with the pairing **empty** — the scan's own
+top level — bash refuses the line at rc 2 and runs nothing, and fdshell reports it
+at its house rc 1 (`stray 'fi' — it closes no open block`, with a `Suggestion`);
+arm (i) survives only where the word really *is* an argument, arm (iii)'s
+"acceptance divergence on others" is now that report, and the bash-**parity**
+hangs are untouched. The decision is a read of the same stack and the one keyword
+table (`Pairing::decision`, recorded by `Pairing::observe`), it moves no score, and
+it excludes the brace — the group scanner owns the brace, and bash has a rule for a
+lone `}` that fdshell does not. The pinned samples:
+`keywords/pairing/tests.rs::the_decision_reads_the_same_stack`,
+`comment/tests.rs::the_scan_records_a_top_level_closer`,
+`tests/cond_blocks.rs::a_stray_closer_in_command_position_reports`,
+`tests/block_closers.rs::a_stray_closer_reports_at_preflight` (the preflight order:
+the async `&` arm, the stray-`;;` arm, the stray closer). A green run on these rows
+still does not mean the family is that many rows.
 
 ## A hand-written score derived from a recognition table moves its `Some(0)` to `None` — audit `is_some` consumers first (task #309)
 
@@ -6610,7 +6643,10 @@ the `wait` round, the loop-status rule),
 `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`,
 `tests/loops.rs::a_word_after_the_closing_keyword_is_a_parse_error`,
 `tests/block_closers.rs::a_closer_shaped_word_directly_behind_a_closer_reports` (a
-word that looks like a keyword — a stray closer, a stray `}` — stays word data),
+word that looks like a keyword: the `}` row keeps this walk's message, the stray
+closer rows answer with task #436's report — the preflight rides ahead of this walk
+— and `tests/block_closers.rs::a_stray_closer_reports_at_preflight` pins the order
+against the async-`&` and stray-`;;` arms; bash rc 2 on every row),
 `parse/block_tail/bg/tests.rs` and `parse/group_block/tail/tests.rs::the_family_at_the_closer_names_its_extra_to`
 (the `&>` family's arms — the rule below),
 `tests/block_redirect.rs::the_combined_redirect_family_on_a_closer` and

@@ -8,9 +8,21 @@ mod types;
 
 pub(crate) use types::Segment;
 
+use crate::keywords::{Decision, Pairing, keyword_len};
 use crate::scan::{Boundary, boundary, skip_comment};
 use alloc::vec::Vec;
 use book::{Book, Run};
+
+/// The [`Decision`] of task #436 for the run's first word — the top level's
+/// command position, so [`Pairing`] is empty and any closing keyword word closes
+/// no open block of its kind. The word is the run's first `keyword_len` bytes, so
+/// the **one** recognition table answers here exactly as it does for the scorers
+/// (the quote gate, the `time [-p]` strip, the one word-break rule); `off` is the
+/// word's own offset in `line`, which is where the report draws the caret. An
+/// ordinary word (and an empty run) is no closer, so the answer is `None`.
+fn is_stray_closer(line: &[u8], word: &[u8], off: usize) -> bool {
+    Pairing::new().decision(word, line, off + keyword_len(word)) == Some(Decision::Stray)
+}
 
 /// Scan a script line and return segments with their positions.
 ///
@@ -113,6 +125,15 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             // nothing). The run path is the only place it can arise.
             if kind == Boundary::SemiSemi {
                 book.segments.push(Segment::UnexpectedSemiSemi);
+            }
+            // Task #436's decision, on the run's **first** word — the top level's
+            // command position, with this scan's stack empty: a closing keyword
+            // word here closes no open block of its kind. A run that was claimed
+            // as a block reports through its own span walk above.
+            if !in_block && is_stray_closer(line, part, book.start + lead) {
+                book.segments.push(Segment::StrayCloser {
+                    off: book.start + lead,
+                });
             }
             let sep = book.i;
             if line.get(book.i) == Some(&b'\n') || book.i == line.len() {

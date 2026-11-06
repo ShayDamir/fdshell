@@ -2,7 +2,7 @@ use crate::segment::Segment;
 use error_stack::{Report, ResultExt};
 
 use crate::error::cmd::CmdError;
-use crate::error::parse::ParseError;
+use crate::error::parse::{ParseError, report_stray_closer};
 use crate::loop_control::LoopControl;
 use crate::state::ShellState;
 use sys::ScriptText;
@@ -40,6 +40,20 @@ pub(crate) fn run_script(
     {
         return Err(Report::new(ParseError::UnexpectedSemiSemi).change_context(CmdError::Parse));
     }
+    // The same preflight for a **stray closer** word (task #436): bash's grammar
+    // refuses a closing keyword word that closes no open block of its kind, and
+    // because bash parses the whole input before running anything, nothing on the
+    // line runs. The scan marked the word's offset, so the report draws the caret
+    // there (the `report_unbalanced_quote` mechanism).
+    //
+    // It rides **after** the async and `;;` arms — the order is a decision, pinned
+    // by the two-shape rows of `tests/block_closers.rs::a_stray_closer_reports_at_preflight`.
+    if let Some(&Segment::StrayCloser { off }) = segments
+        .iter()
+        .find(|seg| matches!(seg, Segment::StrayCloser { .. }))
+    {
+        return Err(report_stray_closer(line, off).change_context(CmdError::Parse));
+    }
     for unit in merge::units(&segments) {
         match unit.segment {
             Segment::Statement { .. } => {
@@ -63,9 +77,9 @@ pub(crate) fn run_script(
                     return Ok(Some(control));
                 }
             }
-            // Unreachable: the pre-pass above bails on every invalid split and
-            // every stray `;;` (task #423).
-            Segment::AsyncInvalid | Segment::UnexpectedSemiSemi => {}
+            // Unreachable: the pre-pass above bails on every invalid split, every
+            // stray `;;` and every stray closer (tasks #423, #326, #436).
+            Segment::AsyncInvalid | Segment::UnexpectedSemiSemi | Segment::StrayCloser { .. } => {}
         }
     }
     Ok(None)

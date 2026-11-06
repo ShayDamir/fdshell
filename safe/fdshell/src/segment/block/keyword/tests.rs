@@ -19,7 +19,7 @@ fn scan(line: &[u8]) -> (usize, usize, bool, usize) {
 fn scan_at(line: &[u8], start: usize) -> (usize, usize, bool, usize, Vec<Vec<u8>>) {
     let raw = line.get(start..).unwrap_or(b"");
     let part = raw.trim_ascii();
-    let (segment, resume, _floor) =
+    let (segment, resume, _floor, _) =
         keyword_block(line, raw, part, start, 0, &ScanState::new(), line.len());
     match segment {
         Segment::Block {
@@ -32,6 +32,7 @@ fn scan_at(line: &[u8], start: usize) -> (usize, usize, bool, usize, Vec<Vec<u8>
         Segment::Statement { cmd, .. } => panic!("expected a Block, got {cmd:?}"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
         Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
+        Segment::StrayCloser { .. } => panic!("unexpected async marker"),
     }
 }
 
@@ -183,7 +184,7 @@ fn skip_is_bounded_to_the_blocks_physical_line() {
     let line = b"cat <<X\nif cat <<A; then echo y; fi; cat <<B\nbodyX\nX\nbodyA\nA\nbodyB\nB";
     let raw = line.get(8..).unwrap_or(b"");
     let part = raw.trim_ascii();
-    let (segment, _resume, _floor) =
+    let (segment, _resume, _floor, _) =
         keyword_block(line, raw, part, 8, 8, &ScanState::new(), line.len());
     match segment {
         Segment::Block {
@@ -203,6 +204,7 @@ fn skip_is_bounded_to_the_blocks_physical_line() {
         Segment::Statement { cmd, .. } => panic!("expected a Block, got {cmd:?}"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
         Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
+        Segment::StrayCloser { .. } => panic!("unexpected async marker"),
     }
 }
 

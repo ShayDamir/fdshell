@@ -124,3 +124,73 @@ fn depth_is_the_level_the_walk_reads() {
     assert_eq!(p.apply(b"esac", b"case x in esac", 13), -1);
     assert_eq!(p.depth(), 1);
 }
+
+/// Task #436's **decision**: the same stack, read for the report — one rule, no
+/// second table, no score moved. Both sides of every arm are pinned (§2.8): a
+/// matched closer is `Paired` (the seeded case and the pushed case), a closer of
+/// another kind is `Stray`, and so is a closer seen with **nothing open** — the
+/// arm the scan reports, at the words its place gate puts in command position.
+/// A word that is no keyword, an opener, and the **brace** closer answer `None`:
+/// the brace is `segment/group.rs`'s and `parse/function_block.rs`'s own, so the
+/// scan never asks it (measured: bash runs `{ echo a; }` and a function body, and
+/// refuses a lone `}` in command position as an ordinary command word — the two
+/// owners' rows in `tests/group.rs`).
+#[test]
+fn the_decision_reads_the_same_stack() {
+    // A matched closer — the seed's kind, and a kind an opener pushed.
+    let mut p = Pairing::new();
+    p.open(Closer::Fi);
+    assert_eq!(p.decision(b"fi", b"echo a; fi", 10), Some(Decision::Paired));
+    assert_eq!(p.apply(b"fi", b"echo a; fi", 10), -1);
+    p.open(Closer::Done);
+    assert_eq!(p.apply(b"if", b"if :; then :; fi", 2), 1);
+    assert_eq!(
+        p.decision(b"fi", b"if :; then :; fi", 18),
+        Some(Decision::Paired)
+    );
+    // The kind-mismatch arm: word data for the score, `Stray` for the decision.
+    let mut p = Pairing::new();
+    p.open(Closer::Done);
+    assert_eq!(
+        p.decision(b"fi", b"while :; do echo a; fi", 22),
+        Some(Decision::Stray)
+    );
+    assert_eq!(
+        p.decision(b"esac", b"while :; do echo a; esac", 24),
+        Some(Decision::Stray)
+    );
+    assert_eq!(
+        p.apply(b"fi", b"while :; do echo a; fi", 22),
+        0,
+        "the score stays a score"
+    );
+    // Nothing open: the arm the scan of task #436 reports.
+    let mut p = Pairing::new();
+    assert_eq!(p.decision(b"fi", b"echo a; fi", 9), Some(Decision::Stray));
+    assert_eq!(
+        p.decision(b"done", b"echo a; done", 11),
+        Some(Decision::Stray)
+    );
+    assert_eq!(
+        p.decision(b"esac", b"echo a; esac", 12),
+        Some(Decision::Stray)
+    );
+    assert_eq!(
+        p.apply(b"fi", b"echo a; fi", 9),
+        -1,
+        "the clamp every top-level scan reads"
+    );
+    // Not asked: a word that is no keyword, and an opener.
+    assert_eq!(p.decision(b"echo", b"echo if", 4), None);
+    assert_eq!(p.decision(b"if", b"if :; then :; fi", 2), None);
+    // The brace closer is the group's and the function body's own: never asked,
+    // with a group open as with none.
+    assert_eq!(p.decision(b"}", b"echo a; }", 9), None);
+    p.open(Closer::Brace);
+    assert_eq!(p.decision(b"}", b"{ echo a; }", 10), None);
+    assert_eq!(
+        p.apply(b"}", b"{ echo a; }", 10),
+        -1,
+        "the score still pairs it"
+    );
+}

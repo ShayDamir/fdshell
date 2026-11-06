@@ -21,7 +21,7 @@ fn scan(line: &[u8], start: usize) -> R {
 fn scan_open(line: &[u8], start: usize, open: Closer) -> R {
     let mut quotes = Quotes::new();
     let mut s = start;
-    let (end, closed) = scan_block(line, start, &mut quotes, &mut s, open, Place::Command);
+    let (end, closed, _) = scan_block(line, start, &mut quotes, &mut s, open, Place::Command);
     R {
         end,
         closed,
@@ -360,7 +360,7 @@ fn run_starting_mid_quote_ignores_closer() {
         single: false,
     };
     let mut s = 1;
-    let (_end, closed) = scan_block(b"\"fi", 1, &mut quotes, &mut s, Closer::Fi, Place::Command);
+    let (_end, closed, _) = scan_block(b"\"fi", 1, &mut quotes, &mut s, Closer::Fi, Place::Command);
     assert!(!closed, "fi inside an open quote must not close the block");
     assert!(quotes.double, "the quote must stay open");
 }
@@ -512,7 +512,7 @@ fn run_starting_mid_span_ignores_closer() {
         single: true,
     };
     let mut s = 1;
-    let (_end, closed) = scan_block(b"'fi", 1, &mut quotes, &mut s, Closer::Fi, Place::Command);
+    let (_end, closed, _) = scan_block(b"'fi", 1, &mut quotes, &mut s, Closer::Fi, Place::Command);
     assert!(!closed, "fi inside an open span must not close the block");
     assert!(quotes.single, "the span must stay open");
 }
@@ -682,7 +682,7 @@ fn pair_payload_rides_the_run_sum() {
 fn scan_seed(line: &[u8], start: usize, seed: Place) -> R {
     let mut quotes = Quotes::new();
     let mut s = start;
-    let (end, closed) = scan_block(line, start, &mut quotes, &mut s, Closer::Done, seed);
+    let (end, closed, _) = scan_block(line, start, &mut quotes, &mut s, Closer::Done, seed);
     R {
         end,
         closed,
@@ -1184,4 +1184,103 @@ fn the_word_start_row_owns_a_word_it_recognizes() {
         "a `)` that ends the word carries no payload"
     );
     assert_eq!(delta(b"esac"), -1, "the plain closer, unchanged");
+}
+
+/// Task #436's record, read at the **top level** of a scan — an empty pairing —
+/// where a closer word in command position that pairs with nothing is recorded
+/// once, at its own offset, and the score is untouched. Both sides of every gate
+/// are pinned: the place gate answers first (an argument word is never asked, and
+/// `keywords/position` answers before the decision is asked); a scan seeded with
+/// the block it is inside records nothing, because a mismatch there only says
+/// *this scanner* did not pair the word (the glued-`|`, cond-pair and `case`
+/// word-slot rows of `tests/cond_blocks.rs`, all bash 5.3.9 rc 0); the brace
+/// closer is `segment/group.rs`'s and `parse/function_block.rs`'s own and is
+/// never asked; and a scorer that walks text it will never run simply never reads
+/// the record, so the decision costs it nothing.
+#[test]
+fn the_scan_records_a_top_level_closer() {
+    // A closer word at a run start, nothing open: recorded at its own offset.
+    let mut p = Pairing::new();
+    assert_eq!(
+        depth_delta::depth_delta(
+            b"done",
+            b"done",
+            0,
+            Quotes::new(),
+            false,
+            Place::Command,
+            &mut p,
+        ),
+        -1,
+        "a closer at a run start is in command position — the score is unchanged"
+    );
+    assert_eq!(p.stray(), Some(0), "the word is recorded at its own offset");
+
+    // The place gate answers first: an argument word is never asked.
+    let mut p = Pairing::new();
+    assert_eq!(
+        depth_delta::depth_delta(
+            b"echo fi",
+            b"echo fi",
+            0,
+            Quotes::new(),
+            false,
+            Place::Command,
+            &mut p,
+        ),
+        0,
+        "an argument word scores nothing"
+    );
+    assert_eq!(p.stray(), None, "an argument is not a stray");
+
+    // Seeded with the block the caller is inside: the mismatch arm scores 0 and
+    // records nothing — bash runs those lines.
+    let mut seeded = Pairing::new();
+    seeded.open(Closer::Done);
+    assert_eq!(
+        depth_delta::depth_delta(
+            b"fi",
+            b"fi",
+            0,
+            Quotes::new(),
+            false,
+            Place::Command,
+            &mut seeded,
+        ),
+        0,
+        "a mismatched closer is word data (task #309)"
+    );
+    assert_eq!(seeded.stray(), None, "a seeded scan records nothing");
+
+    // The brace closer keeps its score and is never asked.
+    let mut p = Pairing::new();
+    assert_eq!(
+        depth_delta::depth_delta(b"}", b"}", 0, Quotes::new(), false, Place::Command, &mut p,),
+        -1,
+        "the brace's own score at the top level"
+    );
+    assert_eq!(p.stray(), None, "the brace belongs to the group scanner");
+
+    // A `time [-p]` prefix run in front of the closer is one word for the walk,
+    // and the keyword behind it is what the recognition table reads — so the
+    // closer word records its own start, and the report names `fi` and not `time`.
+    let mut p = Pairing::new();
+    assert_eq!(
+        depth_delta::depth_delta(
+            b"time fi",
+            b"time fi",
+            0,
+            Quotes::new(),
+            false,
+            Place::Command,
+            &mut p,
+        ),
+        -1,
+        "the prefix is transparent — the score is the closer's own"
+    );
+    assert_eq!(
+        p.stray(),
+        Some(5),
+        "the closer word records its own start — a `time` prefix run alone resolves to no keyword"
+    );
 }

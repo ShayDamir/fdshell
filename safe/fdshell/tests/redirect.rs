@@ -2912,7 +2912,13 @@ fn a_redirect_only_statement_with_a_word_runs_that_word() {
         (">f /nope/x", "\"/nope/x\" not found", &["f"]),
         (">f g h", "\"g\" not found", &["f"]),
         (">f %o", "\"%o\" not found", &["f"]),
-        (">f for i in a; do :; done", "\"for\" not found", &["f"]),
+        // Task #436: the `done` closes no block, so the preflight refuses the
+        // line — bash rc 2 — and no redirect runs, so no file is created.
+        (
+            ">f for i in a; do :; done",
+            "stray 'done' — it closes no open block",
+            &[],
+        ),
     ];
     for (script, needle, want) in rows {
         clean(dir);

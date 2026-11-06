@@ -2156,10 +2156,13 @@ fn case_clause_pattern_of_a_body_heredoc_is_protected_from_brace_expansion() {
 #[test]
 fn case_body_heredoc_of_a_clause_terminated_by_done_runs_the_body() {
     let (out, err, code) = run("case x in x) cat <<T; done;; esac\nbodyT\nT");
-    assert_eq!((out.as_str(), code), ("bodyT\n", 1), "stderr={err:?}");
+    // Task #436: the `done` behind the `;` closes no block, so the preflight
+    // refuses the whole input — bash rc 2, nothing runs (the body heredoc that
+    // printed here before is the run-this-anyway half of the old divergence).
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
     assert!(
-        err.contains("failed to resolve command path"),
-        "stderr={err:?}"
+        err.contains("stray 'done' — it closes no open block"),
+        "bash rc 2; nothing runs, stderr={err:?}"
     );
 }
 

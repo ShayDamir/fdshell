@@ -47,6 +47,16 @@ pub(crate) enum Segment<'a> {
     /// [`Segment::AsyncInvalid`] check (the order is pinned by `tests/async.rs`,
     /// whose rows keep their own message); it is never executed itself.
     UnexpectedSemiSemi,
+    /// A closing keyword word in command position that closes **no** open block
+    /// of its kind (task #436, the decision of [`crate::keywords::Pairing`]):
+    /// bash's grammar refuses it, and because bash parses the whole input before
+    /// running anything, `run_script` bails on it at preflight — after the
+    /// [`Segment::AsyncInvalid`] and [`Segment::UnexpectedSemiSemi`] arms (the
+    /// order is pinned by `tests/block_closers.rs`); it is never executed itself.
+    /// `off` is the word's offset in the line, so the report can draw the caret.
+    /// The **top-level** scan records it once per scanned text; the nested
+    /// scorers read the same pairing for their score and report nothing.
+    StrayCloser { off: usize },
     /// Block (`if … fi`, `while … done`, `case … esac`, `name() { … }`,
     /// `{ …; }`) spanning from `block_start` to `end_pos`.
     Block {

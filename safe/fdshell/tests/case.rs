@@ -1837,9 +1837,11 @@ fn a_semi_inside_a_nested_arm_block_stays_as_measured() {
             "case a in a) case b in b) echo y esac;; esac",
             "'case' is missing its closing 'esac'",
         ),
+        // Task #436: the third `esac` closes no `case` — bash refuses the line
+        // (rc 2) and the preflight names the stray closer before anything runs.
         (
             "case a in a) case b in esac;; esac;; esac",
-            "\"esac\" not found",
+            "stray 'esac' — it closes no open block",
         ),
         ("case a in a) (echo y;; ) ;; esac", "case: empty pattern"),
         (

@@ -5,7 +5,13 @@ use crate::scan::{Boundary, Quotes, boundary, heredoc, skip_comment};
 
 /// Scan forward from `i` looking for the matching closing keyword (the scan's
 /// pairing empties). Updates `quotes` and `start` as side effects.
-/// Returns `(end_position, block_was_closed)`.
+/// Returns `(end_position, block_was_closed, stray_closer)`.
+///
+/// `stray_closer` is task #436's record (see [`Pairing::observe`]): the offset of
+/// the first closer word in command position that pairs with nothing, `None`
+/// when the walk sees none. It
+/// is the **scan's** report — a caller that walks the top level passes it on to
+/// the segment bookkeeping, a caller that scans text it will not run ignores it.
 ///
 /// `open` is the closer the scanned text's **own** block requires (task #309):
 /// the scan starts inside the block, so its opener word is never read, and the
@@ -26,7 +32,7 @@ pub(crate) fn scan_block(
     start: &mut usize,
     open: Closer,
     mut seed: Place,
-) -> (usize, bool) {
+) -> (usize, bool, Option<usize>) {
     let mut state = quotes.scan_state();
     let mut run_quotes = state.quotes();
     let mut run_backtick = state.in_backtick;
@@ -76,7 +82,7 @@ pub(crate) fn scan_block(
         run_backtick = state.in_backtick;
     }
     *quotes = state.quotes();
-    (i, !pairing.is_open())
+    (i, !pairing.is_open(), pairing.stray())
 }
 
 #[cfg(test)]

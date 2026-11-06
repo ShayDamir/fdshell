@@ -1042,6 +1042,114 @@ fn keyword_shaped_arguments_that_only_look_like_an_in_stay_data() {
     }
 }
 
+/// Task #436's rule: a **closing** keyword word that stands in command position
+/// with no block of its kind open is a parse error — bash's grammar has no command
+/// that is a lone `fi`/`done`/`esac`, it parses the whole input before running
+/// anything, and it refuses every row here at rc 2. fdshell answers at its house
+/// rc 1 with the closer named and a suggestion, and runs nothing (the
+/// `script.rs` preflight). The rows are the same family as
+/// [`mismatched_closers_in_a_loop_body_are_word_data`]'s argument-position half,
+/// read on the other side of the command-position rule (task #236): behind a `;`,
+/// a run start, a cond operator, a `then`/`do`, a group opener or a `case`
+/// clause's `)`, the word *is* in command position, so it reports.
+///
+/// A `{ }` group closer is deliberately **not** in this list (the group scanner
+/// owns the brace, and bash has a rule for a lone `}` fdshell does not:
+/// `tests/group.rs` pins the divergence), and a `time [-p]` prefix written in
+/// front of the closer names the closer, not the prefix (the last `time` row).
+/// Bounded children: several rows were the hang of
+/// [`a_loop_body_that_never_returns_reports_where_bash_refuses_the_line`]'s family before
+/// the pairing, and a regression back into it must fail with the script.
+#[test]
+fn a_stray_closer_in_command_position_reports() {
+    for (script, closer) in [
+        (
+            "while :; do echo if; fi; echo x; break; done; echo after",
+            "fi",
+        ),
+        (
+            "while :; do echo case; esac; break; done; echo after",
+            "esac",
+        ),
+        ("while :; do echo until; fi; break; done; echo after", "fi"),
+        ("while :; do echo while; fi; break; done; echo after", "fi"),
+        (
+            "while :; do echo if; echo x; fi; break; done; echo after",
+            "fi",
+        ),
+        (
+            "while :; do echo a if; fi; echo x; break; done; echo after",
+            "fi",
+        ),
+        ("while :; do echo if; esac; break; done; echo after", "esac"),
+        (
+            "while :; do echo if; fi; echo x; echo y; break; done; echo after",
+            "fi",
+        ),
+        ("while :; do echo done; fi; break; done; echo after", "fi"),
+        ("while :; do echo fi; fi; break; done; echo after", "fi"),
+        (
+            "while :; do echo esac; esac; break; done; echo after",
+            "esac",
+        ),
+        (
+            "while :; do echo if && echo z; fi; break; done; echo after",
+            "fi",
+        ),
+        (
+            "while :; do echo if || echo z; fi; break; done; echo after",
+            "fi",
+        ),
+        (
+            "while :; do echo if; fi && echo z; break; done; echo after",
+            "fi",
+        ),
+        ("if :; then echo if; fi; done; echo after", "done"),
+        ("while :; do echo \"if\"; fi; break; done; echo after", "fi"),
+        (
+            "while :; do echo if; time fi; break; done; echo after",
+            "fi",
+        ),
+        ("f() { echo if; fi; }; f; echo after", "fi"),
+        (
+            "while :; do while :; do echo if; fi; break; done; break; done; echo after",
+            "fi",
+        ),
+        (
+            "while :; do for x in a; do echo if; fi; break; done; break; done; echo after",
+            "fi",
+        ),
+        (
+            "while :; do echo a | echo if; fi; break; done; echo after",
+            "fi",
+        ),
+        (
+            "while :; do echo if; fi | echo x; break; done; echo after",
+            "fi",
+        ),
+        ("for x in a; do echo if; fi; break; done; echo after", "fi"),
+        (
+            "for ((i=0;i<3;i++)); do echo if; fi; done; echo after",
+            "fi",
+        ),
+        (
+            "while :; do echo a; fi done; echo x; break; done; echo after",
+            "fi",
+        ),
+    ] {
+        let (out, err, code) = run_bounded(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("", 1),
+            "{script}: bash rc 2; stderr={err}"
+        );
+        assert!(
+            err.contains(&format!("stray '{closer}' — it closes no open block")),
+            "{script}: {err}"
+        );
+    }
+}
+
 /// Task #309 (README "body that never returns"): the pairing of an open block
 /// with its closer is **typed** (`fi`↔`if`, `done`↔`while`/`until`/`for`/`wait`,
 /// `esac`↔`case`, `}`↔`{`), so a closer of a foreign kind written in a body is
@@ -1056,11 +1164,20 @@ fn keyword_shaped_arguments_that_only_look_like_an_in_stay_data() {
 /// (word data → this test; no closer of the block's own kind →
 /// [`a_mismatched_closer_that_leaves_no_closer_is_a_parse_error`]; a matching
 /// closer that ends the loop above its `break` →
-/// [`a_loop_body_that_never_returns_where_bash_refuses_the_line`]).
+/// [`a_loop_body_that_never_returns_reports_where_bash_refuses_the_line`]).
+///
+/// Task #436 took the rows whose closer word sits in **command position** out of
+/// this list — they report, in [`a_stray_closer_in_command_position_reports`] —
+/// and left the rows where the word stays an argument (the `case` arm bodies,
+/// the `echo fi`/`echo }` rows, the bash-rc-0 parity row). A `case` arm keeps its
+/// `esac` frame open over a foreign closer, so no row here has an empty stack:
+/// the empty stack is what reports, and it is the scanner's own answer — the
+/// rows that only look like it (`a_closer_shaped_case_pattern_list_word_is_a_word`,
+/// the glued-`|`/`&&` rows) are bash rc 0 and stay word data.
 ///
 /// Bounded children throughout: a regression back into the hang must fail with
 /// the script, not stall the suite. bash 5.3.9 refuses most of these lines
-/// (rc 2) — `if`/`fi`/`done`/`esac` are reserved words in its grammar, so the
+/// (rc 2) — `fi`/`done`/`esac` are reserved words in its grammar, so the
 /// line never runs. fdshell runs the closer as a command
 /// (`failed to resolve command path: "fi"`, rc 127 inside the body) and the
 /// script often exits 0: the accepted rc-0 acceptance divergence of the
@@ -1068,96 +1185,6 @@ fn keyword_shaped_arguments_that_only_look_like_an_in_stay_data() {
 #[test]
 fn mismatched_closers_in_a_loop_body_are_word_data() {
     for (script, want) in [
-        (
-            "while :; do echo if; fi; echo x; break; done; echo after",
-            "if\nx\nafter\n",
-        ),
-        (
-            "while :; do echo case; esac; break; done; echo after",
-            "case\nafter\n",
-        ),
-        (
-            "while :; do echo until; fi; break; done; echo after",
-            "until\nafter\n",
-        ),
-        (
-            "while :; do echo while; fi; break; done; echo after",
-            "while\nafter\n",
-        ),
-        (
-            "while :; do echo if; echo x; fi; break; done; echo after",
-            "if\nx\nafter\n",
-        ),
-        (
-            "while :; do echo a if; fi; echo x; break; done; echo after",
-            "a if\nx\nafter\n",
-        ),
-        (
-            "while :; do echo if; esac; break; done; echo after",
-            "if\nafter\n",
-        ),
-        (
-            "while :; do echo if; fi; echo x; echo y; break; done; echo after",
-            "if\nx\ny\nafter\n",
-        ),
-        (
-            "while :; do echo done; fi; break; done; echo after",
-            "done\nafter\n",
-        ),
-        (
-            "while :; do echo fi; fi; break; done; echo after",
-            "fi\nafter\n",
-        ),
-        (
-            "while :; do echo esac; esac; break; done; echo after",
-            "esac\nafter\n",
-        ),
-        (
-            "while :; do echo if && echo z; fi; break; done; echo after",
-            "if\nz\nafter\n",
-        ),
-        (
-            "while :; do echo if || echo z; fi; break; done; echo after",
-            "if\nafter\n",
-        ),
-        (
-            "while :; do echo if; fi && echo z; break; done; echo after",
-            "if\nafter\n",
-        ),
-        ("if :; then echo if; fi; done; echo after", "if\nafter\n"),
-        (
-            "while :; do echo \"if\"; fi; break; done; echo after",
-            "if\nafter\n",
-        ),
-        (
-            "while :; do echo if; time fi; break; done; echo after",
-            "if\nafter\n",
-        ),
-        ("f() { echo if; fi; }; f; echo after", "if\nafter\n"),
-        (
-            "while :; do while :; do echo if; fi; break; done; break; done; echo after",
-            "if\nafter\n",
-        ),
-        (
-            "while :; do for x in a; do echo if; fi; break; done; break; done; echo after",
-            "if\nafter\n",
-        ),
-        (
-            "while :; do echo a | echo if; fi; break; done; echo after",
-            "if\nafter\n",
-        ),
-        (
-            "while :; do echo if; fi | echo x; break; done; echo after",
-            "if\nx\nafter\n",
-        ),
-        (
-            "for x in a; do echo if; fi; break; done; echo after",
-            "if\nafter\n",
-        ),
-        (
-            "for ((i=0;i<3;i++)); do echo if; fi; done; echo after",
-            "if\nif\nif\nafter\n",
-        ),
         ("case x in a) echo if; fi;; esac; echo after", "after\n"),
         ("case x in a) echo a; done;; esac; echo after", "after\n"),
         (
@@ -1172,15 +1199,6 @@ fn mismatched_closers_in_a_loop_body_are_word_data() {
         let (out, err, code) = run_bounded(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
     }
-    // The stray closer is a *command*: the body runs, `fi` resolves to nothing,
-    // and the script still ends (bash rc 2).
-    let (out, err, code) =
-        run_bounded("while :; do echo a; fi done; echo x; break; done; echo after");
-    assert_eq!((out.as_str(), code), ("a\nx\nafter\n", 0), "stderr={err}");
-    assert!(
-        err.contains("failed to resolve command path"),
-        "stderr={err}"
-    );
     // A brace argument in a body is the same rule at the brace kind: a `}` is
     // the closer of a **brace** block, so in a `while`/`if` body it is a word
     // (bash's rc 0 too — the row `tests/group.rs` pins for the group side).
@@ -1188,14 +1206,6 @@ fn mismatched_closers_in_a_loop_body_are_word_data() {
     assert_eq!((out.as_str(), code), ("}\nafter\n", 0), "stderr={err}");
 }
 
-/// Task #309, the half that becomes a report: a closer of a foreign kind is a
-/// word, so a block whose **own** closer is gone never closes and the
-/// "unclosed mid-run construct" report names it (README, task #294's family).
-/// `master` closed the block at the foreign closer and ran the line (several of
-/// these rows were the hang of [`mismatched_closers_in_a_loop_body_are_word_data`]'s
-/// family before the pairing). bash refuses every row (rc 2); fdshell's rc 1 is
-/// the rc-1-vs-2 family with an actionable message. Sample of the rule, not its
-/// extent; bounded children, because the pre-fix shape of several rows is a
 /// hang.
 #[test]
 fn a_mismatched_closer_that_leaves_no_closer_is_a_parse_error() {
@@ -1302,37 +1312,63 @@ fn a_loop_body_that_never_returns_is_bash_parity() {
 }
 
 /// Task #309, the divergence half of the same rule (README "body that never
-/// returns"): the shape whose text keeps a **second** closer of the block's own
-/// kind. The pairing ends the block at its own closer, the `break` behind it is
-/// a top-level `break`, the loop body never returns — and bash escapes with rc 2
-/// because it refuses the stray closer written after the loop (its grammar has
-/// no such command), so the *cause* of the divergence is the acceptance of that
-/// stray closer, not the pairing: the same acceptance
-/// `tests/block_closers.rs::the_rc_1_family_stays_a_parse_error` pins at rc 1
-/// for the shapes that do terminate. Filed as task **#436** (its own acceptance
-/// family — the closer-tail rule of task **#405**, now landed for a word written
-/// *directly* behind a closer, does not reach these rows: the stray closer there
-/// sits behind a `;`). Capped children: rc 124 is the
-/// measured outcome, and a row that starts terminating is a change to disclose.
+/// returns"): the shape whose text keeps a **second** closer of the block's **own**
+/// kind. The pairing ends the block at its own closer, so the second closer is a
+/// closing keyword word with nothing open — task **#436**'s rule, and every row
+/// here now answers it: a parse error at fdshell's house rc 1, nothing run, which
+/// is what bash does to all of them at rc 2. They ran forever before (rc 124 at
+/// [`BOUND`], the measured divergence this pin carried, with the stray closer
+/// accepted as a command word — the acceptance family of
+/// `tests/block_closers.rs::the_rc_1_family_stays_a_parse_error`); the parity half
+/// of the family, where bash hangs too, stays
+/// [`a_loop_body_that_never_returns_is_bash_parity`]. Bounded children: a
+/// regression back into the hang must fail with the script, not stall the suite.
 #[test]
-fn a_loop_body_that_never_returns_where_bash_refuses_the_line() {
-    let rows = [
-        "while :; do echo for; done; break; done; echo after",
-        "while :; do echo until; done; break; done; echo after",
-        "while :; do echo while; done; break; done; echo after",
-        "while :; do echo fi; done; break; done; echo after",
-        "while :; do echo esac; done; break; done; echo after",
-        "while :; do echo if; fi; done; echo after",
-        "while :; do echo if; done; esac; break; done; echo after",
-        "if :; then while :; do echo b; fi; done; fi; echo after",
-        "while :; do echo a \\| while :; do break; done; break; done; echo after",
-    ];
-    let codes = run_capped(&rows);
-    for (script, code) in rows.iter().zip(codes) {
-        assert_eq!(code, 124, "{script}: bash rc 2, fdshell runs forever");
+fn a_loop_body_that_never_returns_reports_where_bash_refuses_the_line() {
+    for (script, closer) in [
+        (
+            "while :; do echo for; done; break; done; echo after",
+            "done",
+        ),
+        (
+            "while :; do echo until; done; break; done; echo after",
+            "done",
+        ),
+        (
+            "while :; do echo while; done; break; done; echo after",
+            "done",
+        ),
+        ("while :; do echo fi; done; break; done; echo after", "done"),
+        (
+            "while :; do echo esac; done; break; done; echo after",
+            "done",
+        ),
+        ("while :; do echo if; fi; done; echo after", "fi"),
+        (
+            "while :; do echo if; done; esac; break; done; echo after",
+            "esac",
+        ),
+        (
+            "if :; then while :; do echo b; fi; done; fi; echo after",
+            "fi",
+        ),
+        (
+            "while :; do echo a \\| while :; do break; done; break; done; echo after",
+            "done",
+        ),
+    ] {
+        let (out, err, code) = run_bounded(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("", 1),
+            "{script}: bash rc 2; stderr={err}"
+        );
+        assert!(
+            err.contains(&format!("stray '{closer}' — it closes no open block")),
+            "{script}: {err}"
+        );
     }
 }
-
 /// The `echo in done` twin of
 /// [`a_loop_body_that_never_returns_is_bash_parity`]'s `echo in` row, healed by
 /// task #301: `in` is `echo`'s
@@ -1343,11 +1379,19 @@ fn a_loop_body_that_never_returns_where_bash_refuses_the_line() {
 /// `master` ran forever (rc 124 at [`BOUND`]) and `bash -c` (5.3.9) prints
 /// `in done` / `after` with rc 0. fdshell stays a divergence from bash (rc 1
 /// vs 0), and the parity half belongs to the word-list tasks; the hang is gone.
+///
+/// Task #436 moves only the **message**: the list word pops the scan's seed, so
+/// the block's own `done` arrives with an empty stack and the preflight reports it
+/// before the parse layer's `expected ';' before 'done'` rule ever sees the
+/// word. rc and the divergence against bash are unchanged.
 #[test]
 fn in_word_list_argument_before_a_closer_is_a_parse_error() {
     let (out, err, code) = run_bounded("while :; do echo in done; break; done; echo after");
     assert_eq!((out.as_str(), code), ("", 1), "stderr: {err}");
-    assert!(err.contains("expected ';' before 'done'"), "stderr: {err}");
+    assert!(
+        err.contains("stray 'done' — it closes no open block"),
+        "stderr: {err}"
+    );
 }
 
 /// Task #292 moves these rows out of the hang family of

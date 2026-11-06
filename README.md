@@ -1260,26 +1260,36 @@ a terminator, not an operator, and is bash parity (`if true; then echo a & fi`
 runs `a` in the background).
 
 A closing keyword closes **its own kind of block**: `fi` an `if`, `done` a
-`while`/`until`/`for`, `esac` a `case`, `}` a group. A closer of a **foreign**
-kind written in a body is an ordinary **command word** — it scores nothing and
-does not end the block, so the body keeps the statement written behind it:
-`while :; do echo if; fi; echo x; break; done; echo after` prints `if`, `x` and
-`after` and exits 0, reporting the stray closer as
-`failed to resolve command path: "fi"`, where bash refuses the whole line at
-rc 2 (`fi` is a reserved word in its grammar, never a command) — the accepted
-acceptance divergence of the stray-closer family. The pairing is also why a
-`done` of a `case` **pattern** list stays a list word:
+`while`/`until`/`for`, `esac` a `case`, `}` a group. A closing keyword word that
+stands in **command position** with no block of its kind open closes nothing, and
+bash's grammar has no command that is a lone `fi`/`done`/`esac`: it refuses the
+whole line at rc 2 before running anything, and fdshell answers the same way at
+its house rc 1 — `stray 'fi' — it closes no open block` with a suggestion naming
+the block that closer serves, the caret on the word, and **nothing run** (the
+preflight of `script.rs`, the same shape as the async-`&` and stray-`;;` arms; a
+line carrying both answers with the earlier arm's message).
+`while :; do echo if; fi; echo x; break; done; echo after` is such a line: the
+`if` is `echo`'s argument, so the `fi` behind the `;` is in command position and
+reports, where bash prints nothing either (the command position is the rule, and
+the rows it covers are the *sample* pinned by
+`safe/fdshell/tests/cond_blocks.rs::a_stray_closer_in_command_position_reports`,
+not its extent). A closer-shaped **argument** word stays word data — bash runs
+those lines at rc 0 — so `while :; do echo a; esac; …` and a `done` of a `case`
+**pattern** list keep their bodies:
 `while :; do case x in done) echo p;; esac; break; done; echo after` runs at
-rc 0, as bash does. When no closer of the block's **own** kind is left, the line
-is the "unclosed mid-run construct" report of "Errors":
+rc 0, as bash does. The **brace** closer is the exception by rule: bash's grammar
+has a rule for a lone `}` and the group scanner owns it, so a `}` is never asked
+this decision (the divergence rows of `tests/group.rs` stand). A `time [-p]`
+prefix written in front of the closer is transparent: the report names the closer
+behind it. When no closer of the block's **own** kind is left, the line is the
+"unclosed mid-run construct" report of "Errors":
 `while :; do echo a; fi; echo after` is
 `'while' is missing its closing 'done'` (rc 1, bash rc 2). A body whose **own**
 closer ends it above the `break` runs **forever**, and bash hangs on those
 shapes too (`while :; do echo while; done; echo after`); where such a line keeps
-a second closer of the block's kind, bash escapes at rc 2 and fdshell runs
-forever — the same acceptance divergence. Pinned in
-`safe/fdshell/tests/cond_blocks.rs`; those rows are a **sample of the rule**,
-not its extent.
+a second closer of the block's kind, bash escapes at rc 2 — and so does fdshell,
+at rc 1, since the stray report covers it (the bash-parity hangs are pinned
+separately in `safe/fdshell/tests/cond_blocks.rs`).
 
 A `case` **arm may be empty**: bash reads an arm body as a command list, and an
 empty list is a list, so an arm closed straight at `esac` is a complete clause —

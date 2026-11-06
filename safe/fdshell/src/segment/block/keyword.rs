@@ -13,8 +13,10 @@ use crate::scan::heredoc;
 use alloc::vec::Vec;
 
 /// Build the `Segment::Block` for a block-opening keyword at `start`.
-/// Returns the segment, the scan resume index, and the resume floor for the
-/// rest of the physical line (past which no flush may resume).
+/// Returns the segment, the scan resume index, the resume floor for the
+/// rest of the physical line (past which no flush may resume), and the offset
+/// of the first **stray closer** word the span walk saw (task #436, `None` when
+/// it saw none) — this scan is the top level's, so it is the one that reports.
 /// `pre_resume` is the end of the body regions of a statement that precedes
 /// the block on the same line (the line end when there is none); `line_start`
 /// is the start of the physical line whose body stream the block reads.
@@ -47,7 +49,7 @@ pub(super) fn keyword_block<'a>(
     line_start: usize,
     state: &ScanState,
     pre_resume: usize,
-) -> (Segment<'a>, usize, usize) {
+) -> (Segment<'a>, usize, usize, Option<usize>) {
     let leading_ws = raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count();
     // The keyword is scored on the word behind the `time [-p]` prefix run, so
     // `kw_len` measures the keyword itself (`time if …` must not measure `time`).
@@ -63,7 +65,7 @@ pub(super) fn keyword_block<'a>(
     // scan's pairing is seeded with the closer **this** opener requires
     // ([`opener_closer`], task #309), so a closer of another kind written in
     // the block's text is word data and never ends the span.
-    let (_end_pos, closed) = scan_block(
+    let (_end_pos, closed, stray) = scan_block(
         line,
         after_kw,
         &mut quotes,
@@ -120,6 +122,9 @@ pub(super) fn keyword_block<'a>(
         },
         resume,
         floor,
+        // Task #436's decision, taken by this scan's own walk of the span: the
+        // word's offset, so the report can draw the caret.
+        stray,
     )
 }
 

@@ -57,6 +57,7 @@ fn statements(line: &[u8]) -> Vec<(&[u8], Vec<Vec<u8>>, bool)> {
             Segment::Block { .. } => (b"B".as_slice(), Vec::new(), false),
             Segment::AsyncInvalid => (b"A".as_slice(), Vec::new(), false),
             Segment::UnexpectedSemiSemi => (b"A".as_slice(), Vec::new(), false),
+            Segment::StrayCloser { .. } => (b"A".as_slice(), Vec::new(), false),
         })
         .collect()
 }
@@ -71,6 +72,7 @@ fn faces(line: &[u8]) -> Vec<(&'static str, bool)> {
             Segment::Block { .. } => ("B", false),
             Segment::AsyncInvalid => ("A", false),
             Segment::UnexpectedSemiSemi => ("A", false),
+            Segment::StrayCloser { .. } => ("A", false),
         })
         .collect()
 }
