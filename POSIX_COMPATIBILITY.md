@@ -542,7 +542,14 @@ quoted `;` splits nothing. fdshell applies that at every separator site of the
 parse — the statement split, a block's body slice, the terminator in front of a
 clause keyword, the closing-keyword walk, the pipeline's `|`, the background `&`,
 the `case` clause's `|` / `)` / `;;`, a `wait` arm's pattern head, a definer's
-`)`, the scoped-assignment prefix bound, and the here-document's delimiter word.
+`)`, the scoped-assignment prefix bound, and the here-document's delimiter word. Task
+**#530** closed the last three recognition rules that read a word's **text** without
+the gate — the cond-pair glue row (`parse/semi/closing/word.rs::glue_at`, now the span
+gate on both neighbours), the pair and pipeline-`|` payload rows
+(`keywords::pair_payload`, `keywords/position/payload.rs`, fed the word's own mask), and
+the shared bare-operand guard's separator arms (`scan/heredoc::op::invalid_delimiter`,
+fed the operand's mask) — so `a"&&"if` is one word, `x"|"` is one stage, and
+`echo x > ";"` writes the file `;` at rc 0 exactly as bash does.
 
 The one separator rule that reads a **newline** is the terminator one: an unquoted
 `&&`/`||` at the end of a physical line is POSIX #2.9's AND-IF/OR-IF terminator and
@@ -587,16 +594,18 @@ violation. The tokenizer's `;` token covers the byte **and** the newline, so the
 two spellings are told apart by the byte, and the quoting half stays the span
 gate's.
 
-The pinned divergences are the owners' own, not this rule's: the bare path
-redirect of a quoted separator word (`echo x > ";"` — bash writes the file `;` at
-rc 0, fdshell answers `invalid redirect syntax`, task **#475**); the definer word
+The pinned divergences are the owners' own, not this rule's: the definer word
 that **carries a region** (task **#368**) — the production needs the word's own
 last byte, so a word whose region supplies one is not a definer, and a region word
 that lands in the production's name slot (`$( echo f )() { :; }`) is reported as a
 name at fdshell's rc 1 where bash's rc 1 names the region without the glued `(`;
 and the command-not-found **status** of a quoted separator run as a command (`X=1 ";"`) is
 fdshell's rc 1 where bash answers 127, the shell-wide convention of STYLE §4 — the
-name on stderr is the fact.
+name on stderr is the fact. The `>` family's quoted-operand answers are the gate's,
+except the **empty** word: the mask cannot express a zero-byte quoted region, so that
+arm alone reads the raw-span flag, which the path families pass as `false`
+(`tests/redirect.rs::quoted_empty_target_stays_a_parse_error`, task **#330**); `> %v`
+stays fdshell's `%` file-descriptor namespace.
 
 ## `-c` mode keeps its own `$0`
 

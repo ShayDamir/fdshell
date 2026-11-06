@@ -2514,7 +2514,8 @@ the depth fires at the keyword behind it.
    region is skipped whole) —
    `cond/boundary/body/tests.rs::a_block_closer_inside_a_body_region_never_reaches_the_stack`;
    (2) a word **ending** with `)` sets the body mode — that is
-   `keywords/position::after`'s own ungated rule, which the mode stack mirrors —
+   `keywords/position::after`'s own ungated `)` rule (its glue and payload rows are
+   mask-gated since task #530), which the mode stack mirrors —
    so in a block's *clause* a `)` from a subshell (`if (cat) && cat <<X; then`)
    stops the split and fdshell runs text bash rejects (rc 0 vs 2,
    `tests/heredoc.rs::a_word_ending_in_close_paren_in_a_clause_stops_the_split`).
@@ -3091,9 +3092,10 @@ by task #336's rows of `parse/case_clause/tests.rs` and
 `parse/group_block/tail/tests.rs` plus #346's `case '|' in "|")`,
 `case x in "|")`, `case x in \|)` and group rows.
 - **The third `|`-text reader is `scan/heredoc/op.rs`, and it owns its rule**
-(task #347). `invalid_delimiter`'s `;`/`|` arms read the operand's **text**, gated
-on `span_quoted`, which the here-doc caller computes from the raw span
-(`parse/heredoc/operator.rs` passes `word_quoted(word, start, end)`). For a word
+(task #347). `invalid_delimiter`'s `;`/`|` arms read the operand's **text**, gated on
+`mask::quoted_at(mask, 0)` — the mask every caller already owns; the raw-span flag
+(`parse/heredoc/operator.rs` passes `word_quoted(word, start, end)`) is the **empty**
+arm's input alone since task #530. For a word
 whose text is the **one-byte** separator that span test *is* the quote-mask
 decision the task asked for: span longer than text ⇔ the span carries a quote
 byte ⇔ `mask::quoted_at(mask, 0)`, and the span form is the canonical separator
@@ -3104,10 +3106,13 @@ four headline rows of the report — `cat <<"|"`, `<<'|'`, `<<"|x"`, `<<"|EOF"`
 rc 0 and silent, bash-equal: `tests/heredoc.rs::a_quoted_separator_delimiter_with_an_empty_body_is_parity`
 (the with-body shape is #336's `a_quoted_delimiter_may_be_a_separator_word`; the
 report's rc-1 numbers were measured on `60a2ebd`, before #336's gate). The
-path-redirect callers pass `span_quoted=false` and keep the text-only arms —
-switching the shared arms to a mask test would flip #475's pinned `echo x > ";"`
-rc 1, and the arms' mask insensitivity is pinned by
-`scan/heredoc/op/tests.rs::invalid_delimiter_gates_operator_bytes_on_the_quote_mask`.
+path-redirect callers pass `span_quoted=false` because that flag is the **empty** arm's
+input alone (task #530): the separator arms read the mask themselves, so
+`echo x > ";"` is the file name at rc 0 — bash parity, #475 closed — while `> ""` keeps
+its documented parse error. The arms' gating is pinned by
+`scan/heredoc/op/tests.rs::invalid_delimiter_gates_operator_bytes_on_the_quote_mask`,
+the path families' answers by
+`parse/redirect/tests.rs::a_quoted_separator_operand_is_a_path_and_the_unquoted_one_is_not`.
 - **A byte walk over a delimiter word consumes `\X` pairs whole** (task #347,
 closing #349's scope). The tokenizer keeps the pair in the word text
 (`parse/token/escape.rs::read_escape`), so `scan/heredoc/lines/word.rs::word_span`
@@ -4250,7 +4255,10 @@ closer's *kind*. All measured against bash.
    carry this as `Glue` (head/tail strip in `keywords/position/payload.rs`); the
    token- and run-layer scorers see the glued word whole (`a||if` is ONE token)
    and must score the payload behind the pair themselves — `keywords::pair_payload`
-   + payload arms in `parse/semi/closing.rs` and `comment/depth_delta.rs`. Never
+   + payload arms in `parse/semi/closing.rs` and `comment/depth_delta.rs`. Both take the
+   word's **quote mask** since task #530 (`pair_payload(word, mask)`,
+   `payload(…, op_quoted)`), gated on the operator's own bytes; the byte-level callers
+   pass the neutral `&[]` and stay byte-identical. Never
    put the pair rule inside `keyword_delta` itself: it is also the *run-open*
    test (`segment.rs`, `midrun::skip`), and scoring a payload there makes
    `echo a && if …` open a block from the whole run, collapsing the midrun
@@ -6794,3 +6802,56 @@ breaks the word, so it was never glued) and
 `tests/loops.rs::other_operator_words_in_a_for_word_list_stay_words` (the glued and
 quoted spellings that stay divergences); the gate's own
 LESSONS: "A separator-shaped word needs the span gate, because the scan-back breaks on the separator byte itself".
+
+## A text comparison in the recognition layer is the ONE quotedness gate's answer; the glue row, the payload row and the bare-operand arms are one rule at three granularities (task #530)
+
+A rule that compares a **word's text** to a separator shape — `word.eq_bytes(b";")`,
+`tokens[j].0 == word`, `rest.starts_with(b"|")` — has already answered the quotedness
+question, and answered it wrong: POSIX §2.9.1 builds syntax out of **unquoted** bytes,
+so every site must supply the gate rather than trust the text. The gate is the one
+LESSONS: "A separator-shaped word needs the span gate, because the scan-back breaks on the separator byte itself"
+names, and the three copies that read text now call it:
+
+- **the glue row** — `parse/semi/closing/word.rs::glue_at` decided a split `||`/`&&`
+  pair's head/tail from the neighbours' **texts**, so a quote-protected `"|"` word
+  standing next to a real `|` read as a pair half; both comparisons go through
+  `parse::word_quoted::span_word` (text **and** span).
+- **the payload rows** — `keywords::pair_payload` and `keywords/position/payload.rs`
+  read the payload behind a glued pair or pipeline byte from quote-removed text, so
+  `a"&&"if` scored a pair with payload `if` and `x"|"` took the pipeline-stage row.
+  The gate is an input now (`mask` / `op_quoted`) and it reads **the operator's own
+  bytes** — the pair's offset inside the word, byte 0 for the `|`-prefix rows — so a
+  word whose *payload* is quoted and whose operator is not keeps scoring (the #413
+  rule, LESSONS: "An operator word in a word slot is ONE predicate's answer; each position supplies only its owned set").
+- **the bare-operand arms** — `scan/heredoc/op.rs::invalid_delimiter` gated its `;`/`|`
+  arms on a flag whose value each family chose, so the path families' `false` made
+  `echo x > ";"` a syntax error where bash writes the file `;`. The arms read
+  `mask::quoted_at(mask, 0)`, exact for a word that **has** bytes, and the empty arm
+  keeps the raw-span flag as its own input (`empty_span_quoted`) because a zero-byte
+  quoted region has no mask bit; the path families pass `false` and keep their
+  documented `> ""` answer.
+
+A byte-level caller passes the neutral `&[]` and stays byte-identical: a short or empty
+mask pads to *unquoted*, so the gate degrades to the text rule it already implemented.
+
+Measured 2026-11-06 against bash 5.3.9 (stdout, rc, files created): `> ";"`, `> ';'`,
+`> \;`, `> "|z"`, `>> ";"`, `&> ";"`, `<> ";"`, `> "|"`, `> "&"`, `> \&` and
+`> ";" ; echo after` are bash-equal now; `cat < ";"` is rc parity (both rc 1, the message
+style differs); `> ""` and `> %v` keep their owners' answers. The #474 shapes
+(`echo "|" | cat`, `echo "|" \| cat`, `echo "&&" && echo Y`, `a"&&"if`, `x"|"`) are
+bash-equal **before and after** — what the gate moves shows in-process, which is why the
+fence is a unit pin and the end-to-end rows are parity pins.
+
+Pins: `parse/semi/closing/tests.rs::a_quoted_operator_word_is_no_pair_half` (runs red on
+the ungated glue rule),
+`keywords/position/tests.rs::a_quoted_operator_word_starts_no_stage_and_no_pair`,
+`keywords/pair/tests.rs::a_quoted_operator_byte_carries_no_pair`,
+`scan/heredoc/op/tests.rs::invalid_delimiter_gates_operator_bytes_on_the_quote_mask`,
+`parse/redirect/tests.rs::a_quoted_separator_operand_is_a_path_and_the_unquoted_one_is_not`,
+`tests/redirect.rs::a_quoted_separator_operand_is_the_file_name`,
+`tests/glued_pair.rs::a_quoted_separator_word_is_word_content_end_to_end`,
+`tests/heredoc.rs::a_quoted_delimiter_may_be_a_separator_word` (flipped to bash parity),
+`tests/redirect.rs::quoted_empty_target_stays_a_parse_error` and
+`tests/redirect.rs::unquoted_operator_operands_stay_syntax_errors`. Every new input is
+pinned on **both** answers at ≥2 families — a parameter that changes nothing is an
+unkillable mutant.
