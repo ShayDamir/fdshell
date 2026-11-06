@@ -29,6 +29,23 @@ slow-timeout = { period = "10s", terminate-after = 4 }
 filter = 'test(word0_deep_nesting_is_bounded)'
 slow-timeout = { period = "10s", terminate-after = 4 }
 
+# The `tests/nest.rs` trio are the smallest rows pinning `MAX_NESTING = 100` for
+# a `case`/`while`/`for` body (99 wrapper levels run, 100 refuse), and their cost
+# is real parse CPU at that pinned boundary — the levels -> wall curve is
+# quadratic (10/25/50/75/99 levels: 0.03/0.12/0.32/0.59/0.87 s, fork-and-exit
+# control 0.01 s, `{ …; }` groups at the pinned levels 0.48 s) — so the input
+# cannot be shrunk and the kill is what moves. Keep the 10 s "slow" period — the
+# suite bounds itself by it — and widen only the kill (10 s -> 40 s), for these
+# three tests: quiet 0.59-2.29 s (12 runs each); the plain period killed
+# 33/33/31 of 160 harness runs (the 8-concurrent full-suite `cargo mutants -j8`
+# profile, 32 cores), whose un-truncated tail runs to 17.29 s (median ~9.0 s, a
+# quarter of observations over 10 s), and the 40 s kill saw 0 timeouts in 320 such
+# runs — 2.3x over its own observed max, ~1e-8 per observation on that tail.
+# Verified the filter fires: period `1ms` kills exactly these three rows.
+[[profile.default.overrides]]
+filter = 'test(case_body_counts_toward_limit) | test(while_body_counts_toward_limit) | test(for_body_counts_toward_limit)'
+slow-timeout = { period = "10s", terminate-after = 4 }
+
 # Cap each test binary at 128MB of virtual address space (RLIMIT_AS).
 # Allocation failures abort the test cleanly instead of tripping the host
 # OOM killer, which filters out infinite-allocation mutants (e.g. in semi.rs).
