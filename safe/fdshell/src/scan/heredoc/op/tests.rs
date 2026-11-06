@@ -194,15 +194,19 @@ fn operator_matches_the_stripped_quoted_delimiter() {
 /// gated on the **raw span** instead (task #330): an empty text over a quoted
 /// span is the word `""`/`''` (POSIX #2.3: the delimiter is the word after
 /// quote removal), and the mask has no bit to say so; an empty span is the
-/// missing operand. The `;` and `|` arms are gated on the **same span flag**
-/// (task #336): a quoted `";"` / `"|"` word is the delimiter word of a
-/// here-document (`cat << ";"` reads a body), not the missing operand. One
-/// positive row per operator byte keeps the four arms killable, and both
-/// directions of the span flag kill the new arm's mutants.
+/// missing operand. **The `;` and `|` arms read the same mask as the
+/// operator-byte arm** (task #530, bug #474 — they used to read the span flag):
+/// for a one-byte separator word the mask bit *is* the span test
+/// `parse::word_quoted::span_word` makes, so a quoted `";"` / `"|"` is a word —
+/// bash's file name `;` for a path redirect, the delimiter of a here-document —
+/// and the unquoted word stays the missing operand. Every arm is pinned in both
+/// directions at both families (the here-doc caller hands the real span flag, the
+/// path families `false` for the empty arm): a parameter that changes no answer is
+/// an unkillable mutant.
 #[test]
 fn invalid_delimiter_gates_operator_bytes_on_the_quote_mask() {
     let (t, f) = (MaskBit::Quoted, MaskBit::Unquoted);
-    for (word, mask, span_quoted, want) in [
+    for (word, mask, empty_span_quoted, want) in [
         // Quoted leading byte: an ordinary word in bash (`> "&f"` opens `&f`).
         (b"&f".as_slice(), &[t][..], false, false),
         (b"<x", &[t], false, false),
@@ -229,34 +233,35 @@ fn invalid_delimiter_gates_operator_bytes_on_the_quote_mask() {
         // unquoted empty word: only the span flag gates this arm.
         (b"", &[], true, false),
         (b"", &[], false, true),
-        // The separator arms: the unquoted word is the missing operand, a
-        // quoted raw span (`";"`, `"|"`) is a word — the empty delimiter.
+        // The separator arms read the **mask** (task #530, bug #474 — the same
+        // predicate `operator_word` uses): an unquoted one-byte separator word is
+        // the missing operand, a quoted one is a word — bash's file name `;` / `|`
+        // for a path redirect, a here-document's delimiter.
         (b";", &[f], false, true),
         (b"|", &[f], false, true),
-        (b";", &[f], true, false),
-        (b"|", &[f], true, false),
-        (b";", &[], true, false),
-        (b"|", &[], true, false),
-        // Task #347: the two separator arms are **span**-gated, not mask-gated
-        // (`operator_word` owns the mask). For a one-byte separator word the
-        // two flags coincide — a span longer than the one-byte text is exactly
-        // a quote byte, exactly `quoted_at(mask, 0)` — so no mask arm is needed
-        // and no caller passes a Quoted bit with an unquoted span for `;`/`|`
-        // (an escape spelling keeps the pair in the text,
-        // `parse/token/escape.rs`, so its text is never `;`/`|`). The row is
-        // unreachable in production and pins the arm's insensitivity: switching
-        // these arms to the mask would flip them.
-        (b";", &[t], false, true),
-        (b"|", &[t], false, true),
+        (b";", &[t], false, false),
+        (b"|", &[t], false, false),
+        // The span flag no longer reaches these arms — for a word that has bytes
+        // the mask answers, and both of the flag's answers agree with it (the
+        // here-doc family's real `cat << ";"` word carries a QuotedStart bit
+        // *and* a quoted span). An empty mask pads to *unquoted*, never to
+        // quoted, so it never rescues a separator word either. The flag's own arm
+        // is the empty word, pinned above in both directions.
+        (b";", &[f], true, true),
+        (b"|", &[f], true, true),
+        (b";", &[t], true, false),
+        (b"|", &[t], true, false),
+        (b";", &[], true, true),
+        (b"|", &[], true, true),
         (b"abc", &[f], false, false),
         (b"x&f", &[f], false, false),
         (b"--", &[f], false, false),
     ] {
         let word = ShortCStr::from_vec(word.to_vec()).unwrap();
         assert_eq!(
-            invalid_delimiter(&word, mask, span_quoted),
+            invalid_delimiter(&word, mask, empty_span_quoted),
             want,
-            "word={:?} mask={:?} span_quoted={span_quoted}",
+            "word={:?} mask={:?} empty_span_quoted={empty_span_quoted}",
             word,
             mask
         );

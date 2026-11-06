@@ -1403,6 +1403,91 @@ fn unquoted_operator_operands_stay_syntax_errors() {
     }
 }
 
+/// Task #530 (bug #475): a **quoted separator word as a bare operand** is the file
+/// name, exactly as bash reads it. The shared bare-operand guard
+/// (`scan::heredoc::op::invalid_delimiter`) read its `;`/`|` arms as **text**, one
+/// family at a time, so the path families rejected `> ";"` where bash writes the file
+/// `;`. The arms now answer through the operand's own quote mask — the ONE predicate
+/// the guard's operator-byte arm already used — so all three families answer alike: the
+/// here-doc family keeps task #336's `cat << ";"` delimiter (pinned in
+/// `tests/heredoc.rs::a_quoted_delimiter_may_be_a_separator_word`), and the path
+/// families take the word as their file.
+///
+/// Every row is `bash -c` 5.3.9 and this tree's build, measured 2026-11-06 in a
+/// scratch dir; the listing and the file's body are the asserts. The escape spellings
+/// need no gate (`\;`, `\&` keep the pair in the word text, `parse/token/escape.rs`)
+/// and stay parity; `> "|z"` is parity because no whole-word arm reads a longer text.
+/// Two rows keep their own owners and are pinned as measured: `> %v` is fdshell's
+/// `%`-namespace guard (`unquoted_percent_targets_stay_fd_variable_lookups`,
+/// POSIX_COMPATIBILITY "`%` is a file descriptor namespace") and `> ""` the **empty**
+/// arm's raw-span gate (`quoted_empty_target_stays_a_parse_error` — an empty quoted
+/// region has no mask bit, which is why that arm cannot read the mask).
+#[test]
+fn a_quoted_separator_operand_is_the_file_name() {
+    let dir = scratch("qsep_operand");
+    let dir = dir.to_str().unwrap();
+    for (script, want_file, body, stdout) in [
+        ("echo x > \";\"", ";", "x\n", ""),
+        ("echo x > ';'", ";", "x\n", ""),
+        ("echo x > \\;", ";", "x\n", ""),
+        ("echo x > \"|\"", "|", "x\n", ""),
+        ("echo x > \"|z\"", "|z", "x\n", ""),
+        ("echo x > \"&\"", "&", "x\n", ""),
+        ("echo x > \\&", "&", "x\n", ""),
+        ("echo x >> \";\"", ";", "x\n", ""),
+        ("echo x &> \";\"", ";", "x\n", ""),
+        // `<>` opens for reading and writing and never truncates: the file is born
+        // empty, and `x` reaches stdout.
+        ("echo x <> \";\"", ";", "", "x\n"),
+        ("echo x > \";\" ; echo after", ";", "x\n", "after\n"),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!(
+            (out.as_str(), code),
+            (stdout, 0),
+            "{script}: stderr={err:?}"
+        );
+        assert_eq!(
+            created(&files),
+            vec![want_file.to_string()],
+            "{script}: {files:?}"
+        );
+        assert_eq!(
+            std::fs::read(std::path::Path::new(dir).join(want_file)).unwrap(),
+            body.as_bytes(),
+            "{script}: the body of the file `{want_file}`"
+        );
+    }
+    // `<` takes the quoted word as the name to **open**, so the row is the open
+    // failure bash reports: rc 1 both, and both say the file is not there — bash
+    // `bash: line 1: ;: No such file or directory`, fdshell its own chain ending in
+    // `No such file or directory` (STYLE §4.7).
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "cat < \";\"");
+    assert_eq!((out.as_str(), code), ("", 1), "bash agrees on the number");
+    assert!(
+        err.contains("No such file or directory"),
+        "the chain must name the cause: {err:?}"
+    );
+    assert!(created(&files).is_empty(), "{files:?}");
+    // The two documented divergences, restated here so the table is complete:
+    // bash creates `%v` (rc 0) and fails the open of `""` (rc 1); fdshell parses both
+    // as the guard's arms — the `%` arm unconditionally, the empty arm by its span
+    // flag — and creates nothing, rc 1 for each.
+    for (script, want_code) in [("echo x > %v", 1), ("echo x > \"\"", 1)] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("", want_code),
+            "{script}: stderr={err:?}"
+        );
+        assert!(err.contains("invalid redirect"), "{script}: {err:?}");
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
+    }
+}
+
 // --- quoted bytes end a redirect operator (tasks #250, #264) -----------------
 //
 // POSIX XCU 2.9.1 builds a redirection out of **unquoted** bytes: the

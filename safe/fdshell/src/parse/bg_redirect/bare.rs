@@ -23,8 +23,10 @@ pub(super) fn parse(
         bail!(ParseError::InvalidRedirect);
     };
     let (word, _s, _e, _fq, omask, _spans) = operand;
-    // `false`: the `&>` path family keeps the guard's text-only empty arm,
-    // as the bare `>` family does (bash's `&> ""` fails at the open, rc 1).
+    // `false`: only the guard's **empty** arm reads this flag — the mask has no
+    // bit for a zero-byte quoted region — and the path families pass `false`, as
+    // the bare `>` family does (bash's `&> ""` fails at the open, rc 1). The
+    // separator arms read the mask, so `&> ";"` is the file `;` (task #530).
     if invalid_delimiter(word, omask, false) {
         bail!(ParseError::InvalidRedirect);
     }

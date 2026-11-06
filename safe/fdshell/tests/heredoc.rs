@@ -4193,11 +4193,14 @@ fn a_comment_terminated_line_starved_rows_reach_parity_and_deferred_rows_keep_th
 }
 
 /// Task #336: a **quote-protected separator word** is a delimiter word like any
-/// other. The bare-operand guard's `;` and `|` arms are gated on the word's raw
-/// span (`scan::heredoc::op::invalid_delimiter`'s span flag, the same fact as
-/// `parse::word_quoted::span_word`), so `cat << ";"` takes `;` as its delimiter
-/// and reads the body up to the line that is just `;` — where the **unquoted**
-/// `cat << ;` stays the missing operand. Expectations are bash 5.3.9's.
+/// other. The bare-operand guard's `;` and `|` arms are gated on the word's **quote
+/// mask** — the same predicate as its operator-byte arm (task #530 / bug #474; the
+/// mask is exact for a word that has bytes, and the span flag
+/// `parse::word_quoted::span_word` makes the same call for a one-byte word) — so
+/// `cat << ";"` takes `;` as its delimiter and reads the body up to the line that is
+/// just `;` — where the **unquoted** `cat << ;` stays the missing operand. The
+/// **path** families read the same arm, so the quoted word is their file name too
+/// (the row at the end of this test). Expectations are bash 5.3.9's.
 #[test]
 fn a_quoted_delimiter_may_be_a_separator_word() {
     for (script, want) in [
@@ -4226,14 +4229,22 @@ fn a_quoted_delimiter_may_be_a_separator_word() {
     let (out, err, code) = run("cat << \";\"");
     assert_eq!((out.as_str(), code), ("", 0), "bash agrees");
     assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
-    // The bare path redirect of a quoted separator word is task **#475**'s
-    // divergence, pinned here so the change is visible: bash writes the file `;`
-    // (rc 0), fdshell answers the redirect parse error.
-    let (out, err, code) = run("echo x > \";\"");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    // Task #530 (bug #474): the **path** families of the same guard answer it the
+    // way bash does — the quoted word is the file name, and bash writes the file `;`
+    // (rc 0). The whole table (`> ";"`, `> ';'`, `>> ";"`, `<> ";"`, `&> ";"`,
+    // `< ";"`, `> "|"`, `> \;`, `> "|z"`, `> %v`, `> ""`) is pinned in
+    // `tests/redirect.rs::a_quoted_separator_operand_is_the_file_name`.
+    let dir = scratch("qsep_path");
+    let (out, err, code) = run(&format!("cd {}; echo x > \";\"", dir.display()));
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 0),
+        "bash writes the file `;`: stderr={err:?}"
+    );
     assert!(
-        err.contains("invalid redirect syntax"),
-        "task #475 owns the bare path-redirect word: stderr={err:?}"
+        std::fs::read(dir.join(";")).is_ok_and(|b| b == b"x\n"),
+        "the redirect wrote `x` into the file `;`: {}",
+        dir.display()
     );
 }
 

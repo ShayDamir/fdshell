@@ -320,3 +320,63 @@ fn target_of(line: &[u8]) -> RedirectSource {
 fn assert_target(line: &[u8], want: RedirectSource) {
     assert_eq!(target_of(line), want, "{line:?}");
 }
+
+/// The bare-operand guard's verdict on the operand word behind token 2's operator: the
+/// guard bails (`invalid redirect`), so the parse is an `Err` — not `None`, which is
+/// "no redirect here" (an ordinary argument word).
+fn guard_bails(line: &[u8]) -> bool {
+    tokenize_statement(line).is_ok_and(|t| parse_redirect(&t, 2).is_err())
+}
+
+/// The `&>`/`&>>` twin of [`guard_bails`] — the same guard, the other family.
+fn bg_guard_bails(line: &[u8]) -> bool {
+    tokenize_statement(line).is_ok_and(|t| parse_bg_redirect(&t, 2).is_err())
+}
+
+/// Task #530 (bug #475): the shared bare-operand guard answers its **separator arms**
+/// through the operand's own quote mask — the ONE predicate its operator-byte arm already
+/// used — so the `>`/`>>`/`<>` and `&>`/`&>>` families cannot drift apart: a quoted `";"`
+/// / `"|"` operand is the file **word**, and bash opens it
+/// (`tests/redirect.rs::a_quoted_separator_operand_is_the_file_name`). The **unquoted**
+/// twins stay the guard's parse error at both families (bash rc 2, fdshell rc 1 — the pair
+/// `unquoted_operator_operands_stay_syntax_errors` pins), and so does the **empty** word:
+/// the mask has no bit for a zero-byte quoted region, so that arm alone reads the raw-span
+/// flag, which the path families pass as `false` (task #330's split, pinned by
+/// `quoted_empty_target_stays_a_parse_error`). The here-doc family hands the guard the real
+/// flag and keeps its `<< ";"` / `<< ""` delimiters (`scan/heredoc/op/tests.rs`).
+#[test]
+fn a_quoted_separator_operand_is_a_path_and_the_unquoted_one_is_not() {
+    let bit = runs(&[(true, 1)]);
+    for (line, want) in [
+        (
+            "echo x > \";\"",
+            RedirectSource::path_word(c";", bit.clone(), Vec::new(), true),
+        ),
+        (
+            "echo x > ';'",
+            RedirectSource::path_word(c";", bit.clone(), Vec::new(), true),
+        ),
+        (
+            "echo x >> \"|\"",
+            RedirectSource::path_word(c"|", bit.clone(), Vec::new(), true),
+        ),
+        (
+            "echo x <> \";\"",
+            RedirectSource::path_word(c";", bit.clone(), Vec::new(), true),
+        ),
+        (
+            "echo x &> \";\"",
+            RedirectSource::path_word(c";", bit, Vec::new(), true),
+        ),
+    ] {
+        assert_target(line.as_bytes(), want);
+    }
+    // The mask's other answer, per family: an unquoted separator word is the missing
+    // operand, and the empty word is the path families' span-flag answer.
+    for line in ["echo x > ;", "echo x >> |", "echo x > \"\""] {
+        assert!(guard_bails(line.as_bytes()), "{line}");
+    }
+    for line in ["echo x &> ;", "echo x &>> |"] {
+        assert!(bg_guard_bails(line.as_bytes()), "{line}");
+    }
+}

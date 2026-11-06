@@ -90,43 +90,44 @@ pub(crate) fn attached(line: &[u8], start: usize, end: usize) -> bool {
     !operator_delim(line, start, end).1.is_empty()
 }
 
-/// The shared bare-operand rule: a bare `<<` delimiter, a bare
-/// `>`/`>>`/`<`/`<>`/`>|` path and a bare `&>`/`&>>` path may not be a
-/// separator or another operator. A `)` never forms a token (the tokenizer
-/// emits a `;` separator instead), so the `;` arm covers the `<<`-before-`)`
-/// case. The operator-byte arm is mask-gated ([`operator_word`]): the gate
-/// reads the operand's **quote mask**, never its text alone. The empty arm is
-/// **raw-span**-gated: POSIX #2.3 removes quotes after tokenization, so a
-/// quoted empty pair (`""`, `''`) *is* a word — the empty delimiter a
-/// here-document terminates on — where an empty span is the missing operand.
-/// `span_quoted` is that test, computed by the caller owning the token span
-/// (`parse::word_quoted::word_quoted`, whose span-vs-text length is the only
-/// signal for a zero-byte quoted region). The **same flag gates the separator
-/// arms** (task #336): a quoted `";"` / `"|"` is a word, so `cat << ";"` with a
-/// body and a `;` line delimits, as bash measures — the byte level accepts it
-/// (`lines::delimiter_span` reads the raw bytes, `Operator::new` quote-removes
-/// the word), so the two levels are in lockstep only once the token level stops
-/// rejecting it. The `;`/`|` arms are the operand's **quote-mask** decision in
-/// span form (task #347): a word whose text is the one-byte separator has a span
-/// longer than its text exactly when the span carries a quote byte, i.e. exactly
-/// when `mask::quoted_at(mask, 0)` is set — the span form is the canonical
-/// separator gate (`parse::word_quoted::span_word`). Escape spellings reach
-/// **neither** arm: `\;` and `\|` keep the pair in the token text
-/// (`parse/token/escape.rs`), so there is no separator text to gate. The four
+/// The `;`/`|` arms are the operand's **quote-mask** decision (task #530, bug
+/// #474 — they used to read the span flag, which left one text-only arm per
+/// family): for a word whose text *is* the one-byte separator,
+/// `mask::quoted_at(mask, 0)` is exactly the span test
+/// `parse::word_quoted::span_word` makes, so a quoted `";"` / `"|"` is a **word**
+/// — bash's file name `;` (`echo x > ";"` writes the file `;`, rc 0; `cat < ';'`
+/// opens it) and the here-document's delimiter (`cat << ";"` with a body and a `;`
+/// line delimits, as bash measures) — never the missing operand. The byte level is
+/// in lockstep: `lines::delimiter_span` reads the raw bytes, where a quoted
+/// separator's word text is `";"` / `"|"` and no arm can fire. The mask is exact
+/// only for a word that **has bytes**: the empty arm keeps the **raw-span** flag as
+/// its own input, because POSIX #2.3 removes quotes after tokenization, so a quoted
+/// empty pair (`""`, `''`) *is* a word — the empty delimiter a here-document
+/// terminates on (task #330) — where an empty span is the missing operand, and the
+/// mask has no bit for a zero-byte quoted region. `empty_span_quoted` is that test,
+/// computed by the caller owning the token span
+/// (`parse::word_quoted::word_quoted`, whose span-vs-text length is the only signal
+/// for a zero-byte quoted region); the path families pass `false` and keep the
+/// documented `> ""` answer (bash parses `> ""` and fails at the open, so fdshell's
+/// rc 1 parse error is its side of that pair, owned by #326/#329/#330 and pinned by
+/// `tests/redirect.rs::quoted_empty_target_stays_a_parse_error`). A missing mask bit
+/// pads to *unquoted*, so a short/empty mask degrades to the text-only rule.
+/// Escape spellings reach **neither** arm: `\;` and `\|` keep the pair in the token
+/// text (`parse/token/escape.rs`), so there is no separator text to gate. The four
 /// here-doc rows that motivated the check — `cat <<"|"`, `<<'|'`, `<<"|x"`,
-/// `<<"|EOF"`, each with its delimiter line — measure rc 0 and empty, bash-equal.
-/// The path families pass `false` and keep the text-only arms:
-/// bash parses `> ""` / `> ";"` and fails at the open (or creates the file `;`),
-/// so fdshell's rc 1 parse error is its side of that pair, owned by #326/#329/
-/// #330 and pinned for the quoted-`;` target by #475. Byte-level twin:
-/// `lines::delimiter_span` rejects an empty **raw** word and `""` is not
-/// empty, so that level needs no gate. Every bare-operand site calls this one
-/// function, so the families cannot drift apart.
-pub(crate) fn invalid_delimiter(word: &ShortCStr, mask: &[MaskBit], span_quoted: bool) -> bool {
-    (word.is_empty() && !span_quoted)
+/// `<<"|EOF"`, each with its delimiter line — measure rc 0 and empty, bash-equal
+/// (task #347), and `> "|z"` is parity today for the same reason (the arm reads a
+/// whole-word text). Every bare-operand site calls this one function, so the
+/// families cannot drift apart.
+pub(crate) fn invalid_delimiter(
+    word: &ShortCStr,
+    mask: &[MaskBit],
+    empty_span_quoted: bool,
+) -> bool {
+    (word.is_empty() && !empty_span_quoted)
         || operator_word(word, mask)
-        || (word.eq_bytes(b";") && !span_quoted)
-        || (word.eq_bytes(b"|") && !span_quoted)
+        || (word.eq_bytes(b";") && !quoted_at(mask, 0))
+        || (word.eq_bytes(b"|") && !quoted_at(mask, 0))
 }
 
 /// The operator-byte arm of the bare-operand rule, gated on the operand's own
