@@ -15,7 +15,7 @@
 //! reads its own first token: it can itself be an opener (`a) case b in …`).
 
 use super::Token;
-use super::word::{List, glue_at, next_word, scores_at};
+use super::word::{List, glue_at, next_word, scores_at, structure_flags};
 use crate::keywords::{
     Closer, Glue, Pairing, Place, after, pair_payload, scores, separator_data, word_place,
 };
@@ -43,6 +43,11 @@ pub(crate) fn walk_until(
         None => 0,
     };
     let mut place = Place::Command;
+    // The here-doc structure words, asked once per walk (the walk is O(n)): an
+    // operator's delimiter word and a word of a terminator line never score
+    // (task #432) — `brace_expand/protect` protects the same set for the same
+    // reason (task #266).
+    let structure = structure_flags(line, tokens);
     for (i, tok) in tokens.iter().enumerate().skip(start) {
         let (t, _start, end, _fq, mask, _spans) = tok;
         // Defensive: the tokens were built from `line`, so their bytes are
@@ -62,7 +67,16 @@ pub(crate) fn walk_until(
         } else {
             glue_at(tokens, i, word)
         };
-        let scored = scores_at(word, line, *end, place, list, next_word(tokens, i));
+        // A here-doc structure word scores nothing (task #432): the delimiter
+        // word and a word written on a terminator line are brace-shaped
+        // occasionally (`cat <<}`, `cat << {`), and they are structure, not brace
+        // syntax. Its place transitions still apply (LESSONS "One clause rule,
+        // three scorers", point 2 — they apply to every word, scored or not).
+        let scored = if structure.get(i).is_some_and(|&s| s) {
+            false
+        } else {
+            scores_at(word, line, *end, place, list, next_word(tokens, i))
+        };
         // The gate reads the pairing **before** this word is applied: the
         // closer's kind must match the block it closes, not the one the word
         // itself leaves open behind it (task #309).

@@ -109,3 +109,41 @@ fn heredoc_body_open_brace_does_not_open_depth() {
     let line = b"f() { cat <<EOF\n{\nEOF\n}";
     assert_eq!(scan(line), Some((line.len(), true)));
 }
+
+/// A here-doc **operator word is one unit** — its bytes *and* its operand word —
+/// so a brace-shaped operand moves no depth: a `}` operand does not close the
+/// block (the row that used to end it at the `}` inside `<<}`) and a `{` operand
+/// does not open one (the pair that differs only in the operand's shape is the
+/// detector). Glued spellings here, the bare spellings one test below.
+#[test]
+fn a_glued_operator_word_moves_no_brace_depth() {
+    let close = b"f() { cat <<}; echo x; }";
+    assert_eq!(scan(close), Some((close.len(), true)));
+    let open = b"f() { cat <<{; echo x; }";
+    assert_eq!(scan(open), Some((open.len(), true)));
+}
+
+/// The same rule at the bare spelling (`<< }`, `<< {`): the operand word behind the
+/// operator word is inside the same unit.
+#[test]
+fn a_bare_operator_word_moves_no_brace_depth() {
+    let close = b"f() { cat << }; echo x; }";
+    assert_eq!(scan(close), Some((close.len(), true)));
+    let open = b"f() { cat << {; echo x; }";
+    assert_eq!(scan(open), Some((open.len(), true)));
+}
+
+/// A **quoted** operand is word data, so the helper hands it back to the scan's own
+/// quote state: the `}` inside a closed quote span is inert, and an operand that
+/// opens a quote runs it to the end of the line — the brace behind it is inert too,
+/// which is what keeps the accepted divergence
+/// `tests/group.rs::literal_brace_argument_in_a_block_body` alive at this
+/// granularity (the walk's twin of the same control is
+/// `parse/semi/closing/tests.rs::a_heredoc_structure_word_never_scores`).
+#[test]
+fn a_quoted_operand_stays_with_the_quote_state() {
+    let closed = b"f() { cat <<\"}\"; echo x; }";
+    assert_eq!(scan(closed), Some((closed.len(), true)));
+    let open = b"f() { cat <<{\"; echo }; }";
+    assert_eq!(scan(open), Some((open.len(), false)));
+}

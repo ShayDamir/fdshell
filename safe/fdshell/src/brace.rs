@@ -56,6 +56,13 @@ pub(crate) fn scan_brace_block(line: &[u8], mut i: usize, quotes: &mut Quotes) -
     while let Some(&b) = line.get(i) {
         let bare =
             !state.in_quote && !state.in_single && !state.in_backtick && state.paren_depth == 0;
+        // A here-doc operator word is one unit — its bytes *and* its operand word
+        // (`<<}`, `<< }`) — so no brace inside it moves the depth (task #432). It
+        // is consulted before the brace rows, at every byte the walk stops at.
+        if bare && let Some(next) = heredoc::word_with_operand_end(line, i) {
+            i = next;
+            continue;
+        }
         if bare && b == b'{' {
             depth += 1;
             i += 1;

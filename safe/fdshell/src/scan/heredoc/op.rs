@@ -8,6 +8,10 @@ use crate::mask::quoted_at;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
+mod word;
+
+pub(crate) use word::word_with_operand_end;
+
 /// One `<<` operator: the delimiter word plus the flags and the target
 /// descriptor that select how the body is read and where it goes. `Operator`
 /// is carried through both levels (the byte scanner and the token parser) so

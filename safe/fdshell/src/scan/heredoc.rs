@@ -24,7 +24,7 @@ pub(crate) use line::{
 };
 pub(crate) use lines::first_unquoted_newline;
 pub(crate) use op::operator_word;
-pub(crate) use op::{Operator, attached, invalid_delimiter, operator_delim};
+pub(crate) use op::{Operator, attached, invalid_delimiter, operator_delim, word_with_operand_end};
 pub(crate) use opaque::operator_count_opaque;
 pub(crate) use ops::{operator_count, operator_delims, operator_sites};
 pub(crate) use regions::{body_regions, terminator_spans};

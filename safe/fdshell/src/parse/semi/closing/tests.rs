@@ -286,6 +286,37 @@ fn a_quoted_semicolon_word_closes_no_block() {
     assert_eq!(idx(b"for i in 1 do echo x; done"), Some(8));
 }
 
+/// The walk's **here-doc structure** gate (task #432): an operator's delimiter
+/// word, and a word whose span starts inside a terminator line, never score — the
+/// same set `brace_expand/protect` protects (task #266). The `{ …; }` group is
+/// written at, because it and the definer are the only builders whose closer is a
+/// brace word: a brace-shaped delimiter word (`cat << }`, `cat << {`) is not the
+/// closer, and neither is a brace-shaped word on a terminator line — the `<<-`
+/// row's terminator is tab-indented (the tabs rule). The control is an ordinary
+/// brace **argument** word, which still scores: the gate covers structure
+/// positions only, and the argument-brace accepted divergence
+/// `tests/group.rs::literal_brace_argument_in_a_block_body` keeps its answer.
+#[test]
+fn a_heredoc_structure_word_never_scores() {
+    let idx = |line: &[u8]| closing_keyword_index(&toks(line), line);
+    // The delimiter word, both directions. Without the gate the `}` row closes at
+    // the delimiter word (token 3) and the `{` row never returns to depth 0.
+    assert_eq!(idx(b"{ cat << }; }"), Some(5));
+    assert_eq!(idx(b"{ cat << {; }"), Some(5));
+    // The terminator line's word, both directions: the body region is blanked and
+    // the terminator line's words are not (task #266), so this is where the walk
+    // used to be blind. Ungated, the `}` row closes at token 4 and the `{` row
+    // never returns.
+    assert_eq!(idx(b"{ cat <<}\n}\n}"), Some(6));
+    assert_eq!(idx(b"{ cat <<{\n{\n}\n}"), Some(6));
+    // The `<<-` form: its terminator line is indented with a tab, and the gate
+    // reads the span start inside the terminator span, tabs included.
+    assert_eq!(idx(b"{ cat <<-\t}\ny\n\t}\n}"), Some(7));
+    // The control: an ordinary brace argument word still scores, so the group
+    // closes at it.
+    assert_eq!(idx(b"{ echo }; }"), Some(2));
+}
+
 /// Task #530 (bug #474): the cond-pair rows read **both** neighbours through the ONE
 /// span gate [`crate::parse::word_quoted::span_word`], so a quote-protected `|`/`&`
 /// **word** standing next to a real operator token is word data and never a pair half

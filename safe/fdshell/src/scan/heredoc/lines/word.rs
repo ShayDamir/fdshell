@@ -18,7 +18,7 @@ use crate::paren_scan::scan_at;
 /// `\`+newline continuation is task #489's), exactly `read_escape`'s
 /// trailing-`\` rule, and `fold_quotes` keeps that backslash. So is a `$( … )`
 /// region opened on the word ([`substitution_span`]).
-pub(super) fn word_span(line: &[u8], j: usize, to: usize) -> usize {
+pub(crate) fn word_span(line: &[u8], j: usize, to: usize) -> usize {
     if line.get(j) == Some(&b'\\') {
         return j.saturating_add(2).min(to);
     }

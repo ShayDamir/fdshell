@@ -5,7 +5,10 @@
 
 use super::Token;
 use crate::keywords::{Glue, Place, scores};
+use crate::parse::delimiter_token_indices;
 use crate::parse::word_quoted::span_word;
+use crate::scan::heredoc::terminator_spans;
+use alloc::vec::Vec;
 
 /// How the walk reads a keyword closer written inside a `case`/`for **word
 /// list** ([`Place::Pattern`], task #236): bash reads a word list as words.
@@ -43,6 +46,29 @@ pub(crate) fn scores_at(
         List::Case => word == b"esac" && next != Some(b")"),
         List::Words => false,
     }
+}
+
+/// Which tokens of `tokens` are **here-doc structure**: an operator's delimiter
+/// word ([`delimiter_token_indices`]) and every word whose span starts inside a
+/// terminator line ([`terminator_spans`], tabs included so the `<<-` form is
+/// covered) — the same set `brace_expand/protect` protects (task #266). Such a
+/// word never scores as brace syntax, so a closer-shaped delimiter word
+/// (`cat <<}`) never closes the block it writes its body in; the walk asks once
+/// per walk, and the word stays a token (its words are what the verbatim
+/// families measure) and still moves the place.
+pub(super) fn structure_flags(line: &[u8], tokens: &[Token]) -> Vec<bool> {
+    let delimiters = delimiter_token_indices(line, tokens);
+    let terminators = terminator_spans(line);
+    tokens
+        .iter()
+        .enumerate()
+        .map(|(i, (_, start, _, _, _, _))| delimiters.contains(&i) || covered(&terminators, *start))
+        .collect()
+}
+
+/// Whether `start` sits inside one of the terminator-line spans `spans`.
+fn covered(spans: &[(usize, usize)], start: usize) -> bool {
+    spans.iter().any(|&(s, e)| start >= s && start < e)
 }
 
 /// Where token `i` starts in a cond pair ([`Glue`]): the tokenizer splits a

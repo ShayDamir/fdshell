@@ -561,6 +561,17 @@ byte walk consumes it whole, exactly as it consumes a quoted region — so
 bash), and a block arm whose terminator line is such a word keeps the whole
 terminator line inside its own text.
 
+A delimiter word that is **brace-shaped** is structure too, so it is not brace
+syntax: `f() { cat <<}` + `x` + `}` + `}` + `f` prints `x` (rc 0, as bash), and
+so does the bare spelling `f() { cat << }` — a `}` operand does not close the
+definition and a `{` operand does not open it, in the `{ …; }` group alike; the
+def matrix `a_brace_shaped_delimiter_word_of_a_function_body_is_structure` and
+the group matrix `a_brace_shaped_delimiter_word_of_a_group_body_is_structure`
+pin it. Such a word stays a token, and it scores as nothing at the brace rules —
+the byte scan takes an operator word and its operand as one unit, the shared
+closer walk never scores it, and a brace-shaped word in an ordinary **argument**
+position still counts as brace syntax.
+
 A physical line owns **one** body stream, and its regions are handed out in
 operator order to the operators written on that line: the pre-block statements
 first, then the block's own operators, then the trailing statements. A

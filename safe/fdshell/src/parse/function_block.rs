@@ -4,10 +4,10 @@ pub(crate) use definer_region::definer_with_region;
 
 use super::Token;
 use super::part_text::part_text;
-use super::semi::{block_body, ensure_before_closer};
+use super::semi::{List, block_body, ensure_before_closer, walk_until};
 use super::word_quoted::{gated_word, keyword_word, span_word};
 use crate::error::parse::ParseError;
-use crate::keywords::name_len;
+use crate::keywords::{Closer, name_len};
 use error_stack::{Report, ResultExt};
 use sys::{ScriptText, ShortCStr};
 
@@ -84,18 +84,26 @@ pub(crate) fn tokens_to_function(
         .iter()
         .position(|tok| keyword_word(tok, line, b"{"))
         .ok_or(ParseError::Never)?;
-    // The closer is the **last** unquoted `}` word of the token list. A body
-    // region's words are blanked by the tokenizer (task #266), so a
-    // `}`/`{`/`done` line written **inside a here-doc body** is data and never
-    // closes the definition. A **terminator** line's words stay tokens by the
-    // same rule, which is why the search keeps this token-list walk: switching
-    // it to `semi::closing_keyword_index` (measured, task #305) scores a
-    // delimiter line's word and closes on it. The delimiter-word-is-a-brace
-    // family is broken on master already and is task **#432**.
-    let close = tokens
-        .iter()
-        .rposition(|tok| keyword_word(tok, line, b"}"))
-        .ok_or(ParseError::FunctionMissingCloseBrace)?;
+    // The closer is the shared walk's answer (task #432): the first word that
+    // empties the pairing, seeded with **this** block's closer and started just
+    // after the `{` word — the definer's twin of the group's token-0 opener, so
+    // the definer's own brace is never its closer. A body region's words are
+    // blanked by the tokenizer (task #266), so a `}`/`{`/`done` line written
+    // **inside a here-doc body** is data and never closes the definition, and a
+    // delimiter word or a terminator line's word on the way scores nothing — the
+    // walk's structure gate, without which the def builder had to keep its own
+    // search (task #305 measured the walk closing the definition on a delimiter
+    // word). A **quoted** brace word stays data for both searches, so no
+    // accepted divergence moves with the move.
+    let close = walk_until(
+        tokens,
+        line,
+        Some(Closer::Brace),
+        List::Plain,
+        open + 1,
+        &|_, depth, _| depth == 0,
+    )
+    .ok_or(ParseError::FunctionMissingCloseBrace)?;
     let body_tokens = tokens
         .get(open + 1..close)
         .ok_or(ParseError::FunctionMissingCloseBrace)?;

@@ -189,8 +189,12 @@ fn body_stays_verbatim_for_a_multi_line_definition() {
 
 /// A `}` written **inside** a body region is body data, never the closer: the
 /// tokenizer blanks the region's words (task #266), so the closer search keeps
-/// the definer's own brace. This pins that decision — the token-list walk of
-/// `semi::closing_keyword_index` would score the delimiter line's words.
+/// the definer's own brace. This pins that decision. The **terminator** line's
+/// words stay tokens by the same rule, so the shared walk the definer now reads
+/// gates them (and the delimiter word) on the way — task #432's gate, without
+/// which this builder had to keep its own search (task #305 measured the walk
+/// closing the definition on a delimiter word):
+/// `parse/semi/closing/tests.rs::a_heredoc_structure_word_never_scores`.
 #[test]
 fn closer_shaped_body_word_stays_body_data() {
     let crate::parse::ParsedLine::Function(def) = parse(b"f() { cat <<E; }\n}\nE\n") else {

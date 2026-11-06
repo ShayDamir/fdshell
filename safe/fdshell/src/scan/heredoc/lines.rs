@@ -1,7 +1,7 @@
 //! Word and line helpers for heredoc (`<<`) detection.
 
 use super::super::ScanState;
-use word::word_span;
+pub(crate) use word::word_span;
 
 mod word;
 

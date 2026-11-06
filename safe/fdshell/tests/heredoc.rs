@@ -2600,10 +2600,12 @@ fn group_body_heredoc_behind_a_statement_keeps_the_trailing_statement() {
 /// * the **EOF-starved** stream is parity now (task **#364**): the delimiter
 ///   line never arrives, the claim covers the body, and both shells print it at
 ///   rc 0 with the end-of-file warning (fdshell's wording).
-/// * the delimiter word shaped like a brace (`{ cat <<}; }`): the closer search
-///   of task **#432** — bash prints `x` rc 0 with its EOF warning, fdshell
-///   reports the group missing its closing brace (the `}` word is the closer's
-///   search site; the wording moved with task #364, the rc 1 stands).
+/// * the delimiter word shaped like a brace (`{ cat <<}; }`): bash parity since
+///   task **#432** — a delimiter word is here-doc structure, so the shared closer
+///   walk does not score it and the group's `}` is its real closer; the delimiter
+///   line never arrives, so the end-of-file warning row's wording rule applies
+///   (fdshell's own wording). The family's matrix is
+///   `a_brace_shaped_delimiter_word_of_a_group_body_is_structure`.
 /// * the **multi-line** group with a `;`-terminated inner heredoc: bash rejects
 ///   the syntax at rc 2, fdshell reports the group missing its closing brace at
 ///   rc 1 (the rc-1-vs-2 family — the `}` sits inside the claimed region).
@@ -2630,12 +2632,16 @@ fn group_body_heredoc_divergences_keep_their_owners() {
     let (out, err, code) = run("{ cat <<T; }\nbody");
     assert_eq!((out.as_str(), code), ("body\n", 0), "bash agrees");
     assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
+    // The brace-shaped delimiter word is parity since task #432: bash prints `x`
+    // with its end-of-file warning at rc 0, fdshell matches (fdshell's wording).
+    let (out, err, code) = run("{ cat <<}; }\nx");
+    assert_eq!((out.as_str(), code), ("x\n", 0), "bash agrees");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
     for (script, want) in [
         (
             "{ cat <<T; } <<EOF\nbody\nT\nEOF",
             "here-doc on a group is not supported",
         ),
-        ("{ cat <<}; }\nx", "group is missing a closing brace"),
         (
             "{ echo a\ncat <<T;\n}\nbody\nT",
             "group is missing a closing brace",
@@ -2650,6 +2656,60 @@ fn group_body_heredoc_divergences_keep_their_owners() {
         assert_eq!(code, 1, "{script}: stderr={err}");
         assert!(err.contains(want), "{script}: stderr={err}");
     }
+}
+
+// ── A brace-shaped delimiter word, at both granularities (task #432) ─────────
+//
+// The group matrix sits at the end of the group family above, the definer's matrix
+// inside the `;`-terminated family below: both builders whose closer is a brace word
+// read the same rule (LESSONS: "A brace-shaped here-doc delimiter word is
+// structure").
+
+/// The group's half of the rule that a here-doc **delimiter word** is here-doc
+/// structure, not brace syntax: a `}`-shaped operand does not close the group and a
+/// `{`-shaped one does not open it, at both spellings — glued (`<<}`, `<<{`) and
+/// bare (`<< }`, `<< {`) — so the group runs with its real closer and every row is
+/// bash parity (measured 2026-11-06). The rows whose delimiter line never arrives
+/// (the `;`-terminated ones) print the body through the end-of-file claim with
+/// fdshell's own wording (task #364). The definer's matrix is
+/// `a_brace_shaped_delimiter_word_of_a_function_body_is_structure`, the byte-scan
+/// pins are in `brace/tests.rs`, and the walk gate — the shared one the rule belongs
+/// in — is `parse/semi/closing/tests.rs::a_heredoc_structure_word_never_scores`
+/// (LESSONS: "A brace-shaped here-doc delimiter word is structure").
+///
+/// The **control** is an ordinary brace **argument** word, which stays brace syntax:
+/// braces are ungated by the place rule (LESSONS: "One clause rule, three scorers"),
+/// the gate covers structure positions only, so the group still closes at an argument
+/// `}` and the closer rule answers for it — the accepted divergence
+/// `tests/group.rs::malformed_groups_are_parse_errors` pins that message.
+#[test]
+fn a_brace_shaped_delimiter_word_of_a_group_body_is_structure() {
+    for (script, want, warns) in [
+        ("{ cat <<}\nx\n}\n}\necho tail", "x\ntail\n", false),
+        ("{ cat <<}; }\nx\necho tail", "x\necho tail\n", true),
+        ("{ cat <<{\nx\n{\n}\necho tail", "x\ntail\n", false),
+        ("{ cat << }; }\nx\necho tail", "x\necho tail\n", true),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+        if warns {
+            assert!(
+                err.contains("delimited by end-of-file"),
+                "{script}: stderr={err}"
+            );
+        } else {
+            assert_eq!(err.as_str(), "", "{script}");
+        }
+    }
+    // The control: an ordinary brace argument word still scores, so the group closes
+    // at it — bash prints `}` and `tail` at rc 0, fdshell answers at rc 1 (unchanged
+    // by this rule: no structure positions here).
+    let (out, _err, code) = run("{ echo }\nx\necho tail");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash prints `}}` and `tail` at rc 0"
+    );
 }
 
 // ── A `;`-terminated here-doc in a function-definition body (task #305) ──────
@@ -2918,21 +2978,26 @@ fn function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence() {
 /// The shapes the definer claim does **not** reach, pinned with their owners so
 /// the next reader does not half-fix them:
 ///
-/// * a delimiter word shaped like a brace (`f() { cat <<}; }; f`): bash prints
-///   the body rc 0 (with its end-of-file warning), fdshell rejects the line —
-///   the closer search of task **#432**.
 /// * a def-prefix redirection (`f() <<E { … }`): bash rejects the syntax rc 2;
 ///   fdshell parses it as a definer and the def body's own region prints
 ///   (task **#433**, filed by this one — #180 is the accepted trailing form).
 ///
-/// The third member of the family — a function in a pipeline stage
+/// The **brace-shaped delimiter word** (`f() { cat <<}; }; f`) — this test's
+/// original divergence — is bash parity since task **#432**: a delimiter word is
+/// here-doc structure, so the closer search does not score it, the definition
+/// parses, and the call prints `x`; the delimiter line never arrives, so the
+/// end-of-file warning row's wording rule applies (fdshell's own wording).
+/// The other member of the family — a function in a pipeline stage
 /// (`f() { cat <<E; }; f | cat`) — is **closed** by task **#481**: the definition
-/// claims the region exactly as the plain-shape row above (the #432 twin) does,
-/// and the stage fork now runs the function, so the row below is bash parity.
+/// claims the region exactly as the plain-shape rows above do, and the stage fork
+/// now runs the function, so that row is bash parity too.
 #[test]
 fn function_body_heredoc_shapes_that_stay_divergent() {
-    let (out, _err, code) = run("f() { cat <<}; }; f\nx");
-    assert_eq!((out.as_str(), code), ("", 1), "bash prints `x` at rc 0");
+    // Parity since task #432 (the matrix of the whole family is
+    // `a_brace_shaped_delimiter_word_of_a_function_body_is_structure`).
+    let (out, err, code) = run("f() { cat <<}; }; f\nx");
+    assert_eq!((out.as_str(), code), ("x\n", 0), "bash agrees");
+    assert!(err.contains("delimited by end-of-file"), "stderr={err:?}");
     let (out, _err, code) = run("f() { cat <<E; }; f | cat\nbody\nE");
     assert_eq!(
         (out.as_str(), code),
@@ -2945,6 +3010,50 @@ fn function_body_heredoc_shapes_that_stay_divergent() {
         ("bodyG\n", 0),
         "bash rejects the def-prefix redirection at rc 2 (task #433)"
     );
+}
+
+/// A here-doc **delimiter word** is here-doc structure, so a brace-shaped one is
+/// not brace syntax for the definer: a `}`-shaped operand does not close the
+/// definition and a `{`-shaped one does not open it, at both spellings — glued
+/// (`<<}`, `<<{`) and bare (`<< }`, `<< {`) — and the rows that differ only in the
+/// operand's shape are the detector (LESSONS: "A brace-shaped here-doc delimiter
+/// word is structure"). Every row is bash parity (measured 2026-11-06): the shape
+/// whose delimiter line arrives prints the body line silently, the `;`-terminated
+/// shape prints it with the end-of-file warning (fdshell's own wording, task #364).
+/// The control is the ordinary delimiter `E`; the four keyword-block rows are the
+/// boundary — their closers are gated keyword words, so a delimiter word is an
+/// argument there and this rule reaches nothing. The byte-scan and walk-level pins
+/// of the same rule are `brace/tests.rs::a_glued_operator_word_moves_no_brace_depth`
+/// and `parse/semi/closing/tests.rs::a_heredoc_structure_word_never_scores`; the
+/// group's matrix is `a_brace_shaped_delimiter_word_of_a_group_body_is_structure`.
+#[test]
+fn a_brace_shaped_delimiter_word_of_a_function_body_is_structure() {
+    for (script, want, warns) in [
+        ("f() { cat <<}\nx\n}\n}\nf", "x\n", false),
+        ("f() { cat <<}; }; f\nx", "x\n", true),
+        ("f() { cat <<{\nx\n{\n}\nf", "x\n", false),
+        ("f() { cat <<{; }; f\nx", "x\n", true),
+        ("f() { cat << }\nx\n}\n}\nf", "x\n", false),
+        ("f() { cat << }; }; f\nx", "x\n", true),
+        ("f() { cat << {\nx\n{\n}\nf", "x\n", false),
+        ("f() { cat << {; }; f\nx", "x\n", true),
+        ("f() { cat <<E\nx\nE\n}\nf", "x\n", false),
+        ("if cat <<}; then echo t; fi\n}", "t\n", false),
+        ("while cat <<}; do echo t; break; done\n}", "t\n", false),
+        ("case x in y) cat <<};; esac\n}", "", false),
+        ("if cat << }; then echo t; fi\n}", "t\n", false),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+        if warns {
+            assert!(
+                err.contains("delimited by end-of-file"),
+                "{script}: stderr={err}"
+            );
+        } else {
+            assert_eq!(err.as_str(), "", "{script}");
+        }
+    }
 }
 
 /// A script file whose last delimiter line has **no trailing newline**: the

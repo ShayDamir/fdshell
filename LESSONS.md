@@ -1153,7 +1153,7 @@ Task #268 makes the command-name position expand like an argument: `$(echo echo)
 6. **Fields 1.. of a multi-field expansion must reach the child unexpanded.** They are re-injected as argument words, and a `$`/`` ` `` byte in the child's argv is *its* trigger, so they arrive in the single-quote encoding with every mask bit `true` (`command_word/args.rs::quote_encode`): `$(echo '$HOME') x` looks up the literal name `$HOME`. Without the encoding the child expands it.
 7. **Measure against `bash -c` before pinning, and pin the report, not only the rc.** The empty command name and an unmatched literal pattern are fdshell's missing-command error at rc 1 where bash prints `: command not found` at rc 127; a pin that only asserts `rc != 0` passes for the wrong reason when the lookup is skipped entirely (an empty name, a name consumed from the next field, a fold that produced the wrong text). The quoted word-0 name `""` is asserted with `err.contains("\"\"")` for that reason.
 8. A scoped `NAME=value` prefix is applied **around** the word-0 expansion (the command name sees `E=echo; $(echo $E)`) and restored before the launch, because the child applies the prefix itself after substituting its args. The visible corner: `IFS=: $(printf "echo:hi") zz` splits word 0 on the scoped `IFS` (fdshell runs `echo hi zz`), where bash splits with the shell's `IFS` and reports the name `echo:hi`. Documented in README, pinned by name in `safe/fdshell/tests/cmd_subst.rs::word0_scoped_ifs_divergence` (which also pins the bash-parity form `IFS=:; $(printf "echo:hi") zz` — the same split when `IFS` is set as its own statement), not by accident.
-9. **The rule holds at dispatch granularity too (task #481): the stage child keeps ONE decision point, `child_main`.** A name written as a pipeline stage is a full command, so it resolves the plain path's way — user function first, then **both** builtin tables, then `PATH` — and the function arm belongs at `child_main`'s existing decision, where the capture socket, the stage's redirects, arg substitution, the scoped prefix and the trace have already run; putting it in `pipeline/child.rs` would re-implement all of them. The arm is reached only through the caller that owns the **stage's own text** (the plain launch passes `None`): the parse layer carries each stage's slice — the block stage already carried one for `run_parsed`, and `parse/cmdline/stage.rs` now carries one per command stage — because `function_call::call` needs the text for the positional/frame traces, and an arm that synthesised one would lose the stage's position. The plain path's functions stay in `run/parent.rs` (they already run there), and fdshell's own forked keywords must not gain the arm: `timeout 1 f` resolves as an external command, as bash's coreutils `timeout` does. **Task #381 is the same rule, not an exception to it — the trap this entry set:** the intercepted table gains its own arm at the same decision, and the **whole** table moves, because the stage's fork is the child's own copy of the state, so every handler's mutation (cwd, options, positionals, exports, aliases, frames) dies with the fork — bash's stage-subshell rule, arrived at by the design instead of special-cased per builtin. The arm re-enters `intercept::try_intercept` with the stage's text so the owners stay put: `child_main` decides which arm runs, `try_intercept` keeps the intercepts' trace (raw arguments; `set` traces itself) and the `$_` set, and the generic trace is gated on the answer so one line is printed per command on both paths. A handler's own report maps to `ChildProcessError::StageFailed` because the parent cannot tell a stage's failure from a forked builtin's, while the `Ok` arm reports the child's own last status — which is why a middle stage's `exit 3` is invisible and only the last stage's is the pipeline's code. Pins: `safe/fdshell/tests/pipeline.rs::a_function_stage_runs_the_function` and the redirect/status/subshell/trace/prefix tests beside it, plus `parse/pipeline/stage/tests.rs::a_command_stage_carries_its_own_text_slice`, and task #381's family in `safe/fdshell/tests/pipeline.rs` (its headline pin `an_intercepted_stage_runs_the_intercept_table`); the fork is a subshell, so a `cd`, an assignment, `exit` and a loop control raised by the body die with the child. Neighbours that must not move: task **#490** (bash exempts every stage but the last from `set -e`), tasks **#190**/**#186** (a `{ … }` written as a stage stays a parse error), and the two remaining members of `safe/fdshell/tests/heredoc.rs::function_body_heredoc_shapes_that_stay_divergent` (#432, #433 — the third member, a function stage with a here-doc in its body, is closed here and now pins bash parity).
+9. **The rule holds at dispatch granularity too (task #481): the stage child keeps ONE decision point, `child_main`.** A name written as a pipeline stage is a full command, so it resolves the plain path's way — user function first, then **both** builtin tables, then `PATH` — and the function arm belongs at `child_main`'s existing decision, where the capture socket, the stage's redirects, arg substitution, the scoped prefix and the trace have already run; putting it in `pipeline/child.rs` would re-implement all of them. The arm is reached only through the caller that owns the **stage's own text** (the plain launch passes `None`): the parse layer carries each stage's slice — the block stage already carried one for `run_parsed`, and `parse/cmdline/stage.rs` now carries one per command stage — because `function_call::call` needs the text for the positional/frame traces, and an arm that synthesised one would lose the stage's position. The plain path's functions stay in `run/parent.rs` (they already run there), and fdshell's own forked keywords must not gain the arm: `timeout 1 f` resolves as an external command, as bash's coreutils `timeout` does. **Task #381 is the same rule, not an exception to it — the trap this entry set:** the intercepted table gains its own arm at the same decision, and the **whole** table moves, because the stage's fork is the child's own copy of the state, so every handler's mutation (cwd, options, positionals, exports, aliases, frames) dies with the fork — bash's stage-subshell rule, arrived at by the design instead of special-cased per builtin. The arm re-enters `intercept::try_intercept` with the stage's text so the owners stay put: `child_main` decides which arm runs, `try_intercept` keeps the intercepts' trace (raw arguments; `set` traces itself) and the `$_` set, and the generic trace is gated on the answer so one line is printed per command on both paths. A handler's own report maps to `ChildProcessError::StageFailed` because the parent cannot tell a stage's failure from a forked builtin's, while the `Ok` arm reports the child's own last status — which is why a middle stage's `exit 3` is invisible and only the last stage's is the pipeline's code. Pins: `safe/fdshell/tests/pipeline.rs::a_function_stage_runs_the_function` and the redirect/status/subshell/trace/prefix tests beside it, plus `parse/pipeline/stage/tests.rs::a_command_stage_carries_its_own_text_slice`, and task #381's family in `safe/fdshell/tests/pipeline.rs` (its headline pin `an_intercepted_stage_runs_the_intercept_table`); the fork is a subshell, so a `cd`, an assignment, `exit` and a loop control raised by the body die with the child. Neighbours that must not move: task **#490** (bash exempts every stage but the last from `set -e`), tasks **#190**/**#186** (a `{ … }` written as a stage stays a parse error), and task **#433** (the def-prefix redirection), the remaining member of `safe/fdshell/tests/heredoc.rs::function_body_heredoc_shapes_that_stay_divergent`; the third member, a function stage with a here-doc in its body, is closed here and now pins bash parity.
 
 
 ## The redirect target is a substitution surface: expand to fields, glob with the redirect's own policy
@@ -5752,14 +5752,14 @@ region: pin the bytes, not the shape you expected.
 
 **Body regions are blanked, terminator lines are not — that asymmetry decides
 the closer search.** `tokenize_statement` blanks a **body** region's words
-(task #266), so a `}`/`{`/`done` line written inside a body is data and the
-definer's `rposition` brace search stays right. A **terminator** line's words
-stay tokens by the same rule, which is why the def builder must **not** move
-to `semi::closing_keyword_index`: measured, that walk closes the definition on
-a delimiter word. The delimiter-word-is-a-brace family (`f() { cat <<}; }; f`)
-is broken on master already and stays **#432**'s — it needs region-aware
-truncation shared by `parse/semi/closing` and `parse/function_block`, not a
-second token-list walk.
+(task #266), so a `}`/`{`/`done` line written inside a body is data. A
+**terminator** line's words stay tokens by the same rule, and so do an
+operator's **delimiter words** — the tokenizer keeps every word of the
+structure, so the gate belongs on the closer search's **score**, not on
+tokenizing — and that is where it lives now: the def builder reads the shared
+walk of `parse/semi/closing`, its private `rposition` gone (task **#432**),
+which is only sound because a structure word scores nothing there. The rule,
+its two granularities and its pins: LESSONS: "A brace-shaped here-doc delimiter word is structure".
 
 **The group adds one consumer the definer never had: its tail.**
 `parse/group_block.rs` parses the words written **after** `}`, so the appended
@@ -6894,3 +6894,53 @@ the ungated glue rule),
 `tests/redirect.rs::unquoted_operator_operands_stay_syntax_errors`. Every new input is
 pinned on **both** answers at ≥2 families — a parameter that changes nothing is an
 unkillable mutant.
+
+## A brace-shaped here-doc delimiter word is structure at the brace rules (task #432)
+
+A word that is **here-doc structure** — an operator's operand word (attached
+`<<}` / `<<{`, bare `<< }` / `<< {`) and a word whose span starts inside a
+terminator line — is never brace syntax. It stays a **token** (task #266: the
+verbatim families measure their text slices by tokens), so the rule is a gate on
+**scoring**, never on tokenizing, and never on the place transitions — those
+apply to every word, scored or not (LESSONS: "One clause rule, three scorers").
+
+The rule lives at both granularities the brace machinery has, once each:
+
+- **Byte scan** (`brace.rs`, shared by the definer and group spans): a here-doc
+  operator's word — the operator bytes **plus** its operand word — is one unit,
+  so no brace byte inside it moves the depth. The helper is
+  `scan/heredoc/op/word.rs::word_with_operand_end` and it asks the owners
+  (`span_operator`, `operator_delim`, `attached`, `lines::word_span`) instead of
+  re-deriving their quote/escape/`$( … )` decisions (LESSONS task #324). A
+  **quoted** operand is handed back: the helper answers `None` and the scan's own
+  quote state owns it, because a quoted brace word is word data.
+- **Token walk** (`parse/semi/closing`): a word at a here-doc-structure index —
+  the operator's delimiter word, or a word inside a `terminator_spans` span (tabs
+  included, so the `<<-` form is covered) — never scores. The set is built once
+  per walk from the two owners, `parse/heredoc/operator.rs::delimiter_token_indices`
+  and `scan::heredoc::terminator_spans` — exactly what `brace_expand/protect`
+  protects, for the same reason.
+
+Braces stay **ungated** by the place rule for ordinary words, so the detector of
+the rule is a **pair that differs only in the operand's shape**: a `}`-shaped
+operand must not close the block, a `{`-shaped operand must not open it, at both
+spellings. The definer and the group are the only builders whose closer is a
+brace word, so they are the only builders the rule can reach — which is why the
+definer **moved onto the shared walk** (its private `rposition` search is gone;
+the walk is seeded with `Closer::Brace` and starts just after the `{` word)
+instead of gating its own search.
+
+The **keyword blocks need nothing**: their closers are gated keyword words, so a
+brace-shaped delimiter word is an argument there — `if cat <<}; then echo t; fi` +
+`}`, the `while` and `case` twins, and the bare `if cat << }; …` twin are parity.
+
+Pins: `tests/heredoc.rs::a_brace_shaped_delimiter_word_of_a_function_body_is_structure`
+and `tests/heredoc.rs::a_brace_shaped_delimiter_word_of_a_group_body_is_structure`
+(the matrices, every row bash parity; the `;`-terminated rows print through the
+end-of-file claim in fdshell's wording); `brace/tests.rs::a_glued_operator_word_moves_no_brace_depth`,
+`brace/tests.rs::a_bare_operator_word_moves_no_brace_depth`,
+`brace/tests.rs::a_quoted_operand_stays_with_the_quote_state`,
+`parse/semi/closing/tests.rs::a_heredoc_structure_word_never_scores`. Two existing
+pins moved here from the divergence lists they carried:
+`tests/heredoc.rs::function_body_heredoc_shapes_that_stay_divergent` and
+`tests/heredoc.rs::group_body_heredoc_divergences_keep_their_owners`.
