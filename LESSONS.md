@@ -5101,13 +5101,28 @@ never reaches that guard — the block scan owns the run. Measure each shape aga
 bash before choosing the layer; the two shapes look identical and are not.
 
 The suite's own artifact is worth remembering: `tests/async.rs`'s `scratch(tag)`
-is a **cwd-relative** name (`async-<tag>-<pid>`, removed by `contents()`), and
+was a **cwd-relative** name (`async-<tag>-<pid>`, removed by `contents()`), and
 `glob::tests::relative_pattern_walks_from_the_base_fd` asserts that `a*` matches
 **nothing** in the crate directory. A leaked `async-*` file — trivially produced
 by a per-iteration redirect target, see above — fails an unrelated test with a
 message that names neither. After a suite run, check `git status --porcelain`
 for `??` in the crate directory, and never name a scratch file with something
 the shell is supposed to expand.
+
+Task #465 made that rule mechanical, in both directions: **no test may create a
+file in the package directory** — the package dir is the CWD of the unit tests
+and of the integration binaries, so a killed row poisons an unrelated
+CWD-relative assertion (and the mutation baseline) instead of just itself.
+Every file-creating row runs inside its own guarded pid+counter scratch dir
+(`tests/async.rs`: `scratch(tag)` returns a path inside one, its `Drop` owns the
+files, `contents()` is read-only; the dir is allocated exclusively per LESSONS: "pid + counter is collision-free only if the dir dies with its process"),
+and a pin that depends on the process CWD pins its own scratch CWD
+(`glob/tests.rs::relative_pattern_walks_from_the_base_fd` chdirs into its own
+**empty** guarded dir — the two arms must keep answering differently; the
+process-global `chdir` is safe exactly because nextest runs each test in its
+own process, which is why the workspace forbids `cargo test`). A SIGKILL (a
+nextest slow-timeout) runs no `Drop` at all, so the fix is *where* the file is
+created, never a smarter teardown.
 
 ## A physical line's region list is one global stream, so a boundary that flushes mid-line must leave the cursor on the line (task #313)
 

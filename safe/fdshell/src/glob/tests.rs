@@ -35,9 +35,10 @@ impl Drop for Scratch {
 
 /// A scratch dir with `a1 a2 b1 x .hidden file sub/{alpha,beta,gamma}` (the
 /// single-char `x` exercises `?`); each test gets its own (unit-test cwd is
-/// the repo root, so patterns below are absolute). Returns the path and the
-/// guard that removes it: bind the guard to a name (`let (dir, _scratch) = …`),
-/// because a bare `let _ = …` drops at once and deletes the dir mid-test.
+/// the package root `safe/fdshell/`, so patterns below are absolute). Returns
+/// the path and the guard that removes it: bind the guard to a name
+/// (`let (dir, _scratch) = …`), because a bare `let _ = …` drops at once and
+/// deletes the dir mid-test.
 fn scratch() -> (String, Scratch) {
     let c = COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("fdshell-glob-{}-{}", std::process::id(), c));
@@ -50,6 +51,26 @@ fn scratch() -> (String, Scratch) {
     }
     let path = String::from(dir.to_str().unwrap());
     (path, Scratch(dir))
+}
+
+/// An **empty** guarded scratch dir — no fixtures, same pid + counter guard as
+/// `scratch()`, but allocated **exclusively** (`create_dir`, bumping the
+/// counter on `AlreadyExists`, LESSONS Corollary 2) so a dir inherited from a
+/// killed run is never treated as ours. A pin that depends on the process CWD
+/// pins its own scratch CWD by chdir-ing here: the package dir the unit tests
+/// start in is not the test's own and cannot be promised clean — a killed
+/// test's stray file lands there and poisons the assertion (task #465). Safe
+/// because nextest runs each test in its own process (never `cargo test`).
+fn empty_scratch() -> Scratch {
+    loop {
+        let c = COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("fdshell-glob-{}-{}", std::process::id(), c));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return Scratch(dir),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => panic!("create_dir {}: {err}", dir.display()),
+        }
+    }
 }
 
 fn word(s: &str) -> ShortCStr {
@@ -263,8 +284,9 @@ fn escaped_star_word_is_not_a_pattern() {
 }
 
 /// Strict's glob base: a relative pattern walks from the pinned dirfd, not
-/// from the process CWD (the unit-test cwd is the repo root, which has no
-/// `a1`), so the `%CWD` fd is what a strict redirect target is globbed in.
+/// from the process CWD (the unit-test cwd is the package root `safe/fdshell/`,
+/// which no test may be asked to keep clean), so the `%CWD` fd is what a
+/// strict redirect target is globbed in.
 #[test]
 fn relative_pattern_walks_from_the_base_fd() {
     let cell = ForkCell::new(ShellState::new());
@@ -280,7 +302,12 @@ fn relative_pattern_walks_from_the_base_fd() {
         .map(|s| s.as_bytes().unwrap().to_vec())
         .collect::<Vec<_>>();
     assert_eq!(names, vec![b"a1".to_vec(), b"a2".to_vec()]);
-    // No base: the same pattern is CWD-rooted and finds nothing here.
+    // No base: the same pattern is CWD-rooted and finds nothing — pinned in
+    // the test's **own** empty scratch dir (an empty one: the two arms must
+    // keep answering differently), never in the package dir it starts in,
+    // where a killed test's leaked `a*` file reddened this arm (task #465).
+    let empty = empty_scratch();
+    std::env::set_current_dir(&empty.0).unwrap();
     assert!(matches(&word("a*"), &[], &cell, None).unwrap().is_empty());
 }
 

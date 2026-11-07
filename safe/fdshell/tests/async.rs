@@ -25,16 +25,77 @@ fn lines(out: &std::process::Output) -> Vec<String> {
     v
 }
 
-/// A per-test scratch file name (background children write their own stdout
-/// redirect, so a multi-job pin never depends on interleaving).
-fn scratch(tag: &str) -> String {
-    format!("async-{tag}-{}", id())
+/// A per-test scratch dir (pid + atomic counter), removed on drop — the
+/// `tests/redirect.rs` shape. No row may create a file in the package
+/// directory: it is the CWD of this binary and of the unit tests, so a killed
+/// row's file poisons an unrelated CWD-relative assertion (and the mutation
+/// baseline) instead of just itself (task #465, LESSONS "pid + counter is
+/// collision-free only if the dir dies with its process"). The name is
+/// allocated **exclusively** — `create_dir`, bumping the counter on
+/// `AlreadyExists` (LESSONS Corollary 2) — so a dir inherited from a killed
+/// run is never treated as ours.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
 }
 
+impl std::ops::Deref for Scratch {
+    type Target = std::path::Path;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn scratch_dir() -> Scratch {
+    loop {
+        let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("fdshell-async-{}-{}", id(), c));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return Scratch(dir),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => panic!("create_dir {}: {err}", dir.display()),
+        }
+    }
+}
+
+impl Scratch {
+    fn file(&self, name: &str) -> String {
+        self.0.join(name).to_str().unwrap().to_string()
+    }
+}
+
+/// A per-test scratch file **inside** the guarded dir (background children
+/// write their own stdout redirect, so a multi-job pin never depends on
+/// interleaving). Returns the path and the guard that removes the dir — bind
+/// both (`let (f, _s) = …`; a bare `let _ = …` drops at once, LESSONS).
+fn scratch(tag: &str) -> (String, Scratch) {
+    let dir = scratch_dir();
+    let path = dir.file(&format!("async-{tag}"));
+    (path, dir)
+}
+
+/// Two scratch files in **one** guarded dir — one guard per test, bind all
+/// three (`let (a, b, _s) = two_paths("2a", "2b");`, the `two_paths` shape in
+/// `tests/redirect.rs`).
+fn two_paths(ta: &str, tb: &str) -> (String, String, Scratch) {
+    let dir = scratch_dir();
+    (
+        dir.file(&format!("async-{ta}")),
+        dir.file(&format!("async-{tb}")),
+        dir,
+    )
+}
+
+/// Read a scratch file: **read-only** — the dir's `Drop` owns the files'
+/// lifetime, so there is no per-file `remove_file` teardown (LESSONS, the
+/// pid + counter entry's corollary).
 fn contents(path: &str) -> String {
-    let text = std::fs::read_to_string(path).unwrap_or_default();
-    let _ = std::fs::remove_file(path);
-    text
+    std::fs::read_to_string(path).unwrap_or_default()
 }
 
 fn rc(out: &std::process::Output) -> i32 {
@@ -104,7 +165,7 @@ fn function_in_background_runs_in_the_child() {
 /// Two `&` on one line are two jobs (bash parity): both run, `wait` reaps both.
 #[test]
 fn two_ampersands_are_two_jobs() {
-    let (a, b) = (scratch("2a"), scratch("2b"));
+    let (a, b, _s) = two_paths("2a", "2b");
     let out = run(&format!(
         "builtin echo a >{a} & builtin echo b >{b} &\nwait"
     ));
@@ -172,7 +233,7 @@ fn pipeline_is_one_async_job() {
 /// are identical.
 #[test]
 fn and_list_with_trailing_ampersand_runs_both_elements() {
-    let (a, b) = (scratch("ala"), scratch("alb"));
+    let (a, b, _s) = two_paths("ala", "alb");
     let out = run(&format!(
         "builtin echo a >{a} && builtin echo b >{b} &\nwait"
     ));
@@ -371,11 +432,10 @@ fn time_with_trailing_ampersand_runs_foreground() {
 /// form for background stays `&>&name`).
 #[test]
 fn capture_of_a_backgrounded_command_stays_in_the_child() {
-    let name = format!("async-capture-{}", id());
+    let (name, _s) = scratch("capture");
     let out = run(&format!(
         "builtin openat2 --flags O_CREAT --flags O_EXCL --flags O_RDWR --mode 0644 {name} %>%{name} &\nwait; builtin echo v=%{name}; builtin echo done"
     ));
-    let _ = std::fs::remove_file(&name);
     assert_eq!(rc(&out), 0);
     let tail = format!("v=%{name}");
     contains_all(&out, &[&tail, "done"]);
@@ -387,7 +447,7 @@ fn capture_of_a_backgrounded_command_stays_in_the_child() {
 /// is pinned by [`invalid_splits_run_nothing`]).
 #[test]
 fn multi_line_ampersand_then_semicolon_streams() {
-    let (a, b) = (scratch("sla"), scratch("slb"));
+    let (a, b, _s) = two_paths("sla", "slb");
     let out = run(&format!("builtin echo a >{a} &\n; builtin echo b >{b}"));
     let got = (contents(&a), contents(&b));
     assert_eq!(rc(&out), 0);
@@ -399,7 +459,7 @@ fn multi_line_ampersand_then_semicolon_streams() {
 /// print, `wait` reaps, rc 0.
 #[test]
 fn ampersand_on_the_next_line_claims_the_statement_above_it() {
-    let (a, b) = (scratch("mla"), scratch("mlb"));
+    let (a, b, _s) = two_paths("mla", "mlb");
     let out = run(&format!(
         "builtin echo a >{a} &\n& builtin echo b >{b}\nwait"
     ));
@@ -416,7 +476,7 @@ fn ampersand_on_the_next_line_claims_the_statement_above_it() {
 #[test]
 fn indented_ampersand_on_the_next_line_claims_the_statement_above_it() {
     for indent in [" ", "\t", " \t "] {
-        let (a, b) = (scratch("mla"), scratch("mlb"));
+        let (a, b, _s) = two_paths("mla", "mlb");
         let out = run(&format!(
             "builtin echo a >{a}\n{indent}& builtin echo b >{b}\nwait"
         ));
@@ -439,7 +499,12 @@ fn indented_ampersand_on_the_next_line_claims_the_statement_above_it() {
 /// reaps every job, so the harness's pipe closes (hermeticity).
 #[test]
 fn jobs_do_not_outlive_the_script() {
-    let (a, b, c) = (scratch("j1"), scratch("j2"), scratch("j3"));
+    let dir = scratch_dir();
+    let (a, b, c) = (
+        dir.file("async-j1"),
+        dir.file("async-j2"),
+        dir.file("async-j3"),
+    );
     let out = run(&format!(
         "builtin echo one >{a} & builtin echo two >{b} & builtin echo three >{c} &\nwait"
     ));
@@ -486,7 +551,7 @@ fn block_shapes() -> Vec<String> {
 #[test]
 fn every_block_shape_backgrounds_its_ampersand_statement() {
     for shape in block_shapes() {
-        let f = scratch("blkshape");
+        let (f, _s) = scratch("blkshape");
         let script = shape.replace("{f}", &f);
         let out = run(&format!("{script}\nwait"));
         assert_eq!(
@@ -513,7 +578,7 @@ fn invalid_block_bodies_run_nothing() {
         "f(){ builtin echo a >{f} & ; }; f",
         "case x in x) builtin echo a >{f} & ; ;; esac",
     ] {
-        let f = scratch("invalblk");
+        let (f, _s) = scratch("invalblk");
         let script = shape.replace("{f}", &f);
         let out = run(&script);
         assert_eq!(
@@ -534,7 +599,6 @@ fn invalid_block_bodies_run_nothing() {
             !std::path::Path::new(&f).exists(),
             "shape {shape:?}: the job ran"
         );
-        let _ = std::fs::remove_file(&f);
     }
 }
 
@@ -548,7 +612,7 @@ fn two_ampersands_in_one_block_body_are_two_jobs() {
         "case x in x) builtin echo a >{a} & builtin echo b >{b} & ;; esac",
         "case x in x) builtin echo a >{a} & builtin echo b >{b} & esac",
     ] {
-        let (a, b) = (scratch("blk2a"), scratch("blk2b"));
+        let (a, b, _s) = two_paths("blk2a", "blk2b");
         let script = shape.replace("{a}", &a).replace("{b}", &b);
         let out = run(&format!("{script}\nwait"));
         let got = (contents(&a), contents(&b));
@@ -572,7 +636,7 @@ fn two_ampersands_in_one_block_body_are_two_jobs() {
 /// name stays fixed here.)
 #[test]
 fn for_loop_runs_the_body_job_every_iteration() {
-    let s = scratch("forbody");
+    let (s, _s) = scratch("forbody");
     let out = run(&format!(
         "for i in 1 2; do builtin echo hi >>{s} & done\nwait"
     ));
@@ -607,7 +671,7 @@ fn block_body_job_reports_its_pid() {
 /// statement is a job, the untaken arm is not run at all (bash parity).
 #[test]
 fn if_arms_background_their_own_statements() {
-    let (t, e) = (scratch("ifthen"), scratch("ifelse"));
+    let (t, e, _s) = two_paths("ifthen", "ifelse");
     let script = format!("if true; then builtin echo a >{t} & else builtin echo b >{e} & fi\nwait");
     let out = run(&script);
     let (taken, untaken) = (contents(&t), contents(&e));
@@ -740,7 +804,7 @@ fn a_statement_follows_the_heredoc_pair_behind_an_ampersand() {
 /// bash writes the same bytes to the same file.
 #[test]
 fn the_backgrounded_heredoc_writes_its_body_to_its_own_file() {
-    let s = scratch("bgdoc");
+    let (s, _s) = scratch("bgdoc");
     let out = run(&format!("cat <<T >{s} &\nbody\nT\nwait"));
     let body = contents(&s);
     assert_eq!(rc(&out), 0, "stderr={:?}", str::from_utf8(&out.stderr));
@@ -956,11 +1020,12 @@ fn a_loop_control_keyword_with_the_ampersand_is_a_job() {
 /// under full-suite load.
 #[test]
 fn a_conditional_with_a_heredoc_prints_its_body_and_records_a_job() {
-    let f = scratch("cond-heredoc");
+    let (f, _s) = scratch("cond-heredoc");
     let out = run(&format!(
         "if cat <<A >{f} & then builtin echo x; fi\nbody\nA\nbuiltin echo pid=$!; wait"
     ));
-    // Read-and-remove before the asserts: a red assert must leave no `async-*` file.
+    // Read before the asserts: the file lives in the guarded scratch dir, whose
+    // drop cleans up even on a red assert (task #465).
     let body = contents(&f);
     assert_eq!(rc(&out), 0, "stderr={:?}", str::from_utf8(&out.stderr));
     assert!(
@@ -982,7 +1047,7 @@ fn a_conditional_with_a_heredoc_prints_its_body_and_records_a_job() {
 /// job (row 19).
 #[test]
 fn a_conditional_records_one_job_per_iteration() {
-    let f = scratch("cond-iter");
+    let (f, _s) = scratch("cond-iter");
     let out = run(&format!(
         "i=0; while : & do i=$((i+1)); builtin echo $i >>{f}; [ $i -ge 3 ] && break; done\n\
          builtin echo pid=$!; wait"
