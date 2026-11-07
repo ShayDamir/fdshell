@@ -1949,6 +1949,13 @@ fn run_ls(dir: &str, script: &str) -> (String, String, i32, Vec<String>) {
     (out, err, code, listing(dir))
 }
 
+/// `run_ls` through `run_fd3_closed`, for the one row whose expected output
+/// depends on fd 3 being **closed** in the child's start state.
+fn run_ls_fd3_closed(dir: &str, script: &str) -> (String, String, i32, Vec<String>) {
+    let (out, err, code) = run_fd3_closed(&format!("cd {dir}; {script}"));
+    (out, err, code, listing(dir))
+}
+
 /// The names `dir` holds beyond the seeded `a1 a2 sub`: what the script created.
 fn created(files: &[String]) -> Vec<String> {
     files
@@ -2137,7 +2144,10 @@ fn brace_expanded_redirect_operand_is_ambiguous() {
 /// rule). The **quoted** io-number prefix is no longer a divergence (task
 /// #458): the operand offset is mapped into the raw span, so the quoted prefix
 /// falls outside the rule *after* the mapping and both arms name `{a,b}` as
-/// bash does.
+/// bash does. The fd arms pin **both** sides of the fd 3 state, each in a state
+/// the test itself creates: the closed one through `run_ls_fd3_closed` (the
+/// harness does not guarantee fd 3 is closed), the open one by occupying fd 3 in
+/// the script.
 #[test]
 fn brace_expanded_redirect_operand_parity_rows() {
     let dir = seeded("brace_parity");
@@ -2229,11 +2239,26 @@ fn brace_expanded_redirect_operand_parity_rows() {
         assert!(created(&files).is_empty(), "{script}: {files:?}");
     }
     // One non-empty word keeps the fd arm: bash reports `Bad file descriptor`,
-    // fdshell its own fd message (rc parity).
+    // fdshell its own fd message (rc parity). The row runs through
+    // `run_ls_fd3_closed` because it asserts a **process state** — that fd 3 is
+    // *closed* — which the harness does not guarantee: a jobserver-inherited
+    // fd 3 makes the dup succeed and `<&` degrades to `cat`'s argument
+    // (LESSONS: "A pin that asserts "the parent's fd N is closed" must close it
+    // in the child's start state (task #276)").
     clean(dir);
-    let (_out, err, code, files) = run_ls(dir, "cat <&{,3}");
+    let (_out, err, code, files) = run_ls_fd3_closed(dir, "cat <&{,3}");
     assert_eq!(code, 1, "stderr={err:?}");
-    assert!(err.contains("is not open"), "stderr={err:?}");
+    assert!(err.contains("fd 3 is not open"), "stderr={err:?}");
+    assert!(created(&files).is_empty());
+    // The same script with fd 3 **occupied** is the other real outcome: the dup
+    // succeeds, so the empty word `<&` is `cat`'s argument (#370) and rc stays 1
+    // — the message is all that differs. Deterministic because the script opens
+    // fd 3 itself, whatever the harness holds; bash reads fd 3 instead
+    // (`bash -c` 5.3.9, fd 3 closed in the parent: stdout `x`, rc 0).
+    clean(dir);
+    let (out, err, code, files) = run_ls(dir, "exec 3<<<x; cat <&{,3}");
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("cat: '<&'"), "stderr={err:?}");
     assert!(created(&files).is_empty());
     // The `&>&name` pidvar arm carries no redirect operand, so a brace there is
     // an ordinary word (bash rejects the form outright: rc 2).
