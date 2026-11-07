@@ -2050,12 +2050,14 @@ fn brace_expanded_redirect_operand_is_ambiguous() {
 
 /// The operand rows bash accepts, and the shapes whose behaviour is **kept** as
 /// a documented divergence (task #324): the attached one-non-empty-word form,
-/// the brace words in an io-number prefix, the quoted io-number prefix (it
-/// escapes the guard on a path arm — an rc divergence), the redirect that
-/// *precedes* the ambiguous one (unopened, where bash opens it), and the
-/// `<&word` / `>&word` operands that need a real expansion (task #370 owns
-/// them, and the brace guard must not claim them — a word with no brace group
-/// never reaches the rule).
+/// the brace words in an io-number prefix, the redirect that *precedes* the
+/// ambiguous one (unopened, where bash opens it), and the `<&word` / `>&word`
+/// operands that need a real expansion (task #370 owns them, and the brace
+/// guard must not claim them — a word with no brace group never reaches the
+/// rule). The **quoted** io-number prefix is no longer a divergence (task
+/// #458): the operand offset is mapped into the raw span, so the quoted prefix
+/// falls outside the rule *after* the mapping and both arms name `{a,b}` as
+/// bash does.
 #[test]
 fn brace_expanded_redirect_operand_parity_rows() {
     let dir = seeded("brace_parity");
@@ -2105,34 +2107,30 @@ fn brace_expanded_redirect_operand_parity_rows() {
         "cat {{3,4}}>f: stderr={err:?}"
     );
     assert_eq!(created(&files), vec!["f".to_string()], "cat {{3,4}}>f");
-    // A **quoted** io-number prefix escapes the rule on a path arm, and it is an
-    // rc divergence (#324): `operand_offset` is a token-text offset, so the
-    // region of `>{a,b}` starts at the prefix's **closing** quote — `">{a,b}`.
-    // `expand_word` reads that dangling `"` as an opener, the brace counts as
-    // quoted, the region yields one word, the guard passes, and the textual
-    // rewrite stands: fdshell opens **both** `a` and `b` (rc 0) where bash says
-    // `{a,b}: ambiguous redirect` (rc 1) and opens nothing. Full parity would
-    // need a span↔token offset map, not a bug fix.
+    // A **quoted** io-number prefix reaches the rule through the span↔token
+    // offset map (#458): each stripped quote pair before the operand adds its
+    // two delimiters, so the region starts after the prefix's quotes, the brace
+    // is seen, and the row is bash parity (measured 2026-11-07): rc 1,
+    // `ambiguous redirect: {a,b}`, nothing opened.
     for script in ["cat \"2\">{a,b}", "cat '2'>{a,b}", "echo x \"2\">{a,b}"] {
         clean(dir);
         let (out, err, code, files) = run_ls(dir, script);
-        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
-        assert_eq!(
-            created(&files),
-            vec!["a".to_string(), "b".to_string()],
-            "{script}: bash is rc 1, `ambiguous redirect`"
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(
+            err.contains("ambiguous redirect: {a,b}"),
+            "{script}: stderr={err:?}"
         );
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
     }
-    // On a **dup** arm the prefix's closing quote falls *before* the offset, so
-    // the region carries no dangling quote and the guard does fire: rc parity
-    // with bash, and the message names the operand with its operator byte
-    // (`>&{a,b}`, where bash names `{a,b}`).
+    // The **dup** arm goes through the same map, so its message names the
+    // operand alone — `{a,b}` — exactly what bash writes (measured 2026-11-07);
+    // rc parity and nothing opened, as before.
     for script in ["echo x \"2\">&{a,b}", "echo x '2'>&{a,b}"] {
         clean(dir);
         let (_out, err, code, files) = run_ls(dir, script);
         assert_eq!(code, 1, "{script}: stderr={err:?}");
         assert!(
-            err.contains("ambiguous redirect: >&{a,b}"),
+            err.contains("ambiguous redirect: {a,b}"),
             "{script}: stderr={err:?}"
         );
         assert!(created(&files).is_empty(), "{script}: {files:?}");

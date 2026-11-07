@@ -1,32 +1,41 @@
 //! The ONE owner of "the byte offset at which a redirect **operand** begins in
-//! this token". A pre-parse word rewriter needs exactly that offset to judge
-//! the operand on its own (POSIX XCU 2.7 `worddef`: the operand expands to one
-//! word), and after its text rewrite every parse-level offset has moved, so the
-//! rule lives next to the parser's own owners: `bare`'s suffix test, the
-//! `quoted_bytes` gate, `token_fd`'s io-number rule and `redirect_op`'s
-//! continuation bytes — nothing is re-derived here, and
+//! this token's raw span". A pre-parse word rewriter needs exactly that offset
+//! to judge the operand on its own (POSIX XCU 2.7 `worddef`: the operand
+//! expands to one word), and after its text rewrite every parse-level offset
+//! has moved, so the rule lives next to the parser's own owners: `bare`'s
+//! suffix test, the `quoted_bytes` gate, `token_fd`'s io-number rule and
+//! `redirect_op`'s continuation bytes — nothing is re-derived here, and
 //! `tests::the_operand_slice_is_the_operand_the_parser_derives` pins the two
 //! owners agreeing on the same spelling (LESSONS: a byte-level and a
-//! token-level rule must call ONE predicate).
+//! token-level rule must call ONE predicate). The arms answer in token text;
+//! the answer is mapped into the raw span by `span_map` (the tokenizer's own
+//! stripped-quote record), because the rewriter slices raw bytes.
+
+mod span_map;
 
 use crate::mask::MaskBit;
 use crate::parse::Token;
 use crate::parse::redirect::bare;
 use crate::parse::redirect::{quoted_bytes, token_fd};
 use crate::parse::redirect_op::redirect_op;
+use span_map::span_offset;
 use sys::ShortCStr;
 
-/// The offset of token `i`'s redirect operand inside the token's own text.
-/// `None` when the token has no operand in itself: not a redirect at all (a
-/// quoted operator byte, a non-digit io-number prefix), a `<<`/`<<<` word
-/// (`brace_expand/protect.rs` owns those), a `&>&name`/`&>|&name` pidvar, a
-/// bare operator, whose operand is the **next** token (claimed at that token's
-/// offset 0), or an operator with nothing after it.
+/// The offset of token `i`'s redirect operand inside the token's **raw span**
+/// (quotes included). `None` when the token has no operand in itself: not a
+/// redirect at all (a quoted operator byte, a non-digit io-number prefix), a
+/// `<<`/`<<<` word (`brace_expand/protect.rs` owns those), a
+/// `&>&name`/`&>|&name` pidvar, a bare operator, whose operand is the **next**
+/// token (claimed at that token's offset 0), or an operator with nothing after
+/// it. A text offset produced by an arm is decoded through `span_map` into the
+/// span — the decode is the identity unless a quote pair was stripped before
+/// the operand (task #458).
 pub(crate) fn operand_offset(tokens: &[Token], i: usize) -> Option<usize> {
-    let (t, _start, _end, _fq, mask, _spans) = tokens.get(i)?;
-    bg_operand(t, mask)
+    let (t, _start, _end, _fq, mask, spans) = tokens.get(i)?;
+    let off = bg_operand(t, mask)
         .or_else(|| attached_operand(t, mask))
-        .or_else(|| bare_operand(tokens, i))
+        .or_else(|| bare_operand(tokens, i))?;
+    Some(span_offset(mask, spans, off))
 }
 
 /// The `&>` family, whose operator starts with `&` and so is invisible to the

@@ -301,22 +301,18 @@ redirect that **precedes** the ambiguous one is left unopened too:
 `>x{a,b}`, `>{a,b}c{d,e}`, `>{1..3}`, `>{a,b*}`, `&>{a,b}`, `&>>{a,b}`,
 `>%{a,b}`, `>&%{a,b}`, `<&{3,4}`, `<&{3..5}` and the zero-word `>{,}` /
 `>{,,}`; `>{a}`, `>x{a}y`, `>{a..a}`, `>'{a,b}'` and `>{ 1 , 2 }` keep their
-one word. Four measured residuals, each pinned: the *attached*
+one word. Three measured residuals, each pinned: the *attached*
 one-non-empty-word form `>{,zz}` is fdshell's `invalid redirect syntax`, where
 bash counts the non-empty word and opens `zz` (fdshell's textual rewrite yields
-`> >zz`), and braces in an io-number **prefix** produce several redirect words
+`> >zz`), braces in an io-number **prefix** produce several redirect words
 (`cat {3,4}>f` runs one `cat` with fds 3 and 4 on `f`, rc 0, bash runs `cat 3`
-and `cat 4`, rc 1), the word rule above. A **quoted** io-number prefix escapes
-the rule on a path arm — an rc divergence: the operand offset is a
-quote-stripped token offset, so the region starts at the prefix's **closing**
-quote, the dangling `"` opens a quote, the brace counts as quoted and the
-region yields one word, so `cat "2">{a,b}` and `cat '2'>{a,b}` keep the
-last-wins rewrite (rc 0, **both** `a` and `b` created) where bash is rc 1 and
-opens nothing; on a dup arm the closing quote falls *before* the region, so
-`echo x "2">&{a,b}` does bail, rc 1 as bash, and the message names the operand
-together with its operator byte (`>&{a,b}`, bash `{a,b}`). The async form
-`echo x >{a,b} &` is refused in the parent (rc 1) where bash prints the
-diagnostic in the child and its own status is 0 — the task #179 family.
+and `cat 4`, rc 1), the word rule above, and the async form `echo x >{a,b} &`
+is refused in the parent (rc 1) where bash prints the diagnostic in the child
+and its own status is 0 — the task #179 family. A **quoted** io-number prefix
+is no longer a residual (task #458): the token-text offset is mapped into the
+raw span by the tokenizer's own stripped-quote record, so
+`cat "2">{a,b}`, `cat '2'>{a,b}` and the dup arm `echo x "2">&{a,b}` are
+rc 1, name `{a,b}` and open nothing, as bash does.
 
 A redirection operator written as a statement's **first word** is a redirection
 of a **redirections-only** statement — POSIX XCU 2.1

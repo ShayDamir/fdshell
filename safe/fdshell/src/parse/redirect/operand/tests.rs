@@ -1,8 +1,9 @@
 //! The operand-offset table of `operand_offset` (task #324). The offset is the
-//! byte index at which a redirect's **operand** starts in the token's own text,
-//! and the agreement pin compares it with the operand the parsers derive for
-//! the same spelling: two owners of one rule, one pin (LESSONS: a byte-level
-//! and a token-level rule must call ONE predicate).
+//! byte index at which a redirect's **operand** starts in the token's **raw
+//! span** — an arm's token-text answer decoded through `span_map` — and the
+//! agreement pin compares it with the operand the parsers derive for the same
+//! spelling: two owners of one rule, one pin (LESSONS: a byte-level and a
+//! token-level rule must call ONE predicate).
 
 #![allow(clippy::unwrap_used)]
 use super::operand_offset;
@@ -61,19 +62,19 @@ fn parsed_operand(tokens: &[Token], op: usize) -> Option<String> {
 /// Every operand spelling and the offset its operand starts at: the attached
 /// path arms (with each operator and an io-number prefix), the `%var` arms, the
 /// dup arms, the `&>` family, and the bare forms, whose offset is 0 of the
-/// **next** token. The last two rows are the quote shapes: the offset is a
-/// token-text offset (the tokenizer strips quotes), so a span that carries
-/// quote bytes *before* the operand is sliced a little early. A quoted
-/// here-doc/here-string word is the parser's operandless arm, and a quoted
-/// operand brace needs no shift to be seen as quoted; only the quoted io-number
-/// digits shift, and that shifts **where the rule lands** (measured 2026-10-26,
-/// pinned by `tests/redirect.rs::brace_expanded_redirect_operand_parity_rows`):
-/// the row's region starts at the prefix's **closing** quote, so a path arm's
-/// region (`">{a,b}`) opens a quote, the brace reads as quoted, the region is
-/// **one** word and the guard passes — `cat "2">{a,b}` keeps the last-wins
-/// rewrite (rc 0, both words opened) where bash is rc 1; a dup arm's region
-/// (`>&{a,b}`) carries no quote byte, so `echo x "2">&{a,b}` does bail and the
-/// message names the operand **with** its operator byte, bash naming `{a,b}`.
+/// **next** token. The last rows are the quote shapes, every one measured
+/// through the real tokenizer: the arms answer in token text and `span_map`
+/// decodes that answer into the raw span — one mask region per stripped
+/// non-empty pair, one `spans` anchor per stripped empty pair — so a **quoted**
+/// io-number prefix no longer escapes the rule (task #458): `cat "2">{a,b}` and
+/// `cat '2'>{a,b}` see the brace and yield **two** words. Delimiters at or
+/// after the offset stay inside the region, so the map is the identity there
+/// (`>{a,b}"c"`, `>'a'b{c,d}`, `>'{a,b}'` keep their pins); the boundary
+/// conventions — a region end strictly before the offset, an empty-pair anchor
+/// at or before it, and offset 0 never moving — are pinned on both sides.
+/// `tests/redirect.rs::brace_expanded_redirect_operand_parity_rows` pins the
+/// end-to-end shape against bash 5.3.9. A quoted here-doc/here-string word
+/// stays the parser's operandless arm.
 #[test]
 fn operand_offset_is_the_operand_region_of_the_token() {
     for (line, i, want) in [
@@ -109,7 +110,12 @@ fn operand_offset_is_the_operand_region_of_the_token() {
         ("echo x &>> f", 3, Some("f")),
         ("cat > >{a,b}", 2, Some("{a,b}")),
         ("cat >'a'b{c,d}", 1, Some("'a'b{c,d}")),
-        ("cat \"2\">{a,b}", 1, Some("\">{a,b}")),
+        ("cat \"2\">{a,b}", 1, Some("{a,b}")),
+        ("cat '2'>{a,b}", 1, Some("{a,b}")),
+        ("cat \"2\"\"\"\"3\">{a,b}", 1, Some("{a,b}")),
+        ("cat 2>\"\"{a,b}", 1, Some("{a,b}")),
+        ("cat >a\"\"{b,c}", 1, Some("a\"\"{b,c}")),
+        ("cat > \"\"{a,b}", 2, Some("\"\"{a,b}")),
     ] {
         assert_eq!(region(line, i).as_deref(), want, "{line:?} token {i}");
     }
