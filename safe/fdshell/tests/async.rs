@@ -948,24 +948,33 @@ fn a_loop_control_keyword_with_the_ampersand_is_a_job() {
 
 /// A here-doc carried by a `&`-terminated condition keeps its body region (the
 /// condition's bodies travel as `run_cond_list`'s `bodies`; the flag changes no
-/// slice) and records its job: the body prints from the child, the arm prints
-/// in the parent, `$!` is the job. Async output has no order, so the lines are
-/// a set.
+/// slice) and records its job: the child's body lands in **its own file**, the
+/// arm prints in the parent, `$!` is the job. Task #463 moved the body pin off
+/// the shared stdout pipe onto its own file (the family's rule: give each writer
+/// its own file) — the parent is then the pipe's only writer, so its lines are
+/// its own; the old set assertion on the shared pipe lost the child's line once
+/// under full-suite load.
 #[test]
 fn a_conditional_with_a_heredoc_prints_its_body_and_records_a_job() {
-    let out = run("if cat <<A & then builtin echo x; fi\nbody\nA\nbuiltin echo pid=$!; wait");
-    assert_eq!(rc(&out), 0);
+    let f = scratch("cond-heredoc");
+    let out = run(&format!(
+        "if cat <<A >{f} & then builtin echo x; fi\nbody\nA\nbuiltin echo pid=$!; wait"
+    ));
+    // Read-and-remove before the asserts: a red assert must leave no `async-*` file.
+    let body = contents(&f);
+    assert_eq!(rc(&out), 0, "stderr={:?}", str::from_utf8(&out.stderr));
     assert!(
         reported_pid(&out) > 0,
         "stdout={}",
         str::from_utf8(&out.stdout).unwrap_or_default()
     );
+    assert_eq!(body, "body\n");
     let mut got: Vec<String> = lines(&out)
         .into_iter()
         .filter(|l| !l.starts_with("pid="))
         .collect();
     got.sort();
-    assert_eq!(got, ["body", "x"]);
+    assert_eq!(got, ["x"]);
 }
 
 /// One job **per condition run**: a three-iteration loop records three jobs, so

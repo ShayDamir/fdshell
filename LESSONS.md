@@ -5167,6 +5167,26 @@ its own file; pinning the concatenation is a flake. fd-3 rows go through
 catches a leaked `async-*` scratch file before it breaks
 `glob::tests::relative_pattern_walks_from_the_base_fd`.
 
+Task #463 adds two facts to that rule. A line **missing** from a
+`Command::output()` capture is not a scheduling race: the harness reads to EOF,
+EOF needs every writer closed, and the pin's `wait` precedes the exit — a write
+that happened is never left behind, so a missing line means the writer wrote
+nothing, died, or wrote elsewhere. The load-dependent channels of these rows sit
+**outside** the assertion: nextest's 10 s per-test slow-timeout, and the harness's
+spawn failure,
+LESSONS: "e2e tests that assert"
+(a `.output().unwrap()` in a helper reports fork `EAGAIN`/`ETXTBSY` as an
+`io::Error` and is itself a flake) — which is why the fix here is the per-writer
+shape and never a retry. Second: a **direct** run of a test binary is not a load
+detector for a file whose rows share a pid-named scratch file, because libtest
+threads share the pid and two rows using one tag collide on one file (measured: 16
+of 50 direct runs of the async binary red on an unmutated tree, all of them in the
+two rows sharing `mla`/`mlb`); the loop must run under nextest, where every test
+gets its own process.
+`safe/fdshell/tests/async.rs::a_conditional_with_a_heredoc_prints_its_body_and_records_a_job`
+is on the per-writer file shape now, and it is green in 350 focused runs under
+concurrent full-suite load.
+
 Resolved by task #525 (rule 17): `mark`'s `amp + 1` is now computed **once**
 (`let past_amp = amp + 1;`) and shared by both consumers, so the family sits at
 one site and a mutation there hits the load-bearing consumer too — the two
