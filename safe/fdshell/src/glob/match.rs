@@ -1,5 +1,7 @@
 //! Word-pattern detection and single-component pattern matching.
 
+// mutants: -C --lib -C --test -C glob -C --test -C case -C --test -C pattern -- -E 'test(/^glob::r#match::/) | binary(glob) | binary(case) | binary(pattern)'
+
 pub(in crate::glob) mod bracket;
 
 use crate::mask::MaskBit;
@@ -81,15 +83,19 @@ pub(crate) fn match_component(pat: &[u8], mask: &[MaskBit], name: &[u8], dotglob
             // A failed step (or an exhausted pattern) backtracks one name
             // byte to the last star, which then eats it. The star's own
             // position needs no test: it is recorded with `sn = ni`, forward
-            // steps only raise `ni`, and an extension sets `ni = sn + 1` = the
+            // steps only raise `ni`, and an extension sets `ni = step` = the
             // new `sn`, so `ni >= sn` and the name test below is the whole
             // rule (a second `sn` bound is a duplicate whose mutants are
-            // unkillable). A star past its end and a fully consumed name
+            // unkillable). The extension's step is computed **once** and shared
+            // by the record and the cursor (rule 17): written as two `sn + 1`
+            // expressions each mutant rebuilt the state from the sibling copy
+            // and survived. A star past its end and a fully consumed name
             // decide the verdict below without re-exploring.
             (None, Some((sp, sn))) if ni < name.len() => {
-                star = Some((sp, sn + 1));
+                let step = sn + 1;
+                star = Some((sp, step));
                 pi = sp;
-                ni = sn + 1;
+                ni = step;
             }
             // No extendable star: the match holds iff pattern and name are
             // both exactly consumed.

@@ -88,7 +88,11 @@ pub(crate) fn tokens_to_case(
     // slot it turned into a clause, and the leading-`;`-before-a-clause leniency
     // (task #300) stays as measured.
     if clauses.is_empty() {
-        let slot = closed.get(in_idx + 1..esac_idx).unwrap_or(&[]);
+        // The `+ 1` operand is dead — the guard below scans the slot for a real
+        // `;` **byte** and the `in` token is never one — so it is written as a
+        // method call, which leaves no operator site (CATCHING_MUTANTS rules 22/24).
+        let slot_from = in_idx.saturating_add(1);
+        let slot = closed.get(slot_from..esac_idx).unwrap_or(&[]);
         if slot.iter().any(|tok| semi_byte(tok, line)) {
             bail!(ParseError::CaseEmptyClauseList);
         }

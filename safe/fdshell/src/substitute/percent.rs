@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^substitute::/)'
+
 use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
@@ -55,9 +57,9 @@ pub(crate) fn percent_subst(
         // `%` plus the empty name having consumed nothing — byte-for-byte the
         // old `_` arm, and this is also the `limit == 0` path (the region ends
         // at the `%`). A guard here restating `collect_name`'s own test is a
-        // duplicate rule, so it is deleted: its `with true`/`with false`/
-        // `||`→`&&`/`==`→`!=` family was accepted-equivalent (task #223 probed
-        // 12 shapes, zero differences; task #455 removed the site).
+        // duplicate rule, so it is deleted (task #223 probed 12 shapes and found
+        // no difference; task #455 removed the site, so the family it had —
+        // `with true`/`with false`/`||`→`&&`/`==`→`!=` — is gone from the file).
         _ => {
             let name_scs = collect_name(peek, limit)?;
             if !write_fd(&name_scs, cache, state, out)? {

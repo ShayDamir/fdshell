@@ -96,6 +96,23 @@ fn captures_are_rejected_with_the_timeout_error() {
     ));
 }
 
+/// Rule 19: the arm is unreachable to a *script*, not to a unit test.
+/// `command_word::expand` calls `cell.borrow_mut()`, and that borrow is
+/// **fallible** (`Err(SharedBorrowActive)`) — so a row that holds a shared borrow
+/// of the state across the call reaches `CmdError::Never` and pins this arm's own
+/// mapping: under `delete match arm CmdError::Never` the answer becomes `Resolve`.
+/// No fork happens here (a forked child would call `reset_after_fork`), and the
+/// assertion is on the variant, never on the `at …` frame a debug build adds.
+#[test]
+fn a_held_shared_borrow_answers_the_never_arm() {
+    let cell = make_cell();
+    let held = cell.borrow().unwrap();
+    let cmdline = make_cmdline(&["1", "true"]);
+    let err = super::run_timeout(b"timeout 1 true", &cmdline, &cell).unwrap_err();
+    assert!(matches!(err.current_context(), TimeoutError::Never));
+    drop(held);
+}
+
 #[test]
 fn missing_seconds() {
     let err = run(&[]).unwrap_err();

@@ -1387,17 +1387,26 @@ the load-flaky tests comes before chasing any of this.
      (`Some(p) => i = i.saturating_add(p),`) so no operator is left at the site
      (rules 22/24): the family — `+`→`*` and its `-` twins at both operands,
      which the focus runs kept scoring as caught — has no site to land on.
-     The focused `-j1` run over the five rewritten files (this one, `block.rs`,
-     `group.rs`, `bg.rs`, `regions.rs`, 108 mutants, 2026-11-05) reports **no
-     miss** from any of the seven resolved sites; its four misses are the
-     pre-existing `segment/bg.rs::line_continues` family (drift from task
-     #313's sweep, not a registry record — this chore's `bg.rs` change is
-     value-identical by construction and those mutants touch only
-     `line_continues`'s own body, so they read the same before and after).
-     What stays from the old entry is its rule: an equivalence argument must
-     cover every variable the extra iteration can reach — a flag is as
-     load-bearing as the index — and a recorded equivalent on a rewritten body
-     is a **new** finding to re-prove by hand.
+      The focused `-j1` run over the five rewritten files (this one, `block.rs`,
+      `group.rs`, `bg.rs`, `regions.rs`, 108 mutants, 2026-11-05) reports **no
+      miss** from any of the seven resolved sites; its four misses were the
+      pre-existing `segment/bg.rs::line_continues` family (drift from task
+      #313's sweep, not a registry record — this chore's `bg.rs` change is
+      value-identical by construction and those mutants touch only
+      `line_continues`'s own body, so they read the same before and after).
+      Task #534 closed that family with a pin at the predicate's own answer
+      (`segment/bg/tests.rs::the_three_cursor_rows_are_pinned_at_their_own_answer`:
+      comment behind the `&`, command behind it, the line ending at it — each row
+      carries a `<<` so the region jump it decides is real): all seven mutants of
+      `line_continues` now fail a row, measured one by one — the two
+      function-head mutants, the `amp + 1` pair, the `&&`→`||` and both
+      `delete !`. The segment face alone cannot see the split (every row keeps its
+      segments under `line_continues → true`), which is why the answer itself is
+      what has to be pinned (rules 2/9).
+      What stays from the old entry is its rule: an equivalence argument must
+      cover every variable the extra iteration can reach — a flag is as
+      load-bearing as the index — and a recorded equivalent on a rewritten body
+      is a **new** finding to re-prove by hand.
 4. Resolved by task #513 — the **three** `scan/heredoc/lines.rs` loop bounds this
    entry accepted (each proven equivalent by applying it and running the whole
    suite green, twice, task #318):
@@ -6557,11 +6566,6 @@ the redirect, into the cwd *at redirect time*),
 `tests/cd_expand.rs::cd_dash_prints_only_after_a_successful_move`, and
 `tests/cd_expand.rs::cd_dash_write_failure_is_reported` (kills the two `write_all`
 arms; bash continues after its rc-1 error, fdshell aborts — the task #179 family).
-
-Accepted equivalent: the `getcwd()` arm's `change_context` in
-`intercept/cd.rs::print_new_directory` — on this path the new cwd exists by
-construction, so only the cap's `E2BIG` (LESSONS: "Retrying on a foreign errno
-converges") could reach the arm and no test can; the arm only names the failure.
 
 ## A namespace-selection predicate must cover every store the delete path owns
 

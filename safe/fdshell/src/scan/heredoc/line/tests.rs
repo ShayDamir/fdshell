@@ -110,11 +110,10 @@ fn line_start_anchors_past_the_preceding_newline() {
 }
 
 /// A zero-length window has no operators, so the walk's early return answers
-/// `(empty, line_end)` before the `line_end - 1` read is reached. Pinned: the
-/// `line_end > 0` guard on that read is **defensive and unreachable** at
-/// `line_end == 0` (an empty window yields no ops, so `ops.is_empty()` returns
-/// first) — its mutant is accepted, the guard stays so a debug build cannot
-/// underflow if a caller ever widens the window contract.
+/// `(empty, line_end)`: an empty window yields no ops, so the `ops.is_empty()`
+/// filter is what answers here. (The `line_end > 0` guard on a `line_end - 1` read
+/// that this row used to defend is gone — no ops, no read, and no mutant left to
+/// accept.)
 #[test]
 fn line_bodies_of_an_empty_window_are_empty() {
     assert_eq!(line_bodies_for_line(b"cat <<T\nbody\nT", 0, 0), (vec![], 0));

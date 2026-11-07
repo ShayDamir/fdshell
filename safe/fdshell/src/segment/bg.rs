@@ -5,6 +5,8 @@
 //! split appends `Segment::AsyncInvalid`, which `run_script` bails on before
 //! executing any segment.
 
+// mutants: -C --lib -- -E 'test(/^segment::bg::/)'
+
 use super::Segment;
 use super::book::Book;
 use super::line::flush::flush_line;

@@ -204,6 +204,64 @@ fn invalid_splits_are_marked() {
     }
 }
 
+/// The `&` byte's position — the cursor index [`super::mark`] hands
+/// [`super::line_continues`].
+fn amp_at(line: &[u8]) -> usize {
+    line.iter().position(|&b| b == b'&').unwrap()
+}
+
+/// The three rows of `line_continues`'s cursor table, pinned at the predicate's
+/// **own answer** (rule 2) and at the segments each row produces (rule 9). Every
+/// row puts a `<<` on the `&`'s own line so the body-region jump it decides is
+/// real: a comment behind the `&` ends the line (task #333's decision), command
+/// text behind it is a new statement (task #313), and a line that ends at the `&`
+/// jumps the way a comment line does. The segment face alone cannot see the split
+/// — all three rows keep their segments under `line_continues → true`, which is
+/// why the family survived here — so the answer itself is what kills it.
+#[test]
+fn the_three_cursor_rows_are_pinned_at_their_own_answer() {
+    let rows: &[(&[u8], bool)] = &[
+        (b"cat <<T & #c\nbody\nT", false),
+        (b"cat <<T & echo b\nbody\nT", true),
+        (b"cat <<T &\nbody\nT", false),
+    ];
+    for (line, want) in rows {
+        assert_eq!(
+            super::line_continues(line, amp_at(line)),
+            *want,
+            "{line:?}: the predicate's own answer"
+        );
+    }
+    // The same three rows at segment level, so the jump's shape stays measured.
+    assert_eq!(
+        statements(b"cat <<T & #c\nbody\nT"),
+        alloc::vec![(
+            b"cat <<T".as_slice(),
+            alloc::vec![b"body\nT".to_vec()],
+            true
+        )],
+    );
+    assert_eq!(
+        statements(b"cat <<T & echo b\nbody\nT"),
+        alloc::vec![
+            (
+                b"cat <<T".as_slice(),
+                alloc::vec![b"body\nT".to_vec()],
+                true
+            ),
+            (b"echo b".as_slice(), alloc::vec![], false),
+        ],
+    );
+    assert_eq!(
+        statements(b"cat <<T &\nbody\nT"),
+        alloc::vec![(
+            b"cat <<T".as_slice(),
+            alloc::vec![b"body\nT".to_vec()],
+            true
+        )],
+    );
+}
+
 /// The multi-line streaming shape (measured bash 5.3.9: `echo a &\n; echo b`
 /// prints `a`, rc 2 — line 1 executes, line 2 is the syntax error; fdshell
 /// prints `a` `b` rc 0, its accepted empty-statement divergence). The
