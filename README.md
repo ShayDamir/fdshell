@@ -335,6 +335,25 @@ builtin openat2 --dirfd %CWD --flags O_CREAT --flags O_WRONLY --mode 0644 log %>
 echo "written through the variable" >%log
 ```
 
+The dup word is a **number**, and only a number — but a word that is not one or
+more digits is a **file** when the operator has no io-number, and an
+`ambiguous redirect` (rc 1, nothing opened) when it has one, and for every
+`<&word` spelling:
+
+```shell
+echo a >&x        # creates the file `x` with `a` (bash does the same)
+echo b >&"x"      # quoting the word is not an escape: the file `x`
+echo c >&1x       # a digit run plus text is not a number: the file `1x`
+echo d 2>&x       # `x: ambiguous redirect`, rc 1
+cat <&x           # `x: ambiguous redirect`, rc 1
+echo e >&%v       # fdshell's fd lookup: `%` is its descriptor namespace
+```
+
+The word rides the target surface below (fold, glob, expand). The `%` arm sits
+in front of the file-word rule, so `>&%v` stays fdshell's fd lookup where bash
+creates the file `%v`
+([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#-is-a-file-descriptor-namespace)).
+
 An operand that begins with `<`, `>`, `&` or `%` is a file name when that
 byte is quoted — `echo hi > "&f"` opens `&f`, as bash does — and a syntax
 error when it is not (`> &f`); the spaced `%var` operand stays a syntax
@@ -348,8 +367,12 @@ empty pair is a delimiter only for the here-document family
 The attached fd-variable target obeys the same quoting rule on its **own `%`
 byte**: the `%` names a descriptor only while unquoted, so `> "%log"`,
 `> '%log'`, `>| "%log"`, `>> "%log"` and `&> "%log"` create/append the
-**file** `%log` as bash does, while `>&%var` — a dup, never a file operand
-in bash — keeps its fd lookup quoted and unquoted alike.
+**file** `%log` as bash does. The dup `>&%var` is the deliberate asymmetry
+where an io-number is present (`2>&%var`): bash answers
+`ambiguous redirect` quoted and unquoted alike, so fdshell's fd lookup runs in
+both spellings — and the `%` arm answers first for the io-number-less `>&%var`
+too, where bash would create the file `%var`
+([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#-is-a-file-descriptor-namespace)).
 
 The target of a `>`-family operator is a **word**: `$( … )`, `` ` … ` ``,
 `$(( … ))`, `$name`, `${name…}`, `$@`/`$*` and a leading `~` expand in it, the
@@ -378,8 +401,10 @@ The fd target forms are decided at parse time — the attached `>%var` and the
 `> a%b` creates `a%b`. A `/dev/fd/N` target is an ordinary word at parse time
 and only becomes a magic path at open time (task #337), which is why a target
 that merely *expands* to the magic form keeps the pre-command descriptor (the
-accepted divergence, task #479). The `>&N` duplicate word is not a word to expand
-(`>&$(echo 1)` reads the `1` literally, task #370). In strict mode the ban on
+accepted divergence, task #479). The `>&N` duplicate word is decided on the
+**literal** word, so an operand that needs an expansion is decided before it:
+`>&$(echo 1)` files `1` where bash dups fd 1 (task #370), and a digit word has
+nothing to expand. In strict mode the ban on
 an absolute target is checked on the **expanded** word, so a target expanding
 to `/etc/x` is refused before anything is opened.
 

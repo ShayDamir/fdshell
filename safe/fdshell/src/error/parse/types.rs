@@ -39,6 +39,8 @@ pub(crate) enum ParseError {
     UnexpectedChar { ch: u8 },
     /// invalid redirect syntax
     InvalidRedirect,
+    /// ambiguous redirect: {name}
+    AmbiguousRedirect { name: sys::ShortCStr },
     /// brace expansion produced too many words
     BraceExpansionTooManyWords,
     /// brace expansion nested too deeply; reduce the nesting of brace groups

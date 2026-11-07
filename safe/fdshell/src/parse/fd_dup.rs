@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C fddup -- -E 'test(/^parse::/) | binary(fddup)'
+
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
 use crate::redirect::RedirectDef;
@@ -10,6 +12,12 @@ use super::redirect::token_fd;
 /// redirections; other `&…` tails are not redirects. The io-number prefix
 /// goes through `token_fd`: only **unquoted** digits select a descriptor,
 /// so a quoted `'2'>&1` dups at the operator's default fd 1.
+///
+/// `None` for every other word, and the **caller** decides it (task #461): bash
+/// files it when the operator has no io-number, and answers `ambiguous redirect`
+/// for an io-number spelling and for `<&`. The `%` arm sits in front of both, so
+/// `>&%v` stays fdshell's fd lookup where bash creates the file `%v`
+/// (POSIX_COMPATIBILITY "`%` is a file descriptor namespace").
 pub fn parse_fd_dup_redirect(
     after_op: &ShortCStr,
     prefix: &ShortCStr,

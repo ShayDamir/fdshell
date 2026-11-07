@@ -1201,8 +1201,11 @@ word, the magic meaning being read by the resolver at open time — task #337), 
 a `%` byte inside a target word is file-name data: `> a%b` creates `a%b`,
 `> a%CWD/x` is ENOENT on that name.
  A word carrying *another* trigger still reaches the `%name` arm, so
-`> a%log$(echo x)` expands `log`; accepted, owned by task #371. The `>&N`
-duplicate word is not expanded at all (`>&$(echo 1)`, task #370).
+`> a%log$(echo x)` expands `log`; accepted, owned by task #371. The `>&word`
+duplicate is decided on the **literal** word at the parse site, so expansion
+happens only when the word lands on the **path** arm: `>&$(echo 1)` files the
+file `1` while bash dups fd 1 (task #370's divergence), and the digit, `-` and
+`%` arms have nothing to expand (task #461).
 6. **The here-doc *delimiter* word is not a substitution surface; do not
 "unify" the neighbours.** `cat <<$(echo EOF)` delimits on the literal
 `$(echo EOF)` in bash, and the `<<<` word right beside it already expands
@@ -6172,11 +6175,13 @@ an escape (a bound `%name` expands inside quotes; task #252 owns gating it):
 one rule per layer, stated once, in POSIX_COMPATIBILITY "`%` is a file
 descriptor namespace".
 
-The measured asymmetry: the **dup** arm `>&%var` (`parse/fd_dup.rs`) stays
-mask-blind. bash answers `ambiguous redirect` rc 1 for `>&%v` **and**
-`>&"%v"` — a `>&word` operand is never a file name — so quoting offers no
-file-word escape, and gating the arm would turn today's rc-parity row into
-fdshell printing the word at rc 0. Non-arms, pinned so nobody re-litigates
+The measured asymmetry: the **dup** arm `2>&%var` (`parse/fd_dup.rs`) stays
+mask-blind. bash answers `ambiguous redirect` rc 1 for `2>&%v` **and**
+`2>&"%v"` — with an io-number a `>&word` operand is never a file name — so
+quoting offers no file-word escape, and gating the arm would turn today's
+rc-parity row into fdshell printing the word at rc 0. Without an io-number
+bash's file-word rule does reach the dup — `>&%v` creates the file `%v` at
+rc 0 — and the `%` arm answers first there too (task #461). Non-arms, pinned so nobody re-litigates
 them: `\%` needs no rule (the token text starts with `\`, the text rule
 never fires); `> ""%v` stays fdshell's parse error where bash creates `%v`
 (an empty quoted region contributes no bytes and no mask bit, as #323's
@@ -7052,3 +7057,29 @@ outstanding borrow, so no script reaches the arm; deleting it leaves the whole
 suite green and is recorded in `tools/mutants_allowlist.toml`. Rule: test the
 error conversion at the function that owns it, and allowlist only a fallback
 whose producer is unreachable from that call path.
+
+## bash's dup-word rule is not one rule: measure each spelling separately (task #461)
+
+`>&word` and `<&word` look like one rule and are not. bash files the word only
+for `>&` **without** an io-number (`>&x` creates the file `x`, rc 0); every
+spelling with an io-number, and every `<&` spelling, answers
+`ambiguous redirect` rc 1 naming the word and opens nothing (`2>&x`, `<&x`,
+`3<&x`). Quoting the word is not an escape (`>&"x"` files `x`), a digit run with
+any other text is not a number (`>&1x` files `1x`), and a word that needs an
+expansion is decided **before** the expansion — the parse site reads the literal
+word, which is why `>&$(echo 1)` files `1` where bash dups fd 1 (task #370). The
+`%` namespace arm sits in front of both answers, so `>&%v` stays fdshell's fd
+lookup where bash creates `%v`.
+
+The reproduction: `bash -c` 5.3.9 against this tree's build, **one scratch
+directory per row** — the io-number and the operator byte each change the answer,
+so never generalise from one spelling, and a shared directory hides the file a
+file-word row created behind the ambiguous row that follows it. Pins:
+`tests/redirect.rs::the_dup_word_files_only_without_an_io_number`, plus the unit
+rows in `parse/redirect/attached/tests.rs` and
+`parse/redirect/operand/tests.rs`.
+
+The word-split family caveat stands: bash splits a word at an unquoted operator
+byte and fdshell never does, so `>&>f`, `>&|f` and `>&-5` are syntax errors or
+separate words in bash and **whole** words here — the pins encode fdshell's own
+readings and name the divergence.

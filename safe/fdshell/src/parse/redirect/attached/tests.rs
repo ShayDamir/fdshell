@@ -7,14 +7,23 @@
 
 #![allow(clippy::unwrap_used)]
 use super::attached;
+use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
 use crate::parse::token::tokenize_statement;
-use crate::redirect::{RedirectDef, RedirectSource};
+use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
+use error_stack::Report;
 
 /// The attached form of the operator token (token 1) of a probe line.
 fn attached_of(line: &[u8]) -> Option<RedirectDef> {
     let tokens = tokenize_statement(line).unwrap();
     attached(tokens.get(1)?).unwrap()
+}
+
+/// Its **error**, for the rows the arm reports (`attached_of` swallows the
+/// `Report`, so the variant is asserted through this one).
+fn attached_err_of(line: &[u8]) -> Report<ParseError> {
+    let tokens = tokenize_statement(line).unwrap();
+    attached(tokens.get(1).unwrap()).unwrap_err()
 }
 
 fn assert_path(line: &[u8], export_to: i32) {
@@ -103,9 +112,12 @@ fn quoted_dup_ampersand_falls_through_to_the_path() {
 /// cannot pass: `>%v"w"` keeps the unquoted `%` (a gate reading the byte
 /// *after* it sees the quoted `w` and wrongly yields a path), and `>"%v"x`
 /// reads the quoted `%` (a gate reading the operator byte, index 0, wrongly
-/// yields a var). The `>&%v` dup arm stays **mask-blind**: bash gives
-/// `ambiguous redirect` rc 1 quoted *and* unquoted, so no file-name escape
-/// exists there (§the task's measurement; pinned in `tests/redirect.rs`).
+/// yields a var). The dup arm stays **mask-blind** on its io-number spellings
+/// (`2>&%v`, `2>&"%v"`): bash answers `ambiguous redirect` rc 1 quoted *and*
+/// unquoted, so no file-name escape exists there. The no-io-number `>&%v` is the
+/// row where bash **creates the file `%v`** while fdshell keeps the fd lookup —
+/// the `%` arm sits in front of bash's file-word rule (task #461; both sides
+/// pinned in `tests/redirect.rs`).
 #[test]
 fn quoted_percent_target_is_a_path_not_an_fd_variable() {
     for line in [
@@ -178,7 +190,8 @@ fn quoted_percent_target_is_a_path_not_an_fd_variable() {
         attached(tokens.get(1).unwrap()).is_err(),
         "`>>%x` stays the parse error it is"
     );
-    // The dup arm stays mask-blind (bash: `ambiguous redirect` for both).
+    // The io-number dup spellings stay mask-blind (bash: `ambiguous redirect`
+    // for both), so the mask gate is not applied there.
     for line in [b"cat 2>&\"%v\"".as_slice(), b"cat 2>&%v"] {
         let def = attached_of(line).unwrap();
         assert_eq!(def.export_to, 2, "line={line:?}");
@@ -186,5 +199,77 @@ fn quoted_percent_target_is_a_path_not_an_fd_variable() {
             RedirectSource::Var(name) => assert_eq!(name.as_bytes().unwrap(), b"v"),
             s => panic!("line={line:?}: the dup arm stays mask-blind, got {s:?}"),
         }
+    }
+}
+
+/// bash's `>&word` rule, decided here at the parse site on the literal word
+/// (task #461). It is **not** one rule: only `>&` with **no** io-number files a
+/// non-numeric word — through the shared target surface, so the word rides with
+/// its own mask and quoting — while every io-number spelling, and every `<&`
+/// spelling, answers `ambiguous redirect` naming the word (rc 1, nothing
+/// opened). The digit, `-` and `%var` arms keep their answers, and an empty word
+/// is not a word at all, so `cat >&` stays word data. Every value is `bash -c`
+/// 5.3.9 measured in a fresh dir per row: `>&x` / `>&"x"` / `>&1x` / `>&$n`
+/// create their file at rc 0, `2>&x`, `<&x` and `<&%v` are ambiguous at rc 1.
+#[test]
+fn a_non_numeric_dup_word_is_a_file_word_only_without_an_io_number() {
+    for (line, path, quoted) in [
+        (b"cat >&x".as_slice(), "x", false),
+        (b"cat >&\"x\"", "x", true),
+        (b"cat >&1x", "1x", false),
+        (b"cat >&$n", "$n", false),
+    ] {
+        let def = attached_of(line).unwrap_or_else(|| panic!("line={line:?} must parse"));
+        assert_eq!(def.export_to, 1, "line={line:?}");
+        assert_eq!(def.direction, RedirectDirection::Write, "line={line:?}");
+        match &def.source {
+            RedirectSource::Path { path: p, mask, .. } => {
+                assert_eq!(p.as_bytes().unwrap(), path.as_bytes(), "line={line:?}");
+                assert_eq!(
+                    mask.len(),
+                    path.len(),
+                    "line={line:?}: the mask rides the word"
+                );
+                assert_eq!(
+                    mask.first().copied().is_some_and(MaskBit::quoted),
+                    quoted,
+                    "line={line:?}"
+                );
+            }
+            s => panic!("line={line:?} must be a path, got {s:?}"),
+        }
+    }
+
+    // With an io-number, and on the `<&` side, the same word is bash's
+    // `ambiguous redirect`, named alone.
+    for (line, name) in [
+        (b"cat 2>&x".as_slice(), "x"),
+        (b"cat <&x", "x"),
+        (b"cat 3<&abc", "abc"),
+    ] {
+        let report = attached_err_of(line);
+        match report.current_context() {
+            ParseError::AmbiguousRedirect { name: got } => {
+                assert_eq!(got.as_bytes().unwrap(), name.as_bytes(), "line={line:?}")
+            }
+            other => panic!("line={line:?}: expected ambiguous redirect, got {other:?}"),
+        }
+    }
+
+    // The `%` arm sits in front of both answers, unchanged (POSIX_COMPATIBILITY
+    // "`%` is a file descriptor namespace"): bash files the word for `>&%v` and
+    // is ambiguous for `<&%v`, fdshell looks the fd variable up in both.
+    for line in [b"cat >&%v".as_slice(), b"cat <&%v"] {
+        let def = attached_of(line).unwrap();
+        match &def.source {
+            RedirectSource::Var(name) => assert_eq!(name.as_bytes().unwrap(), b"v"),
+            s => panic!("line={line:?} stays the fd-variable arm, got {s:?}"),
+        }
+    }
+
+    // An empty word is not a word: the token stays word data (the reading
+    // `test_amp_clobber_tail_is_a_pipeline_pipe` depends on).
+    for line in [b"cat >&".as_slice(), b"cat 2>&"] {
+        assert!(attached_of(line).is_none(), "line={line:?}");
     }
 }

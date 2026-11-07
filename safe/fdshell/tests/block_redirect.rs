@@ -134,6 +134,10 @@ fn a_glued_closer_takes_its_redirection() {
         ("while :; do echo a; break; done>>\"f\"", "a\n"),
         ("while :; do echo a; break; done>\"$(echo f)\"", "a\n"),
         ("while :; do echo a; break; done&>\"f\"", "a\n"),
+        // The glued `>&"f"` is bash's file word too (task #461): `>&` with no
+        // io-number files its non-numeric word, so the block's output lands in
+        // `f` exactly as bash's does (measured 2026-11-07, fresh dir per shell).
+        ("while :; do echo a; break; done>&\"f\"", "a\n"),
         // The spaced-quoted control: the same block, the same file.
         ("while :; do echo a; break; done > \"f\"", "a\n"),
     ] {
@@ -147,29 +151,28 @@ fn a_glued_closer_takes_its_redirection() {
         );
         assert_eq!(file(&dir, "f"), Some(want.as_bytes().to_vec()), "{script}");
     }
-    // `>&"f"` is the other operator: bash's `>&word` (a non-numeric operand) is a
-    // file redirect, fdshell's dup arm answers *no redirect* for it and the block's
-    // output stays on stdout — the loops' own vocabulary, pinned at the
-    // simple-command level in `tests/redirect.rs`
-    // [`an_ampersand_operand_follows_the_loops_own_vocabulary`]. The glue and the
-    // quotes change nothing here either: the spaced `>& "f"` answers the same.
-    for script in [
-        "while :; do echo a; break; done>&\"f\"",
-        "while :; do echo a; break; done >& \"f\"",
-    ] {
-        let dir = Scratch::new();
-        let o = run(&dir, script);
-        assert_eq!(
-            (out(&o), rc(&o)),
-            ("a\n", Some(0)),
-            "{script}: stderr={}",
-            err(&o)
-        );
-        assert!(
-            file(&dir, "f").is_none(),
-            "{script}: bash files it, fdshell does not"
-        );
-    }
+    // The **spaced** `>& "f"` is the other half of the shape: bash's operator is
+    // one token across spaces, so bash files `f` (rc 0), while fdshell never reads
+    // an operator with a spaced operand here — the closer's own rule
+    // (`done > "f"` above is the bare operator and *does* file it, so the
+    // divergence is the `>&` spelling, not the space). The glued spelling is
+    // parity, and the whole family is the word-no-split rule
+    // (POSIX_COMPATIBILITY "Operators are recognized at word starts"); the
+    // simple-command level is pinned in `tests/redirect.rs`
+    // [`an_ampersand_operand_follows_the_loops_own_vocabulary`].
+    let dir = Scratch::new();
+    let script = "while :; do echo a; break; done >& \"f\"";
+    let o = run(&dir, script);
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("a\n", Some(0)),
+        "{script}: stderr={}",
+        err(&o)
+    );
+    assert!(
+        file(&dir, "f").is_none(),
+        "{script}: bash files it, fdshell does not"
+    );
     // The **io-number** spelling glued to the closer: `done2>"f"` is not a closer
     // word — the digits belong to it — so bash stops at rc 2 and fdshell at its
     // rc-1 missing closer (the rc-1-vs-2 family), and the block never runs.

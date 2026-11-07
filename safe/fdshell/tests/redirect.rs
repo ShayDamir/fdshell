@@ -2140,8 +2140,9 @@ fn brace_expanded_redirect_operand_is_ambiguous() {
 /// the brace words in an io-number prefix, the redirect that *precedes* the
 /// ambiguous one (unopened, where bash opens it), and the `<&word` / `>&word`
 /// operands that need a real expansion (task #370 owns them, and the brace
-/// guard must not claim them — a word with no brace group never reaches the
-/// rule). The **quoted** io-number prefix is no longer a divergence (task
+/// guard must not claim them — a word with no brace group never reaches the rule;
+/// since task #461 the **parse** arm answers them, naming the literal word it
+/// read). The **quoted** io-number prefix is no longer a divergence (task
 /// #458): the operand offset is mapped into the raw span, so the quoted prefix
 /// falls outside the rule *after* the mapping and both arms name `{a,b}` as
 /// bash does. The fd arms pin **both** sides of the fd 3 state, each in a state
@@ -2225,16 +2226,27 @@ fn brace_expanded_redirect_operand_parity_rows() {
         );
         assert!(created(&files).is_empty(), "{script}: {files:?}");
     }
-    // A `<&word` operand that needs dollar/quote expansion is not a redirect
-    // word for fdshell at all: it degrades to an argument (#370). The brace
-    // guard leaves these rows alone.
-    for script in ["cat <&abc", "cat <&\"{3,4}\"", "cat <&$n"] {
+    // A `<&word` operand that needs dollar/quote expansion is not a dup number,
+    // so the parse arm decides it now (task #461) — and `<&` never files a word:
+    // the answer is bash's `ambiguous redirect` naming the word **as the parser
+    // read it**. The brace guard still does not claim these operands (no
+    // expansion runs before the parse bails, and a word with no brace group never
+    // reaches the rule). bash names the *expanded* word for the first two rows
+    // (`abc:` / `{3,4}: ambiguous redirect` at rc 1 — parity); with `n=1` bash
+    // expands `cat <&$n` to `1`, dups fd 1 and answers `cat: -: Bad file
+    // descriptor` at rc 1, so only the rc is parity there (task #370 owns the
+    // parse-time reading). Nothing is created anywhere.
+    for (script, word) in [
+        ("cat <&abc", "abc"),
+        ("cat <&\"{3,4}\"", "{3,4}"),
+        ("cat <&$n", "$n"),
+    ] {
         clean(dir);
         let (_out, err, code, files) = run_ls(dir, &format!("n=1; {script}"));
         assert_eq!(code, 1, "{script}: stderr={err:?}");
         assert!(
-            !err.contains("ambiguous redirect"),
-            "{script}: the guard must not claim this operand: {err:?}"
+            err.contains(&format!("ambiguous redirect: {word}")),
+            "{script}: the parse arm names the word it read: {err:?}"
         );
         assert!(created(&files).is_empty(), "{script}: {files:?}");
     }
@@ -2531,7 +2543,10 @@ fn percent_bytes_in_a_target_stay_file_name_data() {
 }
 
 /// Two shapes that stay as they were, pinned so the new surface cannot move
-/// them: the `>&N` dup word is **not** expanded (task #370), and a `<>` glued
+/// them: the `>&N` dup word is decided at the **parse** site on the literal word
+/// (task #370 owns the expansion row: the word now rides the path arm's target
+/// surface, so fdshell files the *expanded* name while bash dups the fd —
+/// measured 2026-11-07, one fresh dir per shell), and a `<>` glued
 /// after a non-digit prefix stays an argument (POSIX_COMPATIBILITY "Operators
 /// are recognized at word starts"), where bash redirects.
 #[test]
@@ -2542,10 +2557,15 @@ fn the_dup_word_and_a_non_digit_prefixed_operator_stay_unexpanded() {
     let (out, err, code, files) = run_ls(dir, "echo hi >&$(echo 1)");
     assert_eq!(
         (out.as_str(), code),
-        ("hi >&1\n", 0),
-        "bash dups fd 1 and prints `hi` (#370); stderr={err:?}"
+        ("", 0),
+        "bash prints `hi` (it dups fd 1) and files nothing (#370); stderr={err:?}"
     );
-    assert!(created(&files).is_empty(), "{files:?}");
+    assert_eq!(created(&files), names(&["1"]), "{files:?}");
+    assert_eq!(
+        body(dir, "1"),
+        "hi\n",
+        "bash prints `hi` instead of filing it"
+    );
     clean(dir);
     let (out, err, code, files) = run_ls(dir, "echo hi<>$(echo f)");
     assert_eq!(
@@ -3307,8 +3327,10 @@ fn a_quoted_operator_or_heredoc_word_stays_a_command() {
 /// `echo a >>&x` appends to the file `&x` today). Task #303 inherits that
 /// reading at word 0, so the statement is an rc-0 redirections-only command;
 /// bash rejects the word outright (rc 2, `syntax error near unexpected token
-/// '&'`). The `>&x` twin is no redirect at all — the dup arm answers `None` for
-/// a non-numeric, non-`%` tail — so it stays the command word.
+/// '&'`). The `>&x` twin is a file word too, by task #461's rule (`>&` with no
+/// io-number files its non-numeric word): bash creates `x` at rc 0 and fdshell
+/// now creates it too, so the statement is a redirections-only command on
+/// parity (measured 2026-11-07, one fresh dir per shell).
 #[test]
 fn an_ampersand_operand_follows_the_loops_own_vocabulary() {
     let dir = seeded("redirect_only_amp");
@@ -3319,9 +3341,9 @@ fn an_ampersand_operand_follows_the_loops_own_vocabulary() {
     assert_eq!(created(&files), names(&["&x"]));
     clean(dir);
     let (out, err, code, files) = run_ls(dir, ">&x");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
-    assert!(err.contains("\">&x\" not found"), "stderr={err:?}");
-    assert!(created(&files).is_empty(), "{files:?}");
+    assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
+    assert_eq!(created(&files), names(&["x"]), "{files:?}");
+    assert_eq!(body(dir, "x"), "", "bash creates the same empty `x`");
     // The pid-var background forms are the same token family, and with no
     // command word they launch nothing: the statement is rc 0 and the task is
     // registered under its name (bash rejects both words outright, rc 2).
@@ -3336,10 +3358,13 @@ fn an_ampersand_operand_follows_the_loops_own_vocabulary() {
 // #4.1 removes quotes after tokenization, so bash opens/creates the file
 // `%v` for `>"%v"` and every other quoted shape, while the unquoted `>%v`
 // stays fdshell's fd lookup (POSIX_COMPATIBILITY "Operators are recognized
-// at word starts"). The dup arm `>&%v` is the deliberate asymmetry: bash
-// answers `ambiguous redirect` rc 1 **quoted and unquoted alike**, so the
-// mask gate is not applied there. Every value below is `bash -c` 5.3.9 and
-// this tree's build, measured 2026-10-26 (one scratch dir per shell).
+// at word starts"). The dup arm `2>&%v` is the deliberate asymmetry: bash
+// answers `ambiguous redirect` rc 1 **quoted and unquoted alike** once the
+// operator carries an io-number, so the mask gate is not applied there.
+// Without one bash files the word (`>&%v` creates `%v`), and the `%` arm still
+// answers first — task #461's `the_dup_word_files_only_without_an_io_number`.
+// Every value below is `bash -c` 5.3.9 and this tree's build, measured
+// 2026-10-26 (one scratch dir per shell).
 
 /// The bytes of `dir`/`name` as a string.
 fn body(dir: &str, name: &str) -> String {
@@ -3486,11 +3511,14 @@ fn unquoted_percent_targets_stay_fd_variable_lookups() {
     assert!(created(&files).is_empty(), "{files:?}");
 }
 
-/// The dup arm `>&%v` stays **mask-blind** (measured 2026-10-26): bash gives
-/// `ambiguous redirect` rc 1 quoted *and* unquoted, because `>&word`'s
-/// operand is never a file name — quoting offers no file-word escape. Gating
-/// this arm would print the word at rc 0, breaking the rc parity; the fd
-/// lookup's rc 1 is the parity we keep (message differs, file never created).
+/// The dup arm `2>&%v` stays **mask-blind** (measured 2026-10-26): bash gives
+/// `ambiguous redirect` rc 1 quoted *and* unquoted, because with an io-number
+/// `>&word`'s operand is never a file name — quoting offers no file-word escape
+/// there. Gating this arm would print the word at rc 0, breaking the rc parity;
+/// the fd lookup's rc 1 is the parity we keep (message differs, file never
+/// created). The io-number-less `>&%v` is where bash's file-word rule reaches —
+/// it files `%v` — and the `%` arm answers first there too, pinned by
+/// `the_dup_word_files_only_without_an_io_number` (task #461).
 #[test]
 fn the_dup_percent_target_stays_mask_blind() {
     let dir = scratch("att_pct_dup");
@@ -3505,6 +3533,144 @@ fn the_dup_percent_target_stays_mask_blind() {
         );
         assert!(created(&files).is_empty(), "{script}: {files:?}");
     }
+}
+
+// --- the dup word is a file word only without an io-number (task #461) -----
+//
+// bash's `>&word` rule is **not** one rule: only `>&` with **no** io-number
+// files a non-numeric word (through the shared target surface — fold, glob,
+// expand), while every spelling with an io-number, and every `<&` spelling,
+// answers `ambiguous redirect` at rc 1 and opens nothing. The `%` arm sits in
+// front of both (POSIX_COMPATIBILITY "`%` is a file descriptor namespace"), and
+// the decision is made on the literal word at the parse site — which is why an
+// operand that needs an expansion stays task #370's divergence. Every value
+// below is `bash -c` 5.3.9 measured against this tree's build on 2026-11-07,
+// one scratch dir per row: the io-number and the operator byte each change the
+// answer, so never generalise from a single spelling.
+
+/// The file-word half and its `ambiguous redirect` twin, plus the arms that stay
+/// exactly as pinned (the digits, the close `-`, the `%` namespace).
+#[test]
+fn the_dup_word_files_only_without_an_io_number() {
+    let dir = scratch("dup_word");
+    let dir = dir.to_str().unwrap();
+    // bash creates the word and writes the body; fdshell now answers the same.
+    // Quoting is not an escape, a digit run plus text is not a number, and the
+    // zero-match glob and the expansion ride the target surface.
+    for (script, name, want) in [
+        ("echo a >&x", "x", "a\n"),
+        ("echo b >&\"x\"", "x", "b\n"),
+        ("echo c >&1x", "1x", "c\n"),
+        ("echo x* >&x*", "x*", "x*\n"),
+        ("n=x; echo hi >&$n", "x", "hi\n"),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert_eq!(created(&files), names(&[name]), "{script}");
+        assert_eq!(body(dir, name), want, "{script}");
+    }
+    // With an io-number, and on the `<&` side always, the same word is bash's
+    // `ambiguous redirect` naming the word, rc 1, nothing opened. fdshell reports
+    // its own house shape of the same message at the same rc, from the parse site.
+    for (script, name) in [("echo e 2>&x", "x"), ("cat <&x", "x"), ("cat 3<&x", "x")] {
+        clean(dir);
+        let (_out, err, code, files) = run_ls(dir, script);
+        assert_eq!(code, 1, "{script}: stderr={err:?}");
+        assert!(
+            err.contains(&format!("ambiguous redirect: {name}")),
+            "bash writes `{name}: ambiguous redirect`; stderr={err:?}"
+        );
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
+    }
+    // The `%` arm sits in front of both answers, unchanged: bash *files* the word
+    // for `>&%v` (rc 0) and is ambiguous for `<&%v`, while fdshell runs its fd
+    // lookup in both (rc 1, nothing created) — the documented extension.
+    for script in ["echo d >&%v", "cat <&%v"] {
+        clean(dir);
+        let (_out, err, code, files) = run_ls(dir, script);
+        assert_eq!(
+            (code, created(&files)),
+            (1, names(&[])),
+            "{script}: stderr={err:?}"
+        );
+        assert!(
+            err.contains("fd variable 'v' is not set"),
+            "{script}: {err:?}"
+        );
+    }
+    // A **bound** fd variable is the same extension: bash, with no fd layer, files
+    // `%v` with the body at rc 0, and fdshell dups the fd the name refers to (a
+    // read-only one here, so the write fails at rc 1 and no file appears).
+    clean(dir);
+    let (_out, err, code, files) = run_ls(
+        dir,
+        "builtin openat2 --flags O_RDONLY /dev/null %>%v; echo x >&%v",
+    );
+    assert_eq!(
+        (code, created(&files)),
+        (1, names(&[])),
+        "bash: rc 0, `%v` holds `x`; stderr={err:?}"
+    );
+    assert!(
+        err.contains("write error"),
+        "bash's body is the file: {err:?}"
+    );
+    // The digit and close arms stay exactly as pinned (`cat 3<<T <&3` keeps
+    // task #363's here-doc-dup half in `tests/heredoc.rs`).
+    for (script, want) in [
+        ("echo a 2>&1", "a\n"),
+        ("exec 0</dev/null; echo a >&0; echo rc=$?", "rc=1\n"),
+        ("echo a >&-; echo rc=$?", "rc=1\n"),
+        ("cat <&-; echo rc=$?", "rc=1\n"),
+    ] {
+        clean(dir);
+        let (out, err, code, files) = run_ls(dir, script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+        assert!(created(&files).is_empty(), "{script}: {files:?}");
+    }
+    // The word-no-split family: bash's parser splits these words at the operator
+    // byte and stops at a syntax error (rc 2) or takes the tail as a separate
+    // word, so only the empty word is unchanged (it is not a word at all).
+    // `cat >&`: bash rc 2, fdshell answers `cat: '>&': No such file or directory`.
+    clean(dir);
+    let (_out, err, code, files) = run_ls(dir, "cat >&");
+    assert_eq!(
+        (code, created(&files)),
+        (1, names(&[])),
+        "bash: rc 2; stderr={err:?}"
+    );
+    assert!(err.contains("'>&'"), "bash is a syntax error: {err:?}");
+    // `>&>f`: bash rc 2; fdshell files `f` — the word `>f` is a non-numeric word
+    // and the append arm of the operator takes it (the no-split rule).
+    clean(dir);
+    let (_out, err, code, files) = run_ls(dir, "echo a >&>f");
+    assert_eq!(
+        (code, created(&files)),
+        (0, names(&["f"])),
+        "bash: rc 2; stderr={err:?}"
+    );
+    assert_eq!(body(dir, "f"), "a\n", "bash rejects the word outright");
+    // `>&-5` / `2>&-5`: bash splits at the close `-` (`>&-` + the word `5`, so the
+    // write fails at rc 1) and prints `a 5` with an io-number at rc 0; fdshell
+    // keeps the whole tail as one word and answers per the rule above — the file
+    // word without an io-number, `ambiguous redirect` with one.
+    clean(dir);
+    let (_out, err, code, files) = run_ls(dir, "echo a >&-5");
+    assert_eq!(
+        (code, created(&files)),
+        (0, names(&["-5"])),
+        "bash: rc 1, no file (it closes stdout and files nothing); stderr={err:?}"
+    );
+    assert_eq!(body(dir, "-5"), "a\n");
+    clean(dir);
+    let (_out, err, code, files) = run_ls(dir, "echo a 2>&-5");
+    assert_eq!(
+        (code, created(&files)),
+        (1, names(&[])),
+        "bash: rc 0, prints `a 5`; stderr={err:?}"
+    );
+    assert!(err.contains("ambiguous redirect: -5"), "bash: {err:?}");
 }
 
 /// A **bound** fd variable does not capture the quoted target: the target

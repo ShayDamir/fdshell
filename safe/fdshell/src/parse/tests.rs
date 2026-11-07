@@ -843,13 +843,22 @@ fn test_fd_dup_var_redirect_bare_prefix() {
     );
 }
 
+/// With an io-number the dup word must be a number, and bash says so:
+/// `cmd 2>&abc` is its `ambiguous redirect` (rc 1, nothing opened), decided at
+/// the parse site on the literal word (task #461). The no-io-number twin
+/// (`cmd >&abc`) is the file word `abc` — pinned in
+/// `redirect/attached/tests.rs`.
 #[test]
-fn test_fd_dup_redirect_non_numeric_is_arg() {
-    let ParsedLine::Cmd(cmd) = parse(b"cmd 2>&abc").unwrap() else {
-        panic!("expected Cmd")
+fn test_fd_dup_redirect_non_numeric_word_is_ambiguous_with_an_io_number() {
+    let Err(report) = parse(b"cmd 2>&abc") else {
+        panic!("`2>&abc` is bash's `ambiguous redirect`, not an argument");
     };
-    assert!(cmd.redirects.is_empty());
-    assert_eq!(cmd.args, vec![c"2>&abc".into()]);
+    match report.current_context() {
+        ParseError::AmbiguousRedirect { name } => {
+            assert_eq!(name.as_bytes().unwrap(), b"abc");
+        }
+        other => panic!("expected the ambiguous-redirect variant, got {other:?}"),
+    }
 }
 
 #[test]
@@ -1268,13 +1277,23 @@ fn test_fd_var_target_after_each_operator() {
     assert!(parse(b"cmd >>|%x").is_err());
 }
 
+/// `2>&-5` is not the close word `-`, so none of the dup arm's three shapes
+/// claims the tail and the io-number rule answers bash's `ambiguous redirect`
+/// naming the whole tail (task #461). Bash reaches a different answer by *splitting*
+/// the word — `2>&-` closes fd 2 and `5` is a separate word, so `echo a 2>&-5`
+/// prints `a 5` at rc 0 (measured) — while fdshell never splits a word at an
+/// operator byte (POSIX_COMPATIBILITY "Operators are recognized at word starts"),
+/// so the tail stays one word. The no-io-number twin (`>&-5`) is the path arm's
+/// word; both ends are pinned end to end in `tests/redirect.rs`.
 #[test]
-fn test_fd_dup_redirect_negative_tail_is_arg() {
-    let ParsedLine::Cmd(cmd) = parse(b"cmd 2>&-5").unwrap() else {
-        panic!("expected Cmd")
+fn test_fd_dup_redirect_negative_tail_is_ambiguous_with_an_io_number() {
+    let Err(report) = parse(b"cmd 2>&-5") else {
+        panic!("`2>&-5` is the ambiguous tail, not an argument");
     };
-    assert!(cmd.redirects.is_empty());
-    assert_eq!(cmd.args, vec![c"2>&-5".into()]);
+    match report.current_context() {
+        ParseError::AmbiguousRedirect { name } => assert_eq!(name.as_bytes().unwrap(), b"-5"),
+        other => panic!("expected the ambiguous-redirect variant, got {other:?}"),
+    }
 }
 
 #[test]

@@ -84,6 +84,7 @@ fn the_gate_fires_on_every_redirect_shape() {
         b">&2",
         b">&1",
         b">&-",
+        b">&x",
         b"0<&-",
         b"&>f",
         b"&>>f",
@@ -137,7 +138,6 @@ fn the_gate_stays_off_on_word_data() {
         b"2 > f",
         b"&",
         b"%o",
-        b">&x",
     ] {
         assert!(!gate(line), "{line:?} must stay word data");
     }
@@ -285,11 +285,14 @@ fn build_keeps_the_bg_and_substituted_shapes() {
 /// its **path** operand (fdshell never splits a word at an operator byte, so
 /// `echo a >>&x` appends to the file `&x` today). The gate inherits that
 /// reading, so the statement is a redirections-only command; bash rejects the
-/// word outright (rc 2). The `>&x` twin stays word data, because the dup arm
-/// answers `None` for a non-numeric, non-`%` tail.
+/// word outright (rc 2). The `>&x` twin is a file word too, but a **different**
+/// rule (task #461): `>&` with no io-number files its non-numeric word, so the
+/// operand is `x`, not `&x` — bash creates `x` at rc 0 (measured), which is why
+/// the gate fires on it and the shape names `x`.
 #[test]
 fn an_ampersand_operand_is_the_loops_own_shape() {
     assert!(gate(b">>&x"));
     assert_eq!(shape(&built(b">>&x")), vec![(1, b"&x".to_vec())]);
-    assert!(!gate(b">&x"));
+    assert!(gate(b">&x"));
+    assert_eq!(shape(&built(b">&x")), vec![(1, b"x".to_vec())]);
 }

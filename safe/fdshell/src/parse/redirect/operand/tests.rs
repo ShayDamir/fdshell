@@ -61,8 +61,10 @@ fn parsed_operand(tokens: &[Token], op: usize) -> Option<String> {
 
 /// Every operand spelling and the offset its operand starts at: the attached
 /// path arms (with each operator and an io-number prefix), the `%var` arms, the
-/// dup arms, the `&>` family, and the bare forms, whose offset is 0 of the
-/// **next** token. The last rows are the quote shapes, every one measured
+/// dup arms (including the no-io-number file word the dup arm hands to the path
+/// arm, task #461 — the raw span keeps the word's quotes), the `&>` family, and
+/// the bare forms, whose offset is 0 of the **next** token. The last rows are the
+/// quote shapes, every one measured
 /// through the real tokenizer: the arms answer in token text and `span_map`
 /// decodes that answer into the raw span — one mask region per stripped
 /// non-empty pair, one `spans` anchor per stripped empty pair — so a **quoted**
@@ -94,6 +96,9 @@ fn operand_offset_is_the_operand_region_of_the_token() {
         ("cat 2>&1", 1, Some("1")),
         ("cat >&-", 1, Some("-")),
         ("cat >&%v", 1, Some("%v")),
+        ("cat >&x", 1, Some("x")),
+        ("cat >&\"x\"", 1, Some("\"x\"")),
+        ("cat >&$n", 1, Some("$n")),
         ("cat <&{3,4}", 1, Some("{3,4}")),
         ("cat <&{3,4}x", 1, Some("{3,4}x")),
         ("echo x &>f", 2, Some("f")),
@@ -138,6 +143,7 @@ fn the_operand_slice_is_the_operand_the_parser_derives() {
         ("cat 2>&1", 1, 1),
         ("cat >&-", 1, 1),
         ("cat >&%v", 1, 1),
+        ("cat >&x", 1, 1),
         ("echo x &>f", 2, 2),
         ("echo x &>>f", 2, 2),
         ("echo x &>%v", 2, 2),

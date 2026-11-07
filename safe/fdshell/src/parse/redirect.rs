@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C redirect -- -E 'test(/^parse::/) | binary(redirect)'
+
 mod attached;
 mod bare;
 mod clobber;
@@ -56,6 +58,24 @@ pub(crate) fn fd_var_operand(operand: &ShortCStr, mask: &[MaskBit], at: usize) -
     operand.starts_with(b"%") && !quoted_bytes(mask, at, at + 1)
 }
 
+/// The ONE digit-run test behind the io-number rule (task #461): a non-empty run
+/// of ASCII digits, the quote mask not consulted. `has_io_number` and
+/// `token_fd`'s quote gate both read it, so the two answers cannot drift (LESSONS:
+/// a byte-level and a token-level rule must call ONE predicate).
+fn digit_run(prefix: &ShortCStr) -> bool {
+    prefix
+        .as_bytes()
+        .is_ok_and(|d| !d.is_empty() && d.iter().all(u8::is_ascii_digit))
+}
+
+/// The io-number test: `digit_run` with **no** quoted byte. POSIX XCU 2.9.1 reads
+/// an io-number only from unquoted bytes, so `'2'>f` has none and `>` takes its
+/// default fd 1. The dup arm's caller asks this question directly: bash decides a
+/// `>&word` file word only when the operator has no io-number (task #461).
+pub(crate) fn has_io_number(prefix: &ShortCStr, mask: &[MaskBit]) -> bool {
+    digit_run(prefix) && !quoted_bytes(mask, 0, prefix.len())
+}
+
 /// The descriptor a redirect *token* selects: `parse_fd`'s digit rule plus
 /// POSIX's quote rule — an io-number is read only from **unquoted** digits,
 /// so `'2'>f` has no io-number and `>` takes its default fd 1. A non-digit
@@ -63,11 +83,7 @@ pub(crate) fn fd_var_operand(operand: &ShortCStr, mask: &[MaskBit], at: usize) -
 /// splits a word at an operator byte (POSIX_COMPATIBILITY "Operators are
 /// recognized at word starts").
 pub(crate) fn token_fd(prefix: &ShortCStr, mask: &[MaskBit], dir: u8) -> Option<i32> {
-    let digits = match prefix.as_bytes() {
-        Ok(d) => !d.is_empty() && d.iter().all(u8::is_ascii_digit),
-        Err(_) => false,
-    };
-    let prefix = if digits && quoted_bytes(mask, 0, prefix.len()) {
+    let prefix = if digit_run(prefix) && quoted_bytes(mask, 0, prefix.len()) {
         ShortCStr::new()
     } else {
         prefix.clone()

@@ -33,10 +33,13 @@ to names and expands them in words, arguments and redirection targets:
   expands inside quotes (`echo "%name"` prints the fd number, bash prints
   `%name`), `\%` is the only escape, and gating that arm on the mask too is
   task #252's open decision.
-- The dup word `>&%var` is deliberately **mask-blind**: bash answers
-  `ambiguous redirect` rc 1 for `>&%v` and `>&"%v"` alike — a `>&word`
-  operand is never a file name — so no quoting rule applies to it and
-  fdshell keeps the fd lookup in both spellings.
+- The dup word `2>&%var` is deliberately **mask-blind**: bash answers
+  `ambiguous redirect` rc 1 for `2>&%v` and `2>&"%v"` alike — with an
+  io-number a `>&word` operand is never a file name — so no quoting rule
+  applies to it and fdshell keeps the fd lookup in both spellings. Without an
+  io-number bash's file-word rule does reach the dup: `>&%v` creates the file
+  `%v` at rc 0 (measured 2026-11-07), and the `%` arm sits in front of that
+  rule too, so fdshell still answers its fd lookup (task #461).
 - `%CWD` and `%?` are special names of the same namespace.
 
 A portable script is affected only while an fd variable is bound, but then a
@@ -264,13 +267,30 @@ parsers on the token's quote mask, and these forms are bash parity:
 operator, so the *file* `&1` / `&f` opens), `1'>'` (an argument, not a parse
 error), and a quoted io-number `'2'>f` — the operator keeps its default
 descriptor (fd 1), the digit is no fd.
-
 The surviving divergence is the **argument list**: bash *splits* a word at an
 unquoted operator byte, fdshell never does, so bash's `echo x '1'>g` writes
 `x 1` into `g` (the quoted `1` is an argument) where fdshell writes `x`, and
 the same split keeps bash's `echo x "&">y` writing `y` = `x &`, `echo a
-2\>>f`, `echo a \1>f`, `echo a 2&>f` and `cat '3'<<EOF` behaving as their
-word rules dictate.
+2\>>f`, `echo a \1>f`, `echo a 2&>f` and `cat '3'<<EOF` behaving as their word
+rules dictate. The **dup** operator is the same family: `echo a >&>f` and
+`echo a >&|f` are syntax errors (rc 2) in bash because it splits the word at
+the operator byte, where fdshell reads one word — and since task #461 the first
+of them is no longer an argument either: `>&` with no io-number takes its
+non-numeric word as the file, so fdshell writes `a` into the file `f`. The
+no-split rule still decides the word, and that is where the two shells part
+(`>&-5` files `-5` here, while bash closes stdout and files nothing).
+
+The dup rule is asymmetric and fdshell implements it as bash measures it: only
+`>&` **without** an io-number files a non-numeric word (quoted, globbed,
+expanded — `>&x` and `>&"x"` both name `x`, `>&1x` names `1x`, `n=x; >&$n`
+names `x`, and a no-match glob keeps its literal word: `>&x*` names `x*`); with
+an io-number, and on every `<&word` spelling, bash answers
+`ambiguous redirect` rc 1 naming the word and opens nothing (`2>&x`, `<&x`,
+`3<&x`). Digits, `-` and the fd-variable name keep their own arms, and the `%`
+namespace is decided at the parse site on the literal word — so
+`>&$(echo 1)` files `1` where bash dups fd 1 (task #370).
+Pins: `tests/redirect.rs::the_dup_word_files_only_without_an_io_number`.
+
 
 The same raw-byte rule decides the operand side: an operand of a bare `<<`,
 `<<<`, `>`, `>>`, `<`, `<>`, `>|`, `&>` or `&>>` is an operator (and a syntax
