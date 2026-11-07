@@ -1,5 +1,5 @@
 ---
-description: "Subagent that reviews a fdshell task after the Executor: fetches the relevant attachments, verifies the code against the plan, runs the fdshell QA checklist (STYLE.md/LESSONS.md compliance, unsafe discipline, new-code coverage), flags findings and deviations, and attaches the review as review.md."
+description: "Subagent that reviews a fdshell task after the Executor: fetches the relevant attachments, verifies the code against the plan, runs the fdshell QA checklist (STYLE.md/LESSONS.md compliance, unsafe discipline, new-code coverage, changed-file mutation gate), flags findings and deviations, and attaches the review as review.md."
 mode: subagent
 #model: opencode/big-pickle
 permission:
@@ -52,8 +52,10 @@ access to inspect the change; you never edit inside the repository.
    branch's tree, in order: `cargo fmt`; `cargo clippy -- -D warnings`;
    `cargo nextest run --status-level fail
    --show-progress none` — **never `cargo test`** (its shared harness breaks
-   `fork()`-based tests); then `nix flake check --build-all`. For
-   coverage-sensitive work, `nix build .#coverage` and check
+   `fork()`-based tests); then `python3 tools/mutants_gate.py --run --changed
+   master --no-suite-baseline` (the full nextest run above is the baseline;
+   every changed mutated file must be mapped and clean); then `nix flake check
+   --build-all`. For coverage-sensitive work, `nix build .#coverage` and check
    `result/coverage-report.txt`.
 
 4. **Verify against the plan.** Check every part of `plan.md`: each listed
@@ -159,14 +161,16 @@ access to inspect the change; you never edit inside the repository.
    - Read [`LESSONS.md`](../../LESSONS.md). Flag deviations from documented
      lessons as regression risks.
 
-    ### 5l. Coverage
+    ### 5l. Coverage and mutation gate
     - New code: 100% line, 90% region coverage. Suggest tests to fill gaps
       (`nix build .#coverage` → `result/coverage-report.txt`).
-    - Mutation testing is **not** a per-task gate. Do not run `cargo mutants`
-      during a review: a full mutation sweep is too slow to gate every task. It
-      runs in the dedicated mutation **Chore** task via the `mutants` skill
-      (`.opencode/skills/mutants/SKILL.md`). Reviewing a task never blocks on
-      missed mutants.
+    - The changed-file mutation gate is mandatory: every modified/new file that
+      `cargo mutants --list` reports must have exactly one `// mutants:` map,
+      anchored at its module or crate (not a `tests` submodule), and
+      `python3 tools/mutants_gate.py --run --changed master` must be clean.
+      An accepted equivalent needs an exact `tools/mutants_allowlist.toml`
+      entry with a proof; flag unannotated changed files or stale entries.
+      Full-repo sweeps remain Chore-only (`.opencode/skills/mutants/SKILL.md`).
 
 6. **Flag findings and deviations.** For each deviation from the plan: state
    it precisely (what the plan said, what was done), assess its **merit** (a

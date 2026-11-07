@@ -17,6 +17,12 @@ Deny: `clippy::unwrap_used`, `expect_used`, `indexing_slicing`, `undocumented_un
 ## Commands
 `cargo build`; `cargo fmt`; `cargo clippy -- -D warnings`; `python3 tools/complexity.py` (line-budget report; `--check` exits 1 if any non-test Rust file is >90 tokei LoC — enforced by the nix flake check); `python3 tools/lessons_check.py` (LESSONS.md health report: `LESSONS: "<heading prefix>"` citations and `*.rs` references; `--check` exits 1 on a dangling citation or an unresolved path — enforced by the nix flake check); `nix build` (→ `result/bin/fdshell`); `nix flake check --build-all` (fmt + clippy + complexity + lessons + nextest). Version from `safe/fdshell/Cargo.toml`; `git add` nix files first. `package.nix` params: `doFmt`, `doClippy`, `doTests`, `doCoverage`, `doComplexity`, `doLessons`.
 
+`python3 tools/mutants_gate.py --check --changed master` validates the
+`// mutants:` maps of changed files; `--run --changed master` runs the
+changed-file mutation gate (`--no-suite-baseline` is safe after a clean full
+nextest run). Accepted equivalents live in `tools/mutants_allowlist.toml`.
+The gate is not part of `nix flake check`; it runs in the task pipeline.
+
 Environment quirks:
 
 - New untracked files are **silently excluded from nix builds** (`src =
@@ -32,6 +38,15 @@ Environment quirks:
 
 ## Testing
 `cargo nextest run --status-level fail --show-progress none`; integration tests in `unsafe/sys/tests/` and `safe/builtins/tests/`; unit tests in separate `<module>/tests.rs` files (inline `mod tests {}` forbidden — STYLE.md §2.8). **Never `cargo test`** — its shared harness breaks `fork()`-based tests (hangs, fd corruption, interference). Every test binary runs under a 128MB virtual-address cap (`.config/nextest.toml` wrapper script: `prlimit --as=134217728`); infinite allocation aborts that test cleanly instead of tripping the host OOM killer. Nix builds need `util-linux` (stdenv lacks `prlimit`) — see `package.nix`.
+
+Every changed file that `cargo mutants --list` reports must carry exactly one
+`// mutants:` line naming its `-C` build targets and `-E` nextest filter.
+Anchor the filter at the module or crate prefix, never at a `tests` submodule,
+or nested tests silently stop running. Add the map when the task first touches
+the file; the full set accrues task by task, so do not bulk-annotate unrelated
+files. A task must leave every changed mutated file gate-clean. Unkillable
+equivalents go in `tools/mutants_allowlist.toml` with the exact coordinate,
+cargo-mutants description and proof. Full-repo sweeps stay Chore-only.
 
 ## Coverage
 `nix build .#coverage` (after `git add`) → `result/index.html` + `result/coverage-report.txt`.
@@ -123,14 +138,16 @@ own.
 Chores are where the **expensive, non-gating quality work** lives, because it
 is impractical to run on every task:
 
-- the **mutation sweep** (`cargo mutants` + the `mutants` skill) — retired from
-  the per-task Reviewer gate; it runs only inside a Chore;
+- the **full mutation sweep** (`cargo mutants` + the `mutants` skill;
+  `tools/mutants_gate.py --run --all` once every mutated file has a map) — the
+  per-task gate covers only changed files; full sweeps run only inside a Chore;
 - the **80–90 LoC complexity refactor** (the `complexity` skill /
   `tools/complexity.py`) — files in that band are no longer flagged as
   follow-up work on other tasks (STYLE.md §2.3); they are a Chore's work list.
 
 The **>90 LoC** hard limit and the `nix flake check` gates are unchanged — a
-Chore is not the only place complexity is enforced.
+Chore is not the only place complexity is enforced. The changed-file mutation
+gate runs on every task, separate from the flake check.
 
 ### Handoff contract
 

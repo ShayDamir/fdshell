@@ -1,5 +1,5 @@
 ---
-description: "Subagent that executes a yask task in the fdshell project: reads the task's plan and attachments, implements the code change on its task branch (taskN), verifies it (fmt, clippy, nextest, nix flake check), commits it, attaches a session summary, and moves the task to Review."
+description: "Subagent that executes a yask task in the fdshell project: reads the task's plan and attachments, implements the code change on its task branch (taskN), verifies it (fmt, clippy, nextest, changed-file mutation gate, nix flake check), commits it, attaches a session summary, and moves the task to Review."
 mode: subagent
 permission:
   task: deny
@@ -73,14 +73,25 @@ Orchestrator and stop.
    until `--check` passes. Complexity violations are blocking and must be
    resolved before committing.
 
+   **Mutation map.** If the task touches a file that `cargo mutants --list`
+   reports, keep its single `// mutants:` line in sync: the `-C` pairs name
+   the build targets and `-E` names the nextest filter, anchored at the module
+   or crate (never a `tests` submodule). Add the map the first time a task
+   touches such a file; do not bulk-annotate unrelated files. An unkillable
+   mutant goes in `tools/mutants_allowlist.toml` with its exact
+   file/line/column, the cargo-mutants description, and a proof.
+
 6. **Verify and polish.** Run the AGENTS.md checks in order: `cargo fmt`;
    `cargo clippy -- -D warnings`; `cargo nextest run --status-level fail
    --show-progress none` — **never `cargo test`** (its shared harness breaks
-   `fork()`-based tests); then `python3 tools/complexity.py --check` (must
-   pass with no non-test Rust file >90 LoC); then the hermetic check `nix
-   flake check --build-all`. File length is measured with
-   `python3 tools/complexity.py` — the authoritative measurement for all agents
-   (never `wc -l`, awk, or raw `tokei`): if a non-test file touched by this
+   `fork()`-based tests); then `python3 tools/mutants_gate.py --run --changed
+   master --no-suite-baseline` (the nextest run above is the baseline; every
+   changed mutated file must be mapped and clean); then `python3
+   tools/complexity.py --check` (must pass with no non-test Rust file >90
+   LoC); then the hermetic check `nix flake check --build-all`. File length
+   is measured with `python3 tools/complexity.py` — the authoritative
+   measurement for all agents (never `wc -l`, awk, or raw `tokei`): if a
+   non-test file touched by this
    change is >90 LoC (STYLE.md §2.2), split it before moving on. The 80–90 band
    is the standing complexity Chore's work list (STYLE.md §2.3), not this
    task's concern — do not split or report 80–90 files here. For
@@ -99,9 +110,10 @@ Orchestrator and stop.
    attach it with `yask_add_attachment` (`file_path`,
    `content_type: text/markdown`, `filename: session-summary.md`): what
    changed and which files were touched, the commits made on `taskN` (hashes +
-   messages), verification results (exact commands and outcomes), deviations
-   from the plan and why (the Reviewer will judge them), verdict items
-   addressed (re-work round), anything the Reviewer should know.
+   messages), verification results (exact commands and outcomes, including the
+   mutation gate files and counts), deviations from the plan and why (the
+   Reviewer will judge them), verdict items addressed (re-work round),
+   anything the Reviewer should know.
 
 9. **Move the task to `Review`.** `yask_move_task`; confirm the prerequisite
    cascade if asked.

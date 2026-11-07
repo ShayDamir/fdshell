@@ -66,6 +66,11 @@ seeds the next occurrence.
          if it fails, the tree violates STYLE.md §2.2 and the task is not
          Done: go to the **back to `In progress`** branch below with a
          verdict naming the over-budget file(s).
+
+         The changed-file mutation gate is the Reviewer's evidence; do not
+         re-run `cargo mutants` here. A review that does not show a clean
+         `tools/mutants_gate.py --run --changed master` result is incomplete:
+         send it back.
       4. **Merge.** `git switch master && git merge --ff-only taskN` (the
          rebase guarantees a fast-forward), then delete the branch: `git
          branch -d taskN`.

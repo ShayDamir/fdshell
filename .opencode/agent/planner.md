@@ -50,7 +50,8 @@ by mistake, report to the Orchestrator and stop.
    is the smallest appropriate change. Recall the workspace layout: three
    `#![no_std]` crates — `safe/fdshell/` (bin, shell logic, `forbid(
    unsafe_code)`), `safe/builtins/` (lib), `unsafe/sys/` (the only crate
-   allowed raw fds/syscalls).
+   allowed raw fds/syscalls). Check `cargo mutants --list` for the files the
+   plan will touch; the plan must name their `// mutants:` maps.
 
 5. **Block only if you cannot plan.** If the task is genuinely ambiguous, too
    large, or needs a human decision, do not guess — block (see "Blocking").
@@ -66,9 +67,10 @@ by mistake, report to the Orchestrator and stop.
    `filename: plan.md`). Cover: objective and scope, chosen approach and
    rationale, files to touch and what each change does, verification plan
    (`cargo fmt`, `cargo clippy -- -D warnings`, `cargo nextest run
-   --status-level fail --show-progress none`, `nix flake check --build-all`,
-   `nix build .#coverage` for coverage-sensitive work), risks and open
-   questions.
+   --status-level fail --show-progress none`, `python3
+   tools/mutants_gate.py --run --changed master`, `nix flake check
+   --build-all`, `nix build .#coverage` for coverage-sensitive work), risks
+   and open questions.
 
 7. **Move the task to `In progress`.** `yask_move_task`; confirm the
    prerequisite cascade if asked. If it was already `In progress` when
