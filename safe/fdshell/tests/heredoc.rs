@@ -3471,6 +3471,8 @@ fn heredoc_source_refuses_writes_and_keeps_the_body() {
 /// The mode belongs to the open file description, not to the descriptor, so a
 /// `<&N` dup of a here-document source refuses writes exactly as its source
 /// does (`exec 4<&3` then `echo hi >&4`, bash-measured: `hi` + the write error).
+/// The write-through twin (`> /dev/fd/3` onto this fd) is
+/// `tests/redirect.rs::dev_fd_target_on_a_here_body_fd_writes_through_its_backing`.
 #[test]
 fn heredoc_write_dupe_refuses_writes() {
     let (out, err, code) = run_fd3_closed("exec 3<<T\nhi\nT\nexec 4<&3\necho hi >&4; cat <&4");

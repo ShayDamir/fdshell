@@ -593,7 +593,9 @@ fn here_string_write_failure_sets_the_status() {
 /// The read side is untouched by the fix: the body's offset is **shared** by the
 /// descriptor and its `<&N` dupes, so the second read is EOF (bash prints `x`
 /// once). Same for a `0` target, where the failed `>&0` write leaves `cat`
-/// reading the here-string body.
+/// reading the here-string body. The write-through twin (`> /dev/fd/3` onto
+/// this fd) is
+/// `tests/redirect.rs::dev_fd_target_on_a_here_body_fd_writes_through_its_backing`.
 #[test]
 fn here_string_offset_survives_a_refused_write() {
     let (out, err, code) = run_fd3_closed("exec 3<<<x; cat <&3; cat <&3");

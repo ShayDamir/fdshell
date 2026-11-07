@@ -6115,6 +6115,12 @@ Cost, accepted: `/proc` becomes a runtime dependency of here-docs and
 here-strings, and each one holds one extra fd for the length of the redirect
 (the writable memfd dies at the return).
 
+The magic-path redirect's outcome on such a descriptor is decided by the
+**backing**: a regular inode takes the operator's `O_TRUNC` and writes at
+offset 0, a pipe ignores `O_TRUNC`, appends, and shares its offset per stream —
+so `>` onto a here-body fd diverges while `>>` is parity, and the parity row is
+the proof the direction rule and the open rule are both intact.
+
 Pins: `memfd.rs::reopen_read_only_hands_back_a_fresh_fd_at_offset_zero`,
 `reopen_read_only_refuses_writes` (the errno, the dup, the surviving body),
 `redirect/resolve/tests.rs::here_string_source_refuses_writes` and
@@ -6123,7 +6129,10 @@ Pins: `memfd.rs::reopen_read_only_hands_back_a_fresh_fd_at_offset_zero`,
 `here_string_write_failure_sets_the_status`,
 `here_string_offset_survives_a_refused_write`,
 `tests/heredoc.rs::heredoc_source_refuses_writes_and_keeps_the_body`,
-`heredoc_write_dupe_refuses_writes`. Accepted equivalent in advance: the
+`heredoc_write_dupe_refuses_writes`,
+`tests/redirect.rs::dev_fd_target_on_a_here_body_fd_writes_through_its_backing`
+and `dev_fd_target_on_a_regular_file_backing_reaches_parity`. Accepted
+equivalent in advance: the
 `SyscallError::Never` arm of the path formatting is unconstructible by design (a
 decimal fd number carries no NUL byte), so it has no killable mutant.
 

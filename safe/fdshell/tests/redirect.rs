@@ -1148,7 +1148,10 @@ fn exec_and_group_scopes_apply_in_written_order() {
 // description with its own offset. fdshell pre-#337 turned the word into a
 // `dup` at parse time, which shares the target's description and its offset, so
 // every byte below was different. Values are `bash -c` (5.3.9) measured
-// 2026-10-28 in this harness (stdout and stderr piped).
+// 2026-10-28 in this harness (stdout and stderr piped). The task #459 rows at
+// the end of this section were measured 2026-11-07 in the `run_fd3_closed`
+// shape (fd 3 closed before the script; the rows read the same with fd 3
+// pre-opened as a FIFO).
 
 #[test]
 fn dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at() {
@@ -1254,6 +1257,83 @@ fn dev_fd_target_in_a_pipeline_stage_lands_on_the_pipe() {
         body.starts_with(b"cat: missing: No such file"),
         "the magic open followed the stage's pipe, g={body:?}"
     );
+}
+
+// Task #459's decision on a write redirect onto the descriptor a
+// here-document/here-string opened: fdshell keeps opening the magic path with
+// the operator's flags (the rule above, task #337, bash's rule) and the memfd
+// backing (task #325), so the write **lands** — rc 0, no report, in both shells
+// — and what diverges is the **body**, decided by the kernel per backing: on a
+// regular inode (fdshell's memfd) the open hits the same inode, `O_TRUNC` lands
+// and the write is at offset 0; on a pipe (bash's body on this host) the open
+// yields a fresh writable description of the same stream, `O_TRUNC` is ignored
+// and the write appends. The `>&N` rows — writes through the descriptor — are
+// #325's pins (`tests/heredoc.rs::heredoc_source_refuses_writes_and_keeps_the_body`
+// and its here-string twin); this is their write-through twin. Every row is
+// bash 5.3.9 and this tree's build, measured 2026-11-07 with fd 3 closed before
+// the script; bash's value is in the row's comment, and every row's stderr is
+// empty in both shells.
+#[test]
+fn dev_fd_target_on_a_here_body_fd_writes_through_its_backing() {
+    for (script, want) in [
+        // bash: `rc=0`, `x`, `hi` — the pipe appends; fdshell's memfd is
+        // truncated and `hi` is all that is left.
+        (
+            "exec 3<<<x; echo hi > /dev/fd/3; echo rc=$?; cat <&3",
+            "rc=0\nhi\n",
+        ),
+        // bash: the same row through a real here-document.
+        (
+            "exec 3<<T\nx\nT\necho hi > /dev/fd/3; echo rc=$?; cat <&3",
+            "rc=0\nhi\n",
+        ),
+        // bash: `rc=0`, `x`, `hi` — the `/proc/self/fd/` spelling of row 1.
+        (
+            "exec 3<<<x; echo hi > /proc/self/fd/3; echo rc=$?; cat <&3",
+            "rc=0\nhi\n",
+        ),
+        // `>>` does not truncate: **byte-for-byte parity** — the proof that the
+        // open rule is intact and only the truncating open differs.
+        (
+            "exec 3<<<x; echo hi >> /dev/fd/3; echo rc=$?; cat <&3",
+            "rc=0\nx\nhi\n",
+        ),
+        // Offsets: on a regular inode each description keeps its own — after the
+        // first read fd 3 sits at EOF, so the second read returns the tail byte
+        // of the new content (`x\n\n`); bash has one pipe buffer with a shared
+        // offset (`x\nhi\n`).
+        ("exec 3<<<x; cat <&3; echo hi > /dev/fd/3; cat <&3", "x\n\n"),
+        // The fresh-open-starts-at-byte-0 rule (pinned file-backed by
+        // `dev_fd_read_target_starts_at_byte_zero`) is invisible on a pipe, whose
+        // offset is per-stream (bash `ab\ncdef\n`); on the memfd it shows through.
+        (
+            "exec 3<<<abcdef; head -c 2 <&3; echo; cat < /dev/fd/3",
+            "ab\nabcdef\n",
+        ),
+    ] {
+        let (out, err, code) = run_fd3_closed(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+        assert!(err.is_empty(), "{script}: stderr={err:?}");
+    }
+}
+
+/// The parity control (task #459, measured 2026-11-07 against bash 5.3.9 in
+/// the `run_fd3_closed` shape, stdin `/dev/null`, stderr empty in both shells):
+/// when the magic target's descriptor is backed by a **regular file**, the
+/// backings agree and both shells print `hi\n` — the open truncates and the
+/// write is at offset 0. The read-mode-fd twin of
+/// `tests/fdpath.rs::fd_path_redirect_writes_to_fd`; without this row the pins
+/// above cannot tell "only the backing differs" from "the whole family is
+/// broken".
+#[test]
+fn dev_fd_target_on_a_regular_file_backing_reaches_parity() {
+    let (path, _spath) = temp_path("devfd_backing_parity");
+    let (out, err, code) = run_fd3_closed(&format!(
+        "printf abc > {path}; exec 3< {path}; echo hi > /dev/fd/3; cat {path}"
+    ));
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    let _ = std::fs::remove_file(&path);
 }
 
 // --- the bare-operand guard is mask-gated (task #323) -----------------------

@@ -388,15 +388,24 @@ command's own status is 1). fdshell's report has no `bash: line 1: ` prefix —
 that prefix is bash's, on every shell-reported write error. The machinery stays
 divergent where it shows through: bash 5.3.9 backs the body with a **pipe**
 opened read-only (so it is not seekable), fdshell with a memfd re-opened
-`O_RDONLY` through `/proc/self/fd/N` (offset 0, seekable). Owning task: **#459**
-(`> /dev/fd/N` onto such a descriptor: task #337 made fdshell **open** the magic
-path like bash, so the shapes separate by what the fd is. On a file-backed fd
-they agree — `exec 3< f; echo hi > /dev/fd/3` leaves `f` = `hi\n` in both (the
-pre-#337 dup refused the write). On a here-body fd they do not: bash's is a
-**FIFO**, so the `O_TRUNC` open finds a pipe, ignores the truncation and appends
-— `exec 3<<<x; echo hi > /dev/fd/3; echo rc=$?; cat <&3` prints `rc=0`, `x`,
-`hi` — while fdshell's memfd path re-opens as a fresh descriptor of the memfd
-and truncates the body, printing `rc=0` and `hi` (measured 2026-10-28).
+`O_RDONLY` through `/proc/self/fd/N` (offset 0, seekable). **Decided (#459):**
+fdshell keeps opening the magic path with the operator's flags (task #337 —
+bash's own rule), so a `> /dev/fd/N` write onto such a descriptor **lands**, rc
+0, in both shells, and only the **body** diverges because the kernel decides it
+per backing: on a regular inode (fdshell's memfd) the open hits the same inode,
+`O_TRUNC` lands and the write is at offset 0; on a pipe (bash's body on this
+host) the open yields a fresh writable description of the same stream, ignores
+`O_TRUNC` and appends. `exec 3<<<x; echo hi > /dev/fd/3; echo rc=$?; cat <&3`
+prints `rc=0`, `x`, `hi` in bash and `rc=0`, `hi` in fdshell, and the
+non-truncating `>>` spelling is byte-for-byte parity — that parity row is the
+proof the open rule is intact and only the truncating open differs (measured
+2026-11-07 on this host). Only a pipe-backed body could match bash's `>` rows;
+the project declined that for #325's reasons. Pins:
+`tests/redirect.rs::dev_fd_target_on_a_here_body_fd_writes_through_its_backing`
+(with its `>>` parity row) and its regular-file parity control
+`dev_fd_target_on_a_regular_file_backing_reaches_parity` — on a file-backed fd
+the two agree: `exec 3< f; echo hi > /dev/fd/3` leaves `f` = `hi\n` in both
+shells (the pre-#337 dup refused the write).
 
 The `<<<` form's remaining differences from bash:
 
@@ -419,8 +428,10 @@ and the open is a fresh one: `>` truncates, `<` starts at byte 0. The **success*
 of that open is the exception, third bullet below. bash behaves the same way and
 fdshell matches it byte-for-byte on the direct spellings
 (`tests/redirect.rs::dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at`
-and its neighbours, task #337). Three measured divergences remain, all
-2026-10-28 against bash 5.3.9 with stdout and stderr piped:
+and its neighbours, task #337). Three measured divergences remain (all
+2026-10-28 against bash 5.3.9 with stdout and stderr piped; the #459 rows
+below are not a fourth — they are this section's own rules made observable by
+the backing, where bash's pipe hides them):
 
 - A target that only **expands** to the magic form keeps the consumer's
   pre-command open, because the magic reading is on the word as the parser wrote
@@ -443,6 +454,20 @@ and its neighbours, task #337). Three measured divergences remain, all
   succeeds — Linux ignores `O_EXCL` for a non-regular file — and prints `e`. On
   a regular-file target both shells refuse, which is the pinned shape. Owning
   task: **#480**.
+
+On a descriptor a here-document/here-string opened, this section's rules are
+**decided** (#459): the fresh open truncates and `<` starts at byte 0 for both
+shells, and they agree byte-for-byte on the **non-truncating** spelling
+(`>>`) and on a **regular-file** backing — the parity rows are the proof the
+open rule is intact. `>` diverges because the kernel decides it per backing:
+fdshell's body is a memfd (a regular inode, so `O_TRUNC` lands and the write is
+at offset 0), bash's is a pipe on this host (fresh writable description of the
+same stream, `O_TRUNC` ignored, appended), and per-description offsets show on
+the memfd where a pipe's per-stream offset hides them. Measured 2026-11-07 on
+this host; a different host could hide the parity rows. Pins:
+`tests/redirect.rs::dev_fd_target_on_a_here_body_fd_writes_through_its_backing`
+and `dev_fd_target_on_a_regular_file_backing_reaches_parity`; the write side is
+in `Here-document and here-string descriptor numbers`.
 
 ## `wait` is also a block keyword
 
