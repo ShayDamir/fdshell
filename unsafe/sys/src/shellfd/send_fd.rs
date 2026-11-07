@@ -1,3 +1,5 @@
+// mutants: -C --test -C shellfd -- -E 'binary(shellfd)'
+
 use super::CmsgBuf;
 use super::iovec::IoVec;
 use crate::LocalFd;

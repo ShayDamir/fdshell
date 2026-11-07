@@ -124,6 +124,19 @@ fn the_empty_word_is_the_word_error() {
     }
 }
 
+/// The `case` word is a `;`-trimmed slice, so a separator between the word and
+/// `in` is not part of the clause-list guard's scan.
+#[test]
+fn a_separator_before_in_is_trimmed_out_of_the_word_slot() {
+    for line in [
+        b"case x; in esac".as_slice(),
+        b"case x ; in esac",
+        b"case x\n; in esac",
+    ] {
+        assert_eq!(clause_count(line), Some(0), "{line:?}");
+    }
+}
+
 /// A real `;` **byte** in the empty clause list is the grammar violation, while
 /// the newline that tokenizes as the same `;` **token** is not (task #415):
 /// POSIX #2.9.1's production there is a `newline_list`, and bash 5.3.9 rejects

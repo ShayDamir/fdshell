@@ -1,3 +1,5 @@
+// mutants: -C --test -C cmd_subst -C --test -C redirect -C --test -C pipeline -C --test -C command -- -E 'binary(cmd_subst) | binary(redirect) | binary(pipeline) | binary(command)'
+
 use crate::child::Command;
 use crate::child::setup_shellfd::setup_shellfd;
 use crate::error::child_process::ChildProcessError;

@@ -4,9 +4,13 @@ use error_stack::Report;
 use sys::ShortCStr;
 
 use super::parse::parse;
+use crate::capture::Capture;
 use crate::error::cmd::timeout::TimeoutError;
 use crate::mask::MaskBit;
 use crate::mask::MaskBit::{Quoted, Unquoted};
+use crate::parse::{BuiltinPrefix, CommandLine};
+use crate::state::ShellState;
+use sys::fork_cell::ForkCell;
 
 fn run(words: &[&str]) -> Result<super::parse::TimeoutConfig, Report<TimeoutError>> {
     let args: Vec<ShortCStr> = words
@@ -42,6 +46,54 @@ fn run_masked_quoted(
         .map(|w| ShortCStr::from_vec(w.as_bytes().to_vec()).unwrap())
         .collect();
     parse(&args, mask, &Vec::new(), quoted)
+}
+
+fn make_cmdline(args: &[&str]) -> CommandLine {
+    let args_vec: Vec<ShortCStr> = args
+        .iter()
+        .map(|s| ShortCStr::from_vec(s.as_bytes().to_vec()).unwrap())
+        .collect();
+    CommandLine {
+        prefix: BuiltinPrefix::None,
+        command: c"timeout".into(),
+        command_mask: vec![],
+        command_span: vec![],
+        command_quoted: false,
+        env_assigns: vec![],
+        args: args_vec,
+        args_mask: vec![vec![]; args.len()],
+        args_span: vec![vec![]; args.len()],
+        args_quoted: vec![false; args.len()],
+        captures: vec![],
+        redirects: vec![],
+        pidvar: None,
+        bg_force: false,
+    }
+}
+
+fn make_cell() -> ForkCell<ShellState> {
+    ForkCell::new(ShellState::new())
+}
+
+/// `timeout` is an in-process intercept, so a capture (`%>`) is rejected before
+/// any command is parsed or launched.
+#[test]
+fn captures_are_rejected_with_the_timeout_error() {
+    let line = b"timeout 1 echo %>";
+    let mut cmdline = make_cmdline(&[]);
+    cmdline.captures = vec![Capture {
+        var: c"fd".into(),
+        tag: None,
+        force: false,
+        cap: None,
+        set_at: sys::Position::new(1, 1),
+    }];
+    let cell = make_cell();
+    let err = super::run_timeout(line, &cmdline, &cell).unwrap_err();
+    assert!(matches!(
+        err.current_context(),
+        TimeoutError::CapturesNotSupported { .. }
+    ));
 }
 
 #[test]

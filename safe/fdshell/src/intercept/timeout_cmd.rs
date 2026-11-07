@@ -7,6 +7,8 @@
 //! `timeout_cmd/parse.rs`, the deadline poll and the terminate sequence in
 //! `timeout_cmd/wait.rs`.
 
+// mutants: -C --lib -C --test -C timeout -- -E 'test(/^intercept::timeout_cmd::tests::/) | binary(timeout)'
+
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};

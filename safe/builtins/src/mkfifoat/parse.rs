@@ -1,3 +1,5 @@
+// mutants: -C --test -C mkfifoat -- -E 'package(builtins) & binary(mkfifoat)'
+
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt, bail};
 use sys::ImportedFd;

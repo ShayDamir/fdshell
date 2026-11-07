@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::case_block::/)'
+
 mod literal;
 
 pub(crate) use literal::literal_indices;
