@@ -2,8 +2,8 @@
 """LESSONS.md health gate: cross-references, code references, section sizes.
 
 LESSONS.md is binding reading for every agent (AGENTS.md line 3), and its
-accepted-equivalent-mutant entries are the registry the `mutants` skill reads,
-yet nothing checked its health. This tool reports, and with `--check` fails
+accepted-equivalent-mutant entries carry the proofs behind the gate's
+allowlist, yet nothing checked its health. This tool reports, and with `--check` fails
 (exit code 1) on:
 
   * a `LESSONS: "<heading prefix>"` cross-reference that matches no heading as

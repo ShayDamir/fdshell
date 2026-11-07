@@ -1,0 +1,18 @@
+# Accepted equivalent mutants: no test can observe a difference. Every entry
+# names the source file, line, column and exact cargo-mutants description, and carries
+# the proof that makes it equivalent. Remove an entry as soon as the site
+# changes; a stale proof is a new finding, not a licence.
+
+[[allow]]
+file = "safe/fdshell/src/parse/case_block.rs"
+line = 91
+column = 38
+mutant = "replace + with * in tokens_to_case"
+reason = "the empty-slot guard scans for a real `;` byte; starting the slot at the `in` token (`in_idx * 1`) adds only the `in` keyword, never a `;`, so every input answers the same"
+
+[[allow]]
+file = "safe/fdshell/src/intercept/timeout_cmd.rs"
+line = 75
+column = 13
+mutant = "delete match arm CmdError::Never in run_timeout"
+reason = "`command_word::expand` reaches `CmdError::Never` only through internal `ForkCell` borrow or `ShortCStr` invariant failures; `timeout` calls it with no outstanding borrow, so no script can produce the arm and deleting it only changes an invariant-violation message (whole suite green with the arm deleted)"
