@@ -738,7 +738,9 @@ and the `name(` definer of a function definition:
 
 ```shell
 'if' x        # command `if`: not found (fdshell exits 1; bash 127)
-f'oo'() { :; } # not a definition: the word `foo(` is not a valid name
+f'oo'() { :; } # not a definition — and its lone `}` closes no group, so the
+               # stray-closer preflight (task #467) reports at rc 1; the name
+               # report lives at its own layer
 ```
 
 A `\`-escaped word (`\if`) was never a keyword here: its text is `\if`, so it
@@ -746,13 +748,16 @@ is looked up in `PATH` in both shells. The command-not-found exit code is
 fdshell's shell-wide **1**, not bash's 127. The same word-unit rule covers a
 `$( … )` region: the region is one word, so its `(` is never the definer
 opener's `(`. A region word the definer production does **not** match
-(`$( echo true ) { :; }`, `x=$( echo a ) { echo b; }`) is a simple command and
-runs its words; bash's rc 2 there is its stray-`}`-at-command-position rule
-(task #499), not the substitution. A region word the production **does** match —
+(`$( echo true ) { :; }`, `x=$( echo a ) { echo b; }`) keeps its brace as word
+data — and the `}` then closes no open group, so the stray-`}`-at-command-
+position rule answers (task #467 implemented it; task #499 had filed the
+family): bash refuses the line at rc 2 and fdshell reports the stray at its
+house rc 1, both with nothing run. A region word the production **does** match —
 the word ends with its own `(` and the `)` word follows, or `function` is
 followed by the name word — is a name slot, and fdshell reports it:
 `'$( echo f )(' is not a valid function name (a command substitution is not part
-of a definer word)`, rc 1 with nothing run, where bash reports its own
+of a definer word)`, rc 1 with nothing run — on a one-line line whose body is a
+`{ …; }` group the preflight names the stray closer instead, and bash reports its own
 `` `$(echo f)': not a valid identifier `` and keeps going. An unclosed block
 names the keyword it wants —
 `'if' is missing its closing 'fi'` — and fails with that same parse-error rc 1.
@@ -1299,9 +1304,14 @@ not its extent). A closer-shaped **argument** word stays word data — bash runs
 those lines at rc 0 — so `while :; do echo a; esac; …` and a `done` of a `case`
 **pattern** list keep their bodies:
 `while :; do case x in done) echo p;; esac; break; done; echo after` runs at
-rc 0, as bash does. The **brace** closer is the exception by rule: bash's grammar
-has a rule for a lone `}` and the group scanner owns it, so a `}` is never asked
-this decision (the divergence rows of `tests/group.rs` stand). A `time [-p]`
+rc 0, as bash does. Task #467 brought the **brace** closer into the decision:
+bash's grammar has a rule for a lone `}` — it refuses the line at rc 2 and runs
+nothing — so the decision answers it like the other closers at the house rc 1
+(`tests/group.rs::a_lone_brace_closer_reports_like_the_other_closers`); the
+`comment` walk's recorder keeps not recording braces (its pairing counts exact
+brace words, so a glued definer's `{` keeps no depth), while the run path of
+`segment.rs` asks the decision directly. Argument-position and claimed-span
+rows keep their old answers. A `time [-p]`
 prefix written in front of the closer is transparent: the report names the closer
 behind it. When no closer of the block's **own** kind is left, the line is the
 "unclosed mid-run construct" report of "Errors":

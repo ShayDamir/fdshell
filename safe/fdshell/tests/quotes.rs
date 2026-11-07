@@ -364,26 +364,33 @@ fn quoted_block_openers_are_command_words() {
     assert_eq!((out.as_str(), code), ("a\n", 1), "stderr={err:?}");
     assert!(err.contains(r#""elif""#), "stderr={err:?}");
     // A quoted definer word defines no function (bash: `` 'f'': not a valid
-    // identifier ``), and the shape falls back to the `function` command. On one
-    // line nothing of the body runs, so the stdout is bash's stdout (empty, and
-    // `a` for the row that starts with a statement of its own).
-    for (script, want) in [
-        ("'function' f() { echo hi; }; f", ""),
-        ("function 'f'() { echo hi; }; f", ""),
-        ("f'oo'() { echo hi; }; f", ""),
-        ("function 'f' { echo hi; }; f", ""),
-        ("echo a; function 'f' { echo hi; }; f", "a\n"),
+    // identifier `` and its trailing call at rc 127, printing nothing, and `a`
+    // plus rc 127 for the row that starts with a statement of its own —
+    // measured 2026-11-07). Task #467: the body's `}` closes no open group, so
+    // the stray-closer preflight reports first and **nothing runs** — no word
+    // of the shape is looked up any more, on any row (house rc 1).
+    for script in [
+        "'function' f() { echo hi; }; f",
+        "function 'f'() { echo hi; }; f",
+        "f'oo'() { echo hi; }; f",
+        "function 'f' { echo hi; }; f",
+        "echo a; function 'f' { echo hi; }; f",
     ] {
         let (out, err, code) = run(script);
-        assert_eq!((out.as_str(), code), (want, 1), "{script}: stderr={err:?}");
-        assert!(err.contains("not found"), "{script}: stderr={err:?}");
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+        assert!(
+            err.contains("stray '}' — it closes no open block"),
+            "{script}: stderr={err:?}"
+        );
     }
-    // Accepted divergence (task #247): the **multi-line** forms run their body as
-    // the `{ …; }` group the definer's brace becomes, where bash aborts the whole
-    // input with `'f'`: not a valid identifier (rc 127, prints nothing) — the
-    // same "parse statement by statement" family as the rows below. The
-    // byte-level gate walks `line` from the definer word's own byte, so the
-    // verdict is indentation-invariant: every leading width prints the same.
+    // Task #247 pinned these **multi-line** forms as printing their body — the
+    // `{ …; }` group the definer's brace becomes — where bash prints nothing.
+    // Task #467 closed the divergence in **behaviour**: the lone `}` is now the
+    // stray closer of bash's rule, so nothing runs (measured 2026-11-07: bash
+    // skips its bad definition, runs the trailing `f`, prints nothing, rc 127;
+    // fdshell reports the stray at its house rc 1). The byte-level gate walks
+    // `line` from the definer word's own byte, so the verdict is
+    // indentation-invariant: every leading width prints the same.
     for indent in ["", " ", "  ", "   "] {
         for script in [
             format!("{indent}function 'f' {{\necho hi\n}}\nf"),
@@ -392,10 +399,13 @@ fn quoted_block_openers_are_command_words() {
             let (out, err, code) = run(&script);
             assert_eq!(
                 (out.as_str(), code),
-                ("hi\n", 1),
+                ("", 1),
+                "bash prints nothing at rc 127: {script}: stderr={err:?}"
+            );
+            assert!(
+                err.contains("stray '}' — it closes no open block"),
                 "{script}: stderr={err:?}"
             );
-            assert!(err.contains("not found"), "{script}: stderr={err:?}");
         }
     }
     // Accepted divergence (plan §8): fdshell parses statement by statement, so a

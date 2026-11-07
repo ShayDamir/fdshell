@@ -1224,20 +1224,21 @@ fn check_segments(line: &[u8], want: &[(usize, usize, bool)]) {
 
 /// A brace-shaped word is a command word, never a group opener: brace
 /// expansion, the glued command name, and the glued `{;` (a bash syntax
-/// error) stay statements, as does a group inside a pipeline stage.
+/// error) stay statements, as does a group inside a pipeline stage. Task
+/// #467: on the glued rows the *word* stays a statement exactly as before,
+/// but the lone `}` that closes no open group is now the stray-closer segment
+/// of bash's rule (bash 5.3.9 rc 2, nothing run; house rc 1) — the rows whose
+/// brace is an **argument** (`echo {`, `echo }`) gain no stray at all, the
+/// place gate answers first there.
 #[test]
 fn scan_brace_words_are_statements() {
-    let lines: &[&[u8]] = &[
-        b"echo {",
+    for line in [
+        b"echo {".as_slice(),
         b"echo }",
-        b"{echo hi; }",
-        b"{; echo a; }",
         b"{a,b} echo x",
         b"{1..5} echo x",
         b"{}; echo hi",
-        b"echo a| { echo b; }",
-    ];
-    for line in lines {
+    ] {
         let segments = scan_segments(line, false);
         assert!(
             segments
@@ -1247,6 +1248,51 @@ fn scan_brace_words_are_statements() {
         );
         assert!(!segments.is_empty(), "{line:?}");
     }
+    for line in [
+        b"{echo hi; }".as_slice(),
+        b"{; echo a; }",
+        b"echo a| { echo b; }",
+    ] {
+        let segments = scan_segments(line, false);
+        assert!(
+            segments
+                .iter()
+                .all(|s| matches!(s, Segment::Statement { .. } | Segment::StrayCloser { .. })),
+            "{line:?} must be statements beside the stray closer"
+        );
+        assert!(
+            segments
+                .iter()
+                .any(|s| matches!(s, Segment::Statement { .. })),
+            "the glued word's own run stays a statement: {line:?}"
+        );
+    }
+}
+
+/// The run path is the ask-site of task #467: at the top level (nothing open),
+/// a run whose **first word** is the brace closer yields
+/// [`Segment::StrayCloser`] at the word's own offset — bash 5.3.9 refuses the
+/// whole line (measured 2026-11-07: rc 2, nothing run; the house rc is 1). The
+/// glued-definer sibling claims its closer inside the definer span, so no stray
+/// segment appears there; the `comment` walk keeps its not-recording policy for
+/// braces (`Pairing::observe`).
+#[test]
+fn a_run_first_word_brace_at_the_top_level_reports_stray() {
+    let off: Vec<usize> = scan_segments(b"echo a; }", false)
+        .iter()
+        .filter_map(|s| match s {
+            Segment::StrayCloser { off } => Some(*off),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(off, vec![8], "the stray word's own offset in the line");
+
+    assert!(
+        !scan_segments(b"f(){ :; }; f", false)
+            .iter()
+            .any(|s| matches!(s, Segment::StrayCloser { .. })),
+        "the definer span claims its closer"
+    );
 }
 
 /// Inside a block body (`in_block = true`) the group braces are plain words:

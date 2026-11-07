@@ -151,6 +151,65 @@ fn scoped_prefix_before_keyword_runs_keyword_as_command() {
     );
 }
 
+/// Task #467's rule, seen from the assignment-prefix side (measured 2026-11-07
+/// against bash 5.3.9): the prefix is **not** what decides — bash's rule is the
+/// lone closing word in command position. `A=1 { echo a; }` runs nothing at the
+/// house rc 1 with the stray report (bash rc 2); the guard rows prove the prefix
+/// itself stays legal in bash — `A=1 fi` and `A=1 if true` stay command words
+/// (bash 127, fdshell's lookup rc 1), and `A=1 { echo a;` without a closer looks
+/// its `{` up (bash 127). The `!`-prefixed row reports the stray `}` (bash rc 2)
+/// and the bare twin moves with it — the **pipeline negation** that would run
+/// `a` there (bash prints `a` at rc 1) is task **#96**'s, not this rule's.
+#[test]
+fn assignment_prefix_before_a_group_reports_the_stray_closer() {
+    let (out, err, code) = run("A=1 { echo a; }");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash rc 2; nothing runs, stderr={err:?}"
+    );
+    assert!(
+        err.contains("stray '}' — it closes no open block"),
+        "stderr={err:?}"
+    );
+
+    for script in ["A=1 fi", "A=1 if true"] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("", 1),
+            "bash rc 127; the word runs: {script}, stderr={err:?}"
+        );
+        assert!(
+            err.contains("failed to resolve command path"),
+            "{script}: stderr={err:?}"
+        );
+    }
+    let (out, err, code) = run("A=1 { echo a;");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash rc 127; the brace is the command: stderr={err:?}"
+    );
+    assert!(
+        err.contains(r#"failed to resolve command path: "{""#),
+        "stderr={err:?}"
+    );
+
+    for script in ["A=1 ! { echo a; }", "! { echo a; }"] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("", 1),
+            "bash prints a at rc 1 (negation, task #96): {script}, stderr={err:?}"
+        );
+        assert!(
+            err.contains("stray '}' — it closes no open block"),
+            "{script}: stderr={err:?}"
+        );
+    }
+}
+
 #[test]
 fn word_with_equals_after_command_is_an_arg() {
     let (out, err, code) = run("true FOO=bar; builtin echo $_");

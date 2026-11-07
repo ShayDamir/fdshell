@@ -130,11 +130,12 @@ fn depth_is_the_level_the_walk_reads() {
 /// matched closer is `Paired` (the seeded case and the pushed case), a closer of
 /// another kind is `Stray`, and so is a closer seen with **nothing open** — the
 /// arm the scan reports, at the words its place gate puts in command position.
-/// A word that is no keyword, an opener, and the **brace** closer answer `None`:
-/// the brace is `segment/group.rs`'s and `parse/function_block.rs`'s own, so the
-/// scan never asks it (measured: bash runs `{ echo a; }` and a function body, and
-/// refuses a lone `}` in command position as an ordinary command word — the two
-/// owners' rows in `tests/group.rs`).
+/// A word that is no keyword and an opener answer `None`. Task #467 brought the
+/// **brace** closer into the decision — bash 5.3.9 refuses a lone `}` in command
+/// position at rc 2, nothing runs (measured 2026-11-07; the house rc is 1) — so
+/// it answers like every other closer on both arms. The walk's recorder
+/// ([`Pairing::observe`]) is the half that keeps not recording braces
+/// (`comment/tests.rs::the_scan_records_a_top_level_closer`).
 #[test]
 fn the_decision_reads_the_same_stack() {
     // A matched closer — the seed's kind, and a kind an opener pushed.
@@ -183,11 +184,11 @@ fn the_decision_reads_the_same_stack() {
     // Not asked: a word that is no keyword, and an opener.
     assert_eq!(p.decision(b"echo", b"echo if", 4), None);
     assert_eq!(p.decision(b"if", b"if :; then :; fi", 2), None);
-    // The brace closer is the group's and the function body's own: never asked,
-    // with a group open as with none.
-    assert_eq!(p.decision(b"}", b"echo a; }", 9), None);
+    // The brace closer answers on both arms now (task #467): nothing open is
+    // `Stray`, the group's own closer is `Paired`.
+    assert_eq!(p.decision(b"}", b"echo a; }", 9), Some(Decision::Stray));
     p.open(Closer::Brace);
-    assert_eq!(p.decision(b"}", b"{ echo a; }", 10), None);
+    assert_eq!(p.decision(b"}", b"{ echo a; }", 10), Some(Decision::Paired));
     assert_eq!(
         p.apply(b"}", b"{ echo a; }", 10),
         -1,

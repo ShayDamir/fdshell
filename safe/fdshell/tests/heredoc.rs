@@ -2577,6 +2577,21 @@ fn group_body_heredoc_keeps_the_operators_around_the_group() {
     }
 }
 
+/// The same shape with an assignment prefix in front of the `{ … }`: the middle
+/// statement's brace is **word data** (bash's rule — the assignment prefix owns
+/// the first-word slot), so the `}` closes no open group and task #467's
+/// stray-closer preflight refuses the whole input — nothing prints, house rc 1,
+/// where bash 5.3.9 exits 2 with its syntax error (measured 2026-11-07). The
+/// scan/region machinery of task #332 is not what moves here — only the report;
+/// the real-group sibling above (`{ echo a; }` with no prefix) keeps running its
+/// bodies unchanged.
+#[test]
+fn assignment_prefix_before_a_group_makes_the_closer_stray() {
+    let (out, err, code) = run("cat <<X; A=1 { echo a; }; cat <<B\nbodyX\nX\nbodyB\nB");
+    assert_eq!((out.as_str(), code), ("", 1), "bash rc 2: stderr={err}");
+    assert!(err.contains("stray '}' — it closes no open block"), "{err}");
+}
+
 /// The statement-level twin of the group-body shape: a here-doc statement
 /// **before** the group on the same line, and a statement after the group's own
 /// `;`. The group's span ends its statement, and the line's body stream is

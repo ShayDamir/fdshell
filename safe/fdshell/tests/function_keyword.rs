@@ -121,23 +121,26 @@ fn keyword_form_without_a_brace_is_a_parse_error() {
     assert_eq!((out.as_str(), rc), ("", 1));
 }
 
-/// A definer name with arguments is not a definition; the shapes fall back to the
-/// `function` command, which is not found (bash rc 2 syntax error).
+/// A definer name with arguments is not a definition; the bare word falls back to
+/// the `function` command, which is not found. Task #467: the two rows that carry
+/// a `{ …; }` body end on a `}` that closes no open group, so the stray-closer
+/// preflight reports first and **nothing runs** — bash 5.3.9 rc 2 there (measured
+/// 2026-11-07), fdshell at its house rc 1; the bare word keeps its lookup (bash
+/// rc 2 too).
 #[test]
 fn keyword_form_without_a_definer_name_is_a_command() {
-    let (out, err, rc) = run("function f(x) { echo hi; }; f");
-    assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(
-        err.contains(r#"failed to resolve command path: "function""#),
-        "stderr={err}"
-    );
-    assert!(err.contains(r#""function" not found"#), "stderr={err}");
-    assert!(err.contains(r#""}" not found"#), "stderr={err}");
-    assert!(err.contains(r#""f" not found"#), "stderr={err}");
-    let (out, err, rc) = run("function { echo hi; }");
-    assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(err.contains(r#""function" not found"#), "stderr={err}");
-    assert!(err.contains(r#""}" not found"#), "stderr={err}");
+    for script in ["function f(x) { echo hi; }; f", "function { echo hi; }"] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            ("", 1),
+            "bash rc 2, nothing run: {script}: stderr={err}"
+        );
+        assert!(
+            err.contains("stray '}' — it closes no open block"),
+            "{script}: stderr={err}"
+        );
+    }
     let (out, err, rc) = run("function");
     assert_eq!((out.as_str(), rc), ("", 1));
     assert!(err.contains(r#""function" not found"#), "stderr={err}");
@@ -146,9 +149,11 @@ fn keyword_form_without_a_definer_name_is_a_command() {
 /// Name leniency is inherited from the POSIX form: an option-shaped word is
 /// the name (bash rejects it — a documented leniency). A **quoted** name is
 /// not a name at all (task #247, POSIX §2.9.1): the definer words are gated
-/// on their quote bytes at both granularities, so the shape falls back to the
-/// `function` command, exactly as bash's `` `"f"': not a valid identifier ``
-/// (fdshell rc 1, bash rc 1).
+/// on their quote bytes at both granularities. Task #467 moved these rows: the
+/// `}` closes no open group, so the stray-closer preflight reports first and
+/// **nothing runs** (house rc 1) — bash reports `` `"f"': not a valid
+/// identifier `` and its trailing call at rc 127, printing nothing
+/// (measured 2026-11-07).
 #[test]
 fn definer_name_leniency_is_inherited() {
     let (out, err, rc) = run("function -a f { echo hi; }; -a");
@@ -159,8 +164,15 @@ fn definer_name_leniency_is_inherited() {
         "function 'f' { echo hi; }; f",
     ] {
         let (out, err, rc) = run(script);
-        assert_eq!((out.as_str(), rc), ("", 1), "script={script}: stderr={err}");
-        assert!(err.contains("not found"), "script={script}: stderr={err}");
+        assert_eq!(
+            (out.as_str(), rc),
+            ("", 1),
+            "bash rc 127, nothing run: {script}: stderr={err}"
+        );
+        assert!(
+            err.contains("stray '}' — it closes no open block"),
+            "script={script}: stderr={err}"
+        );
     }
     // A name that is also a block keyword: the definition wins, and the trailing
     // bare keyword is a parse error (as the POSIX `if() { … }; if` pin).
@@ -219,33 +231,31 @@ fn function_words_in_argument_position_are_data() {
 }
 
 /// A `)` glued to `function` is the tokenizer's own separator token, so the
-/// definer pair is `function` + `)` and no block is claimed: the text runs as
-/// commands, the `&&` part is skipped by the failed first part, and nothing is
-/// silently dropped (bash rc 2 syntax error).
+/// definer pair is `function` + `)` and no block is claimed — the same tokens
+/// as the spaced twin, and the same verdict: the `}` closes no open group, so
+/// task #467's stray-closer preflight reports first and **nothing runs** (house
+/// rc 1; bash 5.3.9 rc 2 on every row, measured 2026-11-07 — before the rule
+/// the words ran as commands and the `&&` part was skipped by the failed first
+/// part).
 #[test]
 fn glued_close_paren_after_the_keyword_runs_as_commands() {
-    let (out, err, rc) = run("function)f g { echo hi; } && echo done");
-    assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(err.contains(r#""function" not found"#), "stderr={err}");
-    assert!(err.contains(r#""}" not found"#), "stderr={err}");
-    let (out, err, rc) = run("function)f g { echo hi; }; f");
-    assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(err.contains(r#""function" not found"#), "stderr={err}");
-    assert!(err.contains(r#""f" not found"#), "stderr={err}");
-    // The spaced twin behaves identically: the tokens are the same.
-    let (out, rc) = {
-        let (out, _, rc) = run("function ) f g { echo hi; } && echo done");
-        (out, rc)
-    };
-    assert_eq!((out.as_str(), rc), ("", 1));
-    let (out, rc) = {
-        let (out, _, rc) = run("function ) f g { echo hi; }; f");
-        (out, rc)
-    };
-    assert_eq!((out.as_str(), rc), ("", 1));
-    // A `)` after the name word ends the definer pair, as in the POSIX form.
-    let (out, err, rc) = run("function f)g { echo hi; }; f");
-    assert_eq!((out.as_str(), err.as_str(), rc), ("hi\n", "", 0));
+    for script in [
+        "function)f g { echo hi; } && echo done",
+        "function)f g { echo hi; }; f",
+        "function ) f g { echo hi; } && echo done",
+        "function ) f g { echo hi; }; f",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            ("", 1),
+            "bash rc 2, nothing run: {script}: stderr={err}"
+        );
+        assert!(
+            err.contains("stray '}' — it closes no open block"),
+            "script={script}: stderr={err}"
+        );
+    }
 }
 
 /// The mid-run definition gap (task #168) closed with task #232: a
@@ -308,29 +318,46 @@ fn a_line_ending_on_a_cond_operator_continues_a_function_body() {
 
 /// A definer word that carries a `$( … )` region is never a name: the production
 /// matches the statement, the word lands in the name slot, and bash rejects the
-/// name at parse time (`` `$(echo x)': not a valid identifier ``). fdshell names
-/// the word its tokenizer sees — with the glued `(` bash does not read into the
-/// name — and stops at its shell-wide parse-error rc 1 with nothing run (the
-/// rc-1-vs-bash-2 family, README "Words and quoting"; task #368).
+/// name at parse time (`` `$(echo x)': not a valid identifier ``) and — unlike
+/// fdshell — keeps going. Task #467 moved these rows: the body's `}` closes no
+/// open group, so the stray-closer preflight **reports first** and the name slot
+/// is never reached — every row runs nothing at the house rc 1 (bash: rc 1 on
+/// the bare rows, and `tail` printed at rc 0 on the continuation row, measured
+/// 2026-11-07). The name report itself stays pinned at its own layer
+/// (`parse/function_block/tests.rs::a_definer_word_carrying_a_region_is_reported`,
+/// task #368).
 #[test]
-fn a_definer_word_carrying_a_region_reports_the_name() {
-    for (script, word) in [
-        ("f$( echo x )() { :; }", "f$( echo x )("),
-        ("$( echo f )() { :; }", "$( echo f )("),
-        ("function $( echo x ) { :; }", "$( echo x )"),
+fn a_definer_word_carrying_a_region_reports_the_stray_closer() {
+    for script in [
+        "f$( echo x )() { :; }",
+        "$( echo f )() { :; }",
+        "function $( echo x ) { :; }",
     ] {
         let (out, err, rc) = run(script);
-        assert_eq!((out.as_str(), rc), ("", 1), "script={script}: stderr={err}");
-        let want = format!("'{word}' is not a valid function name");
-        assert!(err.contains(&want), "script={script}: stderr={err}");
+        assert_eq!(
+            (out.as_str(), rc),
+            ("", 1),
+            "bash prints nothing, rc 1: {script}: stderr={err}"
+        );
+        assert!(
+            err.contains("stray '}' — it closes no open block"),
+            "script={script}: stderr={err}"
+        );
         assert!(err.contains("Suggestion"), "script={script}: stderr={err}");
     }
     // The continuation divergence is frozen here: bash keeps going after its own
-    // report (`; echo tail` prints `tail` at rc 0), while fdshell's parse error
+    // report (`; echo tail` prints `tail` at rc 0), while fdshell's report
     // aborts the script, so the tail never runs.
     let (out, err, rc) = run("$( echo f )() { :; }; echo tail");
-    assert_eq!((out.as_str(), rc), ("", 1), "stderr={err}");
-    assert!(err.contains("is not a valid function name"), "stderr={err}");
+    assert_eq!(
+        (out.as_str(), rc),
+        ("", 1),
+        "bash prints tail at rc 0: stderr={err}"
+    );
+    assert!(
+        err.contains("stray '}' — it closes no open block"),
+        "stderr={err}"
+    );
 }
 
 /// A definition must be followed by `;`, a newline or the end of input for bash,

@@ -262,12 +262,15 @@ fn group_in_block_bodies() {
 }
 
 /// `{echo` is a command name, not a group opener (the byte after `{` is not a
-/// boundary), so it is command-not-found, as bash's syntax error is there too.
+/// boundary) — the recognition statement stands. But the lone `}` closes no open
+/// group, and task #467 implemented bash's rule for it (measured 2026-11-07:
+/// bash rc 2, nothing run): the stray-closer preflight reports at the house rc 1
+/// and the `{echo` lookup never happens.
 #[test]
 fn glued_brace_stays_a_command_word() {
     let (out, err, rc) = run("{echo hi; }");
     assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(err.contains("\"{echo\" not found"), "{err}");
+    assert!(err.contains("stray '}' — it closes no open block"), "{err}");
 }
 
 /// A **bare** `{` at the end of input is an opener for the byte rule since task
@@ -287,16 +290,19 @@ fn a_brace_at_the_end_of_input_reports_its_missing_closer() {
 
 /// A brace in an argument position is a word: `echo {` prints the brace. The
 /// `{` after a pipeline `|` is a command word too, never a group opener — task
-/// #292's stage arm takes only a **keyword** block, so the brace keeps the
-/// group parse's own failure (tasks #186/#190: a group as a pipeline stage is
-/// unsupported). bash runs the group in the stage's fork (prints `b`, rc 0).
+/// #292's stage arm takes only a **keyword** block, so the brace stays word
+/// data (tasks #186/#190: a group as a pipeline stage is unsupported). bash runs
+/// the group in the stage's fork (prints `b`, rc 0). Task #467: the `}` that
+/// closes no open group is reported by the stray rule — bash's own rule for a
+/// lone closer, so the whole line is refused at the house rc 1 (bash runs it,
+/// this row's stdout divergence stands; the message is the rule's).
 #[test]
 fn brace_in_argument_or_pipeline_position_is_a_word() {
     let (out, err, rc) = run("echo {");
     assert_eq!((out.as_str(), err.as_str(), rc), ("{\n", "", 0));
     let (out, err, rc) = run("echo a| { echo b; }");
-    assert_eq!((out.as_str(), rc), ("", 1));
-    assert!(err.contains("group is missing a closing brace"), "{err}");
+    assert_eq!((out.as_str(), rc), ("", 1), "bash prints b at rc 0");
+    assert!(err.contains("stray '}' — it closes no open block"), "{err}");
 }
 
 /// `{ …; } | cat` is unsupported: a pipeline stage is not a group, and the parse
@@ -529,6 +535,43 @@ fn brace_shaped_words_at_top_level_are_data() {
     assert_eq!((out.as_str(), err.as_str(), rc), ("{}\n{\n}\n", "", 0));
 }
 
+/// The lone-closer family, decided by task #467: a `}` word in **command
+/// position** that closes no open group is what bash refuses (measured 2026-11-07:
+/// bash 5.3.9 rc 2, syntax error, nothing run on every row), and task #436's
+/// preflight reports it at the house rc 1 with the standard message and
+/// `Suggestion` — nothing runs. The assignment prefix is incidental (bash's rule
+/// is the lone closer, not the prefix: `A=1 fi`-shaped prefixes stay command
+/// words, pinned in `tests/env_assign.rs`); glued opener words keep their own
+/// recognition (`glued_brace_stays_a_command_word`), and the argument-position
+/// and claimed-span rows above keep theirs.
+#[test]
+fn a_lone_brace_closer_reports_like_the_other_closers() {
+    for script in [
+        "}",
+        "};",
+        "} && echo b",
+        "} echo b",
+        "time }",
+        "echo a; }",
+        "echo a; echo b; }",
+        "echo a{ b; }",
+        "{echo hi; }",
+        "f(){ echo in; }; f; echo a; }",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            ("", 1),
+            "bash rc 2, nothing run: {script}: stderr={err}"
+        );
+        assert!(
+            err.contains("stray '}' — it closes no open block"),
+            "script={script}: stderr={err}"
+        );
+        assert!(err.contains("Suggestion"), "script={script}: stderr={err}");
+    }
+}
+
 /// A literal brace **argument** inside a block body prints the brace, as bash
 /// does. Task #309's pairing removed the accepted divergence this pin carried:
 /// the body scan is seeded with the **enclosing** block's closer, and a brace
@@ -625,10 +668,13 @@ fn group_opener_needs_a_word_start() {
     // text inside the double quotes, so bash and fdshell print the same line.
     let (out, _, rc) = run("echo \"$( { echo a; echo b; } ) && echo c\"");
     assert_eq!((out.as_str(), rc), ("a\nb && echo c\n", 0));
-    // A brace glued to a word is that word's data; the `}` after `;` is a command.
+    // A brace glued to a word is that word's data (the recognition stands); the
+    // `}` after `;` is the lone closer of task #467's rule — bash 5.3.9 rc 2,
+    // nothing run (measured 2026-11-07), so the stray report answers at the
+    // house rc 1 and `a{ b` never prints.
     let (out, err, rc) = run("echo a{ b; }");
-    assert_eq!((out.as_str(), rc), ("a{ b\n", 1));
-    assert!(err.contains("\"}\" not found"), "{err}");
+    assert_eq!((out.as_str(), rc), ("", 1));
+    assert!(err.contains("stray '}' — it closes no open block"), "{err}");
     // A brace inside a backtick body is data for this shell's scan: the region
     // is one word, the brace never opens a *parent* group and `&& echo c` stays
     // outside it. The body is the child's own text, so the child runs the group

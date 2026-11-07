@@ -2411,10 +2411,12 @@ fn c_style_for_brace_body_shapes_bash_also_rejects() {
 }
 
 /// A **pipe** behind the body, and the loop behind a pipe: both run in bash (rc 0),
-/// and fdshell inherits the group layer's pinned divergence for exactly those
-/// positions — a pipe after a group is `unexpected pipe`, a brace at a pipeline stage
-/// is word data (#186/#190, pinned in `tests/group.rs`). The group's rules own both,
-/// so the brace body reports them unchanged.
+/// and fdshell's divergence for those positions comes from the group layer — a pipe
+/// after a group is `unexpected pipe` (#186/#190, pinned in `tests/group.rs`), and
+/// the second row's `}` is the lone closer of task #467's rule: it closes no open
+/// group, so the stray report answers first and **nothing runs** (house rc 1; bash
+/// prints `0` and `rc=0`, measured 2026-11-07 — the divergence stands, only its
+/// message is the rule's).
 #[test]
 fn c_style_for_a_brace_body_at_a_pipeline_boundary_is_a_divergence() {
     let (out, err, rc) = run("for ((i=0;i<2;i++)) { echo $i; } | cat; echo rc=$?");
@@ -2422,7 +2424,7 @@ fn c_style_for_a_brace_body_at_a_pipeline_boundary_is_a_divergence() {
     assert!(err.contains("unexpected pipe"), "{err}");
     let (out, err, rc) = run("echo x | for ((i=0;i<1;i++)) { echo $i; }; echo rc=$?");
     assert_eq!((out.as_str(), rc), ("", 1), "{err}");
-    assert!(err.contains("group is missing a closing brace"), "{err}");
+    assert!(err.contains("stray '}' — it closes no open block"), "{err}");
 }
 
 /// A here-doc **and** a trailing `&` inside the construct are the group layer's pinned

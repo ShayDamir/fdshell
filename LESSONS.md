@@ -1976,8 +1976,10 @@ region the tokenizer rejects with a `{`, and the jump stays terminating
 `unwrap_or(0, …)` mutant hangs the scan, so the unterminated rows are the kill);
 the byte gate now rejects **every** word that carries a substitution region, so
 the definer-position shapes bash rejects at parse time (`$( echo hi ) { :; }`,
-`x$( echo hi ) { :; }`, `$() { :; }`) stay simple commands fdshell runs at rc 1 —
-the rc-2 family, filed as task **#499**, and the name-validity rule (`a$b()`,
+`x$( echo hi ) { :; }`, `$() { :; }`) stay simple commands — their `}` closes no
+open group, so since task **#467** the stray-closer rule refuses the whole line
+(bash rc 2, house rc 1, nothing run — the family task **#499** had filed), and
+the name-validity rule (`a$b()`,
 `$F()`) belongs to task **#166**, which is why `def(b"$F() {")` is pinned to
 `Some(b"$F")` here.
 
@@ -1996,7 +1998,7 @@ only *looks* like a region) stay word data. Pins: `keywords/function/tests.rs`,
 (asserts the variant) plus
 `parse/function_block/tests.rs::only_the_production_shape_reports`,
 `keywords/function/tests.rs::carries_region_arms`,
-`tests/function_keyword.rs::a_definer_word_carrying_a_region_reports_the_name`.
+`tests/function_keyword.rs::a_definer_word_carrying_a_region_reports_the_stray_closer`.
 
 **The walk between the definer and its `{` belongs to the parse layer** (task #433).
 A **redirection** word written there — the here-doc (`<<E`, `3<<T`), the path operator
@@ -4362,9 +4364,16 @@ closer's *kind*. All measured against bash.
    never a second rule, and it moves no score: `Pairing::decision` answers
    `Paired`/`Stray` and `Pairing::apply` keeps the arithmetic exactly as before, so
    the mismatch arm (a block of another kind open) stays word data — it only says
-   the scanner did not pair the word, and those rows are bash rc 0. The **brace**
-   closer is never asked: the group scanner owns it and bash has a rule for a lone
-   `}` that fdshell does not. With no closer of the block's own kind left the
+   the scanner did not pair the word, and those rows are bash rc 0. Task **#467**
+   implemented bash's rule for a lone `}` (measured 2026-11-07, bash 5.3.9 rc 2,
+   nothing run; house rc 1): the decision answers the brace like the other
+   closers, and the boundary moved from `decision` to the **two ask-sites** — the
+   run path of `segment.rs` asks it directly and is where the stray `}` reports,
+   while the `comment` walk's recorder `Pairing::observe` keeps not recording
+   braces (its pairing counts exact brace words only, so a glued definer's `{`
+   keeps no depth and a glued body's legitimate closer would read as stray).
+   The score is still untouched by all of this.
+   With no closer of the block's own kind left the
    line is the "unclosed mid-run construct" report. Two shapes stay divergent
    **by rule**, both pinned: a body whose **own** closer ends it above the
    `break` runs forever — **bash parity** where the line has no second closer

@@ -22,7 +22,13 @@
 //! The score is what the scorers read, and no caller may move it (task #309).
 //! Task #436 adds the [`Decision`] a scan takes on top of it **at its own top
 //! level** (an empty stack) — a read of the same stack, never a second table,
-//! and never a score change.
+//! and never a score change. Task #467 brings the brace closer into the
+//! decision: bash refuses a `}` that closes no open group (measured 2026-11-07,
+//! bash 5.3.9 rc 2, nothing runs); the decision answers it like the other
+//! closers, and it is [`Pairing::observe`] — the walk's recorder — that keeps
+//! not recording braces.
+
+// mutants: -C --lib -- -E 'test(/^keywords::pairing::/) | test(/^comment::/)'
 
 use super::Place;
 use super::kind::{Closer, Keyword, keyword_kind};
@@ -89,7 +95,20 @@ impl Pairing {
     /// mismatch arm of [`Pairing::apply`] records nothing: it only says the scanner
     /// did not pair the word, and its score-0 answer is load-bearing exactly there
     /// (`tests/cond_blocks.rs::a_closer_shaped_case_pattern_list_word_is_a_word`).
+    ///
+    /// The **brace** closer is not recorded here (task #467, the walk keeps not
+    /// asking): this recorder serves the `comment` walk, whose pairing counts
+    /// exact brace words only, so a glued definer's `{` keeps no depth and a
+    /// legitimate closer of a glued body would read as stray. The walk answers
+    /// the word with its own score; the run path of `segment.rs` asks
+    /// [`Pairing::decision`] directly and reports the brace there.
     pub(crate) fn observe(&mut self, word: &[u8], line: &[u8], word_end: usize, place: Place) {
+        if matches!(
+            keyword_kind(word, line, word_end),
+            Some(Keyword::Closes(Closer::Brace))
+        ) {
+            return;
+        }
         if matches!(place, Place::Command)
             && self.top().is_none()
             && self.stray.is_none()
@@ -160,24 +179,21 @@ impl Pairing {
     /// The [`Decision`] for one closer word, read **before** the word is
     /// [`apply`]-ed — the same read [`super::position`] makes when it takes
     /// [`Pairing::top`] as the pairing gate of the closer row. `None` answers a
-    /// word that is no keyword (no closer, no decision), an opener (it opens a
-    /// block, it closes nothing), and the **brace** closer — the `{ …; }` group
-    /// is `segment/group.rs`'s own, its opener rule is tested first and its
-    /// scans never consult this decision (task #436's boundary) — so only the two
-    /// unpaired arms of [`apply`] **of the keyword closers** are ever asked, and
-    /// the answer is `Stray` for both: the kind-mismatch arm and the arm of a
-    /// closer seen with nothing open.
+    /// word that is no keyword (no closer, no decision) and an opener (it opens
+    /// a block, it closes nothing); every closer is asked, the brace like the
+    /// others (task #467: bash 5.3.9 refuses a `}` that closes no open group,
+    /// rc 2, nothing runs), and the answer is `Stray` for both unpaired arms of
+    /// [`apply`]: the kind-mismatch arm and the arm of a closer seen with
+    /// nothing open.
     ///
     /// Task #436's rule is asked **only** by the top-level scan, at words the
     /// place gate puts in command position; the nested scorers read the same
-    /// pairing for their score and must not report the same word twice.
+    /// pairing for their score and must not report the same word twice. For the
+    /// `comment` walk the brace stays unasked at the recorder
+    /// ([`Pairing::observe`], task #467); the run path of `segment.rs` asks it
+    /// directly.
     pub(crate) fn decision(&self, word: &[u8], line: &[u8], word_end: usize) -> Option<Decision> {
         let kind = match keyword_kind(word, line, word_end) {
-            // The brace closer is not asked: bash's grammar makes a lone `}` a
-            // command word unless a brace group is *open*, and the scans that
-            // know a group is open (`segment/group*`, `parse/function_block*`)
-            // are the ones that own it (the boundary above).
-            Some(Keyword::Closes(Closer::Brace)) => return None,
             Some(Keyword::Closes(kind)) => kind,
             _ => return None,
         };
