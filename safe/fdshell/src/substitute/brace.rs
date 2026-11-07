@@ -5,9 +5,15 @@ use sys::fork_cell::ForkCell;
 use crate::error::resolve::ResolveError;
 use crate::mask::MaskBit;
 use crate::state::ShellState;
+use crate::substitute::Join;
+use crate::substitute::dollar::at_star::pattern_arm;
 
 mod length;
 
+// The `join` mode lets the braced `${@}`/`${*}` reach the shared pattern arm;
+// threading it through `substitute/resolve.rs` instead would put the argument on
+// every braced surface, arithmetic and nounset included (task #452).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_brace(
     peek: &mut super::mask::Counting<'_>,
     mask: &[MaskBit],
@@ -15,6 +21,7 @@ pub(crate) fn handle_brace(
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
     quoted: bool,
+    join: Join,
     origin: &mut super::origin::Origin,
 ) -> Result<(), Report<ResolveError>> {
     peek.next();
@@ -57,6 +64,17 @@ pub(crate) fn handle_brace(
         // `dollar/at_star.rs`, and it must agree with the whole-word fast path
         // in `substitute/fields.rs` (LESSONS "`$@` has two join rules").
         return Ok(());
+    }
+    // The braced spellings `${@}` / `${*}` of the `$@`/`$*` arm: on the `case`
+    // **pattern** surface bash's braced spelling equals the unbraced one (task
+    // #452), so these two exact contents go to the shared arm. Every other
+    // content, and every other surface, keeps the resolve path — the word and
+    // argument surfaces stay on task #177's D1 join (`tests/positional.rs`).
+    if join == Join::Pattern {
+        let is_star = content.eq_bytes(b"*");
+        if is_star || content.eq_bytes(b"@") {
+            return pattern_arm(is_star, quoted, &state, out, origin);
+        }
     }
     state.resolve_var_name(&content, out)
 }

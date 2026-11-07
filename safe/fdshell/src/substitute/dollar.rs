@@ -1,4 +1,4 @@
-mod at_star;
+pub(crate) mod at_star;
 mod name;
 
 use core::fmt::Write;
@@ -62,7 +62,9 @@ pub(crate) fn dollar_subst(
                 core::write!(out, "{pid}").change_context(ResolveError::Never)?;
             }
         }
-        Some(b'{') => super::brace::handle_brace(peek, mask, start, cell, out, quoted, origin)?,
+        Some(b'{') => {
+            super::brace::handle_brace(peek, mask, start, cell, out, quoted, join, origin)?
+        }
         Some(b'#') => {
             peek.next();
             let state = super::borrow_state(cell)?;

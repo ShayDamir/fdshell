@@ -98,6 +98,18 @@ fn empty_positionals_cut_the_pattern_at_their_boundaries() {
     assert_eq!(bytes(&text), b"x");
 }
 
+/// The braced spelling of the row above (task #452):
+/// `set -- a b; case a in "${@}")` matches too, so the shared arm is driven by
+/// the trigger byte's quote bit, not by the spelling.
+#[test]
+fn a_braced_dollar_at_pattern_is_the_first_positional_too() {
+    let pos = [c"a", c"b"];
+    let mask = [QuotedStart, Quoted, Quoted, Quoted];
+    let (text, out_mask) = pat(c"${@}", &mask, ShellState::default_ifs(), &pos);
+    assert_eq!(bytes(&text), b"a");
+    assert_eq!(out_mask, vec![Quoted]);
+}
+
 /// `IFS=; set -- a b; case "a b" in "$@")` matches (and `case a in "$@")` does
 /// not): with an empty `IFS` the arm emits **no boundary**, so nothing is
 /// dropped — the space join *is* the pattern.
@@ -113,6 +125,17 @@ fn quoted_dollar_at_pattern_space_joins_with_an_empty_ifs() {
     assert_eq!(mask, vec![Quoted, Quoted, Quoted]);
 }
 
+/// The braced spelling of the row above: `IFS=; set -- a b; case "a b" in
+/// "${@}")` matches, so the empty-`IFS` space join is shared by both spellings
+/// (task #452).
+#[test]
+fn a_braced_dollar_at_pattern_space_joins_with_an_empty_ifs_too() {
+    let mask = [QuotedStart, Quoted, Quoted, Quoted];
+    let (text, out_mask) = pat(c"${@}", &mask, ShortCStr::new(), &[c"a", c"b"]);
+    assert_eq!(bytes(&text), b"a b");
+    assert_eq!(out_mask, vec![Quoted, Quoted, Quoted]);
+}
+
 /// `IFS=,; set -- a b; case "pa bq" in p$@q)` matches: an unquoted `$@`
 /// space-joins whatever the `IFS` is, glue kept, and no boundary is emitted so
 /// the whole text is the pattern.
@@ -120,6 +143,17 @@ fn quoted_dollar_at_pattern_space_joins_with_an_empty_ifs() {
 fn unquoted_dollar_at_pattern_space_joins_whatever_the_ifs_is() {
     let ifs = ShortCStr::from(c",");
     let (text, mask) = pat(c"p$@q", &[], ifs, &[c"a", c"b"]);
+    assert_eq!(bytes(&text), b"pa bq");
+    assert_eq!(mask, vec![Unquoted; 5]);
+}
+
+/// The braced spelling of the row above (task #452):
+/// `IFS=,; set -- a b; case "pa bq" in p${@}q)` matches — the space join and the
+/// glue survive exactly as they do unbraced.
+#[test]
+fn a_braced_dollar_at_pattern_space_joins_unquoted_whatever_the_ifs_is() {
+    let ifs = ShortCStr::from(c",");
+    let (text, mask) = pat(c"p${@}q", &[], ifs, &[c"a", c"b"]);
     assert_eq!(bytes(&text), b"pa bq");
     assert_eq!(mask, vec![Unquoted; 5]);
 }
@@ -151,6 +185,29 @@ fn dollar_star_pattern_joins_with_the_first_ifs_byte() {
 #[test]
 fn dollar_star_pattern_concatenates_with_an_empty_ifs() {
     let (text, mask) = pat(c"$*", &[], ShortCStr::new(), &[c"a", c"b"]);
+    assert_eq!(bytes(&text), b"ab");
+    assert_eq!(mask, vec![Unquoted; 2]);
+}
+
+/// The braced spellings of the two rows above (task #452): the first-`IFS`-byte
+/// join and the empty-`IFS` concatenate are shared with the unbraced `$*` —
+/// `IFS=,; set -- a b; case "a,b" in ${*})` and `in "${*}")` both match, and so
+/// does `IFS=; set -- a b; case ab in ${*})`.
+#[test]
+fn a_braced_dollar_star_pattern_joins_with_the_first_ifs_byte_too() {
+    let ifs = ShortCStr::from(c",");
+    let (text, mask) = pat(c"${*}", &[], ifs.clone(), &[c"a", c"b"]);
+    assert_eq!(bytes(&text), b"a,b");
+    assert_eq!(mask, vec![Unquoted; 3]);
+    let (text, mask) = pat(
+        c"${*}",
+        &[QuotedStart, Quoted, Quoted, Quoted],
+        ifs,
+        &[c"a", c"b"],
+    );
+    assert_eq!(bytes(&text), b"a,b");
+    assert_eq!(mask, vec![Quoted; 3]);
+    let (text, mask) = pat(c"${*}", &[], ShortCStr::new(), &[c"a", c"b"]);
     assert_eq!(bytes(&text), b"ab");
     assert_eq!(mask, vec![Unquoted; 2]);
 }

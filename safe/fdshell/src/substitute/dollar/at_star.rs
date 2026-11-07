@@ -23,6 +23,9 @@
 //! (`execute_case_command`, `es->word->word`), never a list of patterns, and
 //! splits nothing. Every row of it is measured in bash 5.3.9 and pinned in
 //! `substitute/pattern.rs`, `substitute/pattern/tests.rs` and `tests/case.rs`.
+//! The braced `${@}`/`${*}` spellings route here too (`substitute/brace.rs`,
+//! task #452): on this surface bash's braced spelling equals the unbraced one,
+//! so one arm serves both spellings and the two cannot drift.
 //! LESSONS: "`$@` has two join rules".
 
 use error_stack::Report;
@@ -62,7 +65,10 @@ pub(super) fn expand(
     Ok(())
 }
 
-/// The pattern arm's matrix (all rows measured in bash 5.3.9, task #319):
+/// The pattern arm's matrix (all rows measured in bash 5.3.9, task #319), shared
+/// by both spellings — the unbraced `$@`/`$*` here, and the braced `${@}`/`${*}`
+/// through `substitute/brace.rs` (task #452): bash's braced spelling equals the
+/// unbraced one on this surface, so one arm serves both and they cannot drift.
 ///
 /// - quoted `"$@"`, **non-empty `IFS`** → the boundary model of the word path:
 ///   the caller's boundary cut keeps `p1` and drops the rest, and the glue
@@ -85,7 +91,7 @@ pub(super) fn expand(
 /// survives; a pattern is never IFS-split and never globbed (task #280's mask
 /// rule), so "join only where a splitter consumes the text" holds — the
 /// pattern's cut is a boundary cut, not an `IFS` split.
-fn pattern_arm(
+pub(crate) fn pattern_arm(
     is_star: bool,
     quoted: bool,
     state: &ShellState,

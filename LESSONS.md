@@ -3692,12 +3692,17 @@ an empty `IFS` space-joins a quoted `"$@"` (`IFS=; set -- a b; case "a b" in "$@
 joins with the first `IFS` byte while an empty `IFS` **concatenates** it (`IFS=; set -- a b; case
 ab in $*)`) — the pattern surface must not share the word path's space-when-empty byte. "Join only
 where a splitter consumes the text" survives: the pattern's cut is a boundary cut, never an `IFS`
-split. Two divergences are pinned, not fixed: `IFS=; set -- a ""` in the pattern `x"$@"y` is
-**unmatchable in bash** — its quoted-null byte (0x7f) leaks into the pattern text — where fdshell
-space-joins to `xa y` (`tests/case.rs::an_empty_positional_with_an_empty_ifs_diverges_in_a_pattern`);
-braced `${@}` keeps fdshell's first-`IFS`-byte join (task #177's D1) where bash space-joins an
-unquoted `${@}` and takes the first positional in a quoted `"${@}"`
-(`tests/case.rs::a_braced_dollar_at_pattern_keeps_the_first_ifs_byte_join`).
+split. One divergence is pinned, not fixed, and it is the same row for both
+spellings: `IFS=; set -- a ""` in the pattern `x"$@"y` is **unmatchable in bash**
+— its quoted-null byte (0x7f) leaks into the pattern text — where fdshell
+space-joins to `xa y` (`tests/case.rs::an_empty_positional_with_an_empty_ifs_diverges_in_a_pattern`).
+**On this surface the braced spelling equals the unbraced one (task #452):**
+`"${@}"` takes the first positional, `${@}` space-joins, `${*}` joins with the
+first `IFS` byte and concatenates on an empty one, because `substitute/brace.rs`
+routes the exact `@`/`*` contents to the *same* arm — one arm, no drift
+(`tests/case.rs::braced_dollar_at_in_a_case_pattern_takes_the_unbraced_matrix`).
+Task #177's D1 join survives only on the non-splitting surfaces (task #288 owns
+it), pinned in `tests/positional.rs`.
 Record spans for the splitter, never guess from `expanded`; measure every shape in bash before
 pinning — the earlier "bash cuts here" pins for literal `IFS` bytes after an expansion
 (`x$(true):y` → `[x:y]`, not `[x][y]`) were master-behavior pins, not bash facts.
