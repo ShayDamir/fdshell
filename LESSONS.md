@@ -20,8 +20,9 @@
   `LESSONS:` + a quoted heading prefix, and a citation stays on **one
   line** — never wrap it, the checker parses it. Update every quotation in
   the same commit that renames a heading.
-- Accepted-equivalent-mutant entries are a **registry** the `mutants` skill
-  reads: condense them, never drop site + mutation + reason + pin.
+- Accepted-equivalent records in `LESSONS.md` keep the reusable proof and pin;
+  the active machine-readable registry is `tools/mutants_allowlist.toml`.
+  Condense entries, never drop site + mutation + reason + pin.
 - `python3 tools/lessons_check.py` reports the sections over the byte budget
   and the citation/reference health; `--check` gates dangling citations and
   unresolved `*.rs` paths, and `nix flake check` enforces both.
@@ -7016,3 +7017,38 @@ end-of-file claim in fdshell's wording); `brace/tests.rs::a_glued_operator_word_
 pins moved here from the divergence lists they carried:
 `tests/heredoc.rs::function_body_heredoc_shapes_that_stay_divergent` and
 `tests/heredoc.rs::group_body_heredoc_divergences_keep_their_owners`.
+
+## A mutation filter rooted at a module's `tests` excludes its submodules
+
+The first `// mutants:` map for `parse/case_block.rs` anchored its nextest filter at
+`test(/^parse::case_block::tests::/)`, so `parse::case_block::literal::tests::*` never
+ran under the gate. That hid a real miss: `tokens_to_case`'s empty-slot guard
+(`closed.get(in_idx + 1..esac_idx)`) mutated to `in_idx - 1` scans the token before
+`in`; `case x; in esac` (accepted because the case word is `;`-trimmed) then sees a
+real `;` and reports the empty-clause error, but the filtered suite was green.
+Broadening the filter to the module prefix (`test(/^parse::case_block::/)`) ran 20
+tests and killed the `-` twin;
+`a_separator_before_in_is_trimmed_out_of_the_word_slot` pins the accepted trim
+directly. The `*` twin (`in_idx * 1`) is the accepted equivalent: the slot starts at
+the `in` keyword, never a `;` byte, so the guard's answer cannot change; it is in
+`tools/mutants_allowlist.toml`. Rule: a per-file filter must anchor at the module (or
+the crate), not at its `tests` submodule, or the gate silently under-tests every
+nested test module.
+
+## An error-mapping arm needs a test at the mapping boundary
+
+`timeout`'s `validate_intercept` result is converted variant by variant
+(`CmdError::CapturesNotSupported` → `TimeoutError::CapturesNotSupported`), but
+the whole `timeout_cmd` suite tested only `parse`, so deleting the capture arm
+was green until the gate's `test(/^intercept::timeout_cmd::tests::/) | binary(timeout)`
+filter ran it. The kill is direct:
+`captures_are_rejected_with_the_timeout_error` builds a `CommandLine` with a
+`Capture` and calls `run_timeout`, so the mapping arm — not just the validator
+underneath it — is observable. The sibling
+`CmdError::Never => TimeoutError::Never` arm is the invariant fallback:
+`command_word::expand` reaches `CmdError::Never` only through internal
+`ForkCell` borrow or `ShortCStr` failures, and `timeout` calls it with no
+outstanding borrow, so no script reaches the arm; deleting it leaves the whole
+suite green and is recorded in `tools/mutants_allowlist.toml`. Rule: test the
+error conversion at the function that owns it, and allowlist only a fallback
+whose producer is unreachable from that call path.

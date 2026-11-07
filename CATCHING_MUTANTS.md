@@ -4,6 +4,10 @@ Reusable recipes for turning missed mutants into caught ones. Keep this file
 short. Add a rule whenever a probe kills a mutant or disproves an
 "accepted equivalent" entry.
 
+Active accepted equivalents are recorded in
+[`tools/mutants_allowlist.toml`](tools/mutants_allowlist.toml); `LESSONS.md`
+keeps the reusable proof. A "registry" below means that allowlist.
+
 1. **Apply the mutant as source.** For an identity-shaped mutant (`x + 1` →
    `x * 1`, `x - 0`, `x * 1`, `x | 0`, `x && true`), replace the original with
    the identity form, run the suite, and compare behavior on real input. If
@@ -184,11 +188,12 @@ short. Add a rule whenever a probe kills a mutant or disproves an
     operand and the family dies with it.** Prove the operand dead by hand (rule 1),
     then write the value in a shape with no operator left to mutate: a plain literal
     for a product, an exact range for a ±1, a predicate for a boundary comparison,
-    the callee's own gate for a duplicated conjunct. The registry entries this
-    chore resolved (task #477) each landed on a form an existing rule already
-    names — rules 3, 6, 11, 13, 15, 16, 18, 20, 22; this one is the pointer, not a
-    new recipe. A deleted operator cannot be re-flagged by a future sweep, and the
-    pins that named the surviving behaviour stay green on the simplified source.
+    the callee's own gate for a duplicated conjunct. The accepted-equivalent
+    entries this chore resolved (task #477) each landed on a form an existing
+    rule already names — rules 3, 6, 11, 13, 15, 16, 18, 20, 22; this one is
+    the pointer, not a new recipe. A deleted operator cannot be re-flagged by a
+    future sweep, and the pins that named the surviving behaviour stay green on
+    the simplified source.
 
 25. **When every consumer *clamps* the value, pin it at the computation site.**
     An external agent (the kernel, a library) is told the value and acts on at
