@@ -2,6 +2,9 @@
 //! the matching formatter. Numeric failures are reported to the `Sink` (the
 //! value falls back to 0 or the clamped bound) rather than aborting.
 
+// mutants: -C --test -C printf -- -E 'binary(printf)'
+
+mod field;
 mod num;
 
 use alloc::vec::Vec;
@@ -15,7 +18,7 @@ use super::fmt_float;
 use super::fmt_g;
 use super::fmt_hexfloat;
 use super::fmt_int;
-use super::spec::{Field, Fmt, Spec};
+use super::spec::{Fmt, Spec};
 
 /// Apply one fully-parsed specifier, consuming its `*` fields and its argument.
 /// Returns `true` when at least one argument was consumed.
@@ -25,8 +28,8 @@ pub(super) fn apply_spec(
     sink: &mut Sink,
 ) -> Result<bool, Report<BuiltinError>> {
     let before = rest.len();
-    let (width, width_left) = resolve_field(spec.width, rest, sink, false);
-    let (precision, _) = resolve_field(spec.precision, rest, sink, true);
+    let (width, width_left) = field::resolve_field(spec.width, rest, sink, false);
+    let (precision, _) = field::resolve_field(spec.precision, rest, sink, true);
     let fmt = Fmt {
         conv: spec.conv,
         left: spec.left || width_left,
@@ -55,41 +58,6 @@ pub(super) fn apply_spec(
         _ => {}
     }
     Ok(before != rest.len())
-}
-
-/// Resolve a width/precision field to its value and whether a negative `*`
-/// width forced left-justification. A negative `*` precision means "absent".
-fn resolve_field(
-    field: Option<Field>,
-    rest: &mut &[&CStr],
-    sink: &mut Sink,
-    is_precision: bool,
-) -> (Option<usize>, bool) {
-    let Some(f) = field else {
-        return (None, false);
-    };
-    match f {
-        Field::Lit(n) => (Some(n), false),
-        Field::Star => {
-            let v = num::next_int(rest, sink);
-            if is_precision {
-                if v < 0 {
-                    (None, false)
-                } else {
-                    (Some(v as usize), false)
-                }
-            } else if v.is_negative() {
-                // A negative `*` width left-justifies at `|width|`. The
-                // predicate has no `v == 0` boundary to hide behind: `v < 0`
-                // mutates to `v <= 0` (unobservable at 0, where `pad` fills
-                // nothing), `is_negative` mutates only to a value that the
-                // two-sided `%*d` pins kill.
-                (Some(v.unsigned_abs() as usize), true)
-            } else {
-                (Some(v as usize), false)
-            }
-        }
-    }
 }
 
 /// The next argument's bytes (owned), consumed from `rest`; `None` when the
