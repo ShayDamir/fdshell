@@ -1203,18 +1203,56 @@ fn dev_fd_read_target_starts_at_byte_zero() {
     assert_eq!((out.as_str(), code), ("xxy", 0), "stderr={err:?}");
 }
 
+/// Run with fd `fd` **closed from the start**: `sh` closes it before
+/// `exec`-ing fdshell, so the fd table the child sees is deterministic
+/// whatever the harness inherited.
+///
+/// LESSONS: "A pin that asserts "the parent's fd N is closed" must close it in the child's start state (task #276)"
+fn run_fd_closed(fd: u32, script: &str) -> (String, String, i32) {
+    let output = Command::new("sh")
+        .args([
+            "-c",
+            &format!("exec {fd}>&-; exec \"$0\" -c \"$1\""),
+            BIN,
+            script,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 #[test]
 fn dev_fd_target_is_canonical_digits_only() {
     // The kernel's entry for fd 1 is named `1`, so `/dev/fd/01`, `/dev/fd/1x`
     // and a closed fd's number are ordinary paths and the open fails (bash rc 1,
     // `No such file or directory`). The earlier `> z` ran, so `z` exists empty —
     // the failure is this def's open, not the list's.
+    //
+    // (`word`, fd closed before the script): only the `/dev/fd/7` row is a
+    // process-state pin — it asserts fd 7 is *closed*, which the harness does
+    // not guarantee (an inherited jobserver fd 7 makes the magic open succeed,
+    // rc 0, body `hi\n`), so it runs through `run_fd_closed` (LESSONS: "A pin that asserts "the parent's fd N is closed" must close it in the child's start state (task #276)").
+    // The other rows fail as ordinary paths whatever the fd table holds and
+    // stay on the plain spawn.
     let (path, _spath) = temp_path("devfd_digits");
-    for word in ["/dev/fd/01", "/dev/fd/1x", "/dev/fd/7", "/proc/self/fd/01"] {
+    for (word, closed_fd) in [
+        ("/dev/fd/01", None),
+        ("/dev/fd/1x", None),
+        ("/dev/fd/7", Some(7)),
+        ("/proc/self/fd/01", None),
+    ] {
         let _ = std::fs::write(&path, "stale");
-        let (out, err, code) = run(&format!(
-            "f(){{ echo hi; echo e >&2; }}; f > {path} 2> {word}"
-        ));
+        let script = format!("f(){{ echo hi; echo e >&2; }}; f > {path} 2> {word}");
+        let (out, err, code) = match closed_fd {
+            Some(fd) => run_fd_closed(fd, &script),
+            None => run(&script),
+        };
         let body = std::fs::read(&path).unwrap();
         assert_eq!((out.as_str(), code), ("", 1), "{word}: stderr={err:?}");
         assert!(
@@ -2673,17 +2711,7 @@ fn run_cwd(dir: &str, script: &str) -> (String, String, i32) {
 /// needs this — cargo-mutants hands every test process its jobserver pipes as
 /// open fds ≥ 3, which would make a `>&3` dup succeed (LESSONS, task #276).
 fn run_fd3_closed(script: &str) -> (String, String, i32) {
-    let output = Command::new("sh")
-        .args(["-c", "exec 3>&-; exec \"$0\" -c \"$1\"", BIN, script])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .unwrap();
-    (
-        str::from_utf8(&output.stdout).unwrap().to_string(),
-        str::from_utf8(&output.stderr).unwrap().to_string(),
-        output.status.code().unwrap_or(-1),
-    )
+    run_fd_closed(3, script)
 }
 
 /// The plain family: every operator shape, in every statement position, is a
