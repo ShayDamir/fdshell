@@ -2,7 +2,7 @@
 //! the matching formatter. Numeric failures are reported to the `Sink` (the
 //! value falls back to 0 or the clamped bound) rather than aborting.
 
-// mutants: -C --test -C printf -- -E 'binary(printf)'
+// mutants: -C --lib -C --test -C printf -- -E 'test(/^child::printf::/) | binary(printf)'
 
 mod field;
 mod num;

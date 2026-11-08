@@ -925,6 +925,21 @@ fn scan_function_block_resume_gap_eats_glued_byte() {
     }
 }
 
+/// `open_block`'s `def_start` is the run start plus the run's **own** leading
+/// whitespace, and the definer gate walks `line` from there. The ws=2 rows of
+/// `scan_kw_len_arithmetic_with_whitespace` measure that sum only as a
+/// subtraction (their runs start at 0, where a product still answers 0), so the
+/// last row here is the neighbour that measures it as a multiplication: the run
+/// starts inside the line and has whitespace of its own, a product moves
+/// `def_start` past the `{`, the definer stops being a block, and the row goes
+/// red (CATCHING_MUTANTS rule 3: pin the neighbour, not only the equality case).
+#[test]
+fn the_definer_gate_measures_the_run_offset_plus_its_whitespace() {
+    check_block(b" f() { :; }", (0, 11, true));
+    check_block(b"f() { :; }", (0, 10, true));
+    check_segments(b"echo a;   f() { :; }", &[(7, 20, true)]);
+}
+
 /// A `;`-terminated heredoc statement before a function definition and a
 /// heredoc statement after it: the line's body stream is allocated in operator
 /// order, so the pre-block statement takes region 0, the definition claims

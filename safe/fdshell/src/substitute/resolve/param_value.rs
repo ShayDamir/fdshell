@@ -2,7 +2,7 @@
 //! own `set -u` policy and hands every name it is given to the shared lookup in
 //! [`lookup`], so no family re-implements the `!name` rule and none can drift.
 
-// mutants: -C --test -C colon -C --test -C positional -C --test -C pattern -- -E 'binary(colon) | binary(positional) | binary(pattern)'
+// mutants: -C --lib -C --test -C colon -C --test -C positional -C --test -C pattern -- -E 'test(/^substitute::/) | binary(colon) | binary(positional) | binary(pattern)'
 
 use error_stack::Report;
 use sys::ShortCStr;

@@ -1,7 +1,7 @@
 //! Width/precision field resolution for the conversions: a `*` field consumes
 //! an argument (reported through the `Sink`), a literal field is its own value.
 
-// mutants: -C --test -C printf -- -E 'binary(printf)'
+// mutants: -C --lib -C --test -C printf -- -E 'test(/^child::printf::/) | binary(printf)'
 
 use core::ffi::CStr;
 

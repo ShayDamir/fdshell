@@ -5,7 +5,7 @@
 //! an absolute target (filesystem-root resolution) is banned. Non-strict
 //! redirect opening (redirect/open.rs) is byte-for-byte unchanged.
 
-// mutants: -C --lib -- -E 'test(/^redirect::open::/)'
+// mutants: -C --lib -C --test -C strict -- -E 'test(/^redirect::open::/) | binary(strict)'
 
 use super::target;
 use crate::error::redirect::OpenRedirectError;

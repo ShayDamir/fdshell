@@ -2,7 +2,7 @@
 //! head words whose `{ …; }` body the span swallows, so both land here with the
 //! span end and the closed flag already decided by their own scanners.
 
-// mutants: -C --lib -C --test -C function_keyword -C --test -C block_bodies -C --test -C block_closers -C --test -C block_conditions -- -E 'test(/^segment::block::/) | binary(function_keyword) | binary(block_bodies) | binary(block_closers) | binary(block_conditions)'
+// mutants: -C --lib -C --test -C function_keyword -C --test -C block_bodies -C --test -C block_closers -C --test -C block_conditions -- -E 'test(/^segment::/) | binary(function_keyword) | binary(block_bodies) | binary(block_closers) | binary(block_conditions)'
 
 use super::Segment;
 use super::claim;

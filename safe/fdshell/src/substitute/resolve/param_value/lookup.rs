@@ -9,7 +9,7 @@
 //! `4`. Values are owned `ShortCStr`s: the specials render theirs, and `clone`
 //! is documented as very cheap (STYLE §6.3).
 
-// mutants: -C --test -C colon -C --test -C positional -C --test -C pattern -- -E 'binary(colon) | binary(positional) | binary(pattern)'
+// mutants: -C --lib -C --test -C colon -C --test -C positional -C --test -C pattern -- -E 'test(/^substitute::/) | binary(colon) | binary(positional) | binary(pattern)'
 
 use error_stack::{Report, bail};
 use sys::ShortCStr;
