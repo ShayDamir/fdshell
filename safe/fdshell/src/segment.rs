@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^segment::/)'
+
 mod bg;
 mod block;
 pub(super) mod book;
@@ -38,21 +40,11 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
     while book.i <= line.len() {
         let kind = boundary(line, book.i, &book.state);
         match kind {
+            // The word-start arm: the opener owners are asked in turn, each
+            // moving the cursor past its whole span, and a run that opens
+            // nothing is the plain advance. The plain-`&` arm below is its twin.
             Boundary::Char => {
-                let opener = !in_block && book.state.at_word_start();
-                if opener && group::opens_at(line, book.i) {
-                    group::opener::scan(line, &mut book);
-                } else if opener && block::midrun::skip(line, &mut book).is_some() {
-                    // A keyword block that opens a cond part mid-run: `skip` moved
-                    // the cursor past its whole span, so its `;` never splits the
-                    // run and the cond layer splits the operators.
-                } else if opener && block::stage::skip(line, &mut book).is_some() {
-                    // A keyword block that opens a pipeline stage mid-run: `skip`
-                    // moved the cursor past its whole span, so its `;` never splits
-                    // the run and the pipeline parser splits the stages.
-                } else {
-                    book.i = book.state.advance(line, book.i);
-                }
+                block::opener::open_at_word(line, &mut book, in_block);
                 continue;
             }
             // `mark` owns the cursor for the whole split (it flushes the runs
