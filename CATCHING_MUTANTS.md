@@ -220,3 +220,19 @@ keeps the reusable proof. A "registry" below means that allowlist.
     `escape_pair_never_leaves_a_toggle_behind`) now kill its `i < e`→`<=` bound and
     the escape-arm `!in_quote` guard together — two records this chore deleted, made
     obsolete by the mask split, died for free.
+
+27. **Read the same number once.** When one arm computes the same arithmetic
+    twice — once to ask, once to report — each copy is its own mutant site and
+    only one of them is observable: the copy whose value reaches an assertion
+    dies, the other survives because every probe that reaches it is decided by
+    state the arithmetic cannot change. Hoist the sum into one local and the
+    surviving site disappears. Measured on `segment.rs`'s stray-closer arm: the
+    run-offset sum was read by `is_stray_closer` (whose own sum feeds only the
+    recognition table's quote gate, whose answer for the raw-text words this
+    byte-level path receives never depends on the offset) and by the
+    `Segment::StrayCloser` it pushes; after the hoist one `+` is left and it is
+    killed by the existing exact-offset pin
+    (`segment/tests.rs::a_run_first_word_brace_at_the_top_level_reports_stray`),
+    while the ask-side sum stays killable only through rule 2's direct probe
+    (`segment/tests.rs::the_stray_decision_measures_the_word_where_its_bytes_lie`,
+    a quote-removed text read at an offset inside a quote region).

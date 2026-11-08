@@ -121,11 +121,11 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             // Task #436's decision, on the run's **first** word — the top level's
             // command position, with this scan's stack empty: a closing keyword
             // word here closes no open block of its kind. A run that was claimed
-            // as a block reports through its own span walk above.
-            if !in_block && is_stray_closer(line, part, book.start + lead) {
-                book.segments.push(Segment::StrayCloser {
-                    off: book.start + lead,
-                });
+            // as a block reports through its own span walk above. The word's own
+            // offset is computed once: the ask and the report read the same number.
+            let word_off = book.start + lead;
+            if !in_block && is_stray_closer(line, part, word_off) {
+                book.segments.push(Segment::StrayCloser { off: word_off });
             }
             let sep = book.i;
             if line.get(book.i) == Some(&b'\n') || book.i == line.len() {

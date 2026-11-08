@@ -1295,6 +1295,27 @@ fn a_run_first_word_brace_at_the_top_level_reports_stray() {
     );
 }
 
+/// The quote gate measures the keyword's own bytes **where they lie in the
+/// line**, so the offset the run path hands it — the run's start plus the run's
+/// leading whitespace — must be the word's own offset. Both sides of it: a
+/// quote-removed text (the token-level reading the gate's own doc names) whose
+/// bytes sit inside a quote region is word data, and the same text read at an
+/// offset where its bytes are the line's own bytes is the closer it reads as
+/// (task #141's rule, at the run path's arithmetic).
+#[test]
+fn the_stray_decision_measures_the_word_where_its_bytes_lie() {
+    // `echo x;   "fi"` — the word's bytes are at 11, inside the quotes.
+    assert!(
+        !is_stray_closer(b"echo x;   \"fi\"", b"fi", 11),
+        "a word whose bytes lie in a quote region is word data"
+    );
+    // `echo x;   fi` — the run's own bytes: the bare closer of task #436.
+    assert!(
+        is_stray_closer(b"echo x;   fi", b"fi", 10),
+        "the same text whose bytes are the line's is the closer"
+    );
+}
+
 /// Inside a block body (`in_block = true`) the group braces are plain words:
 /// the body's own statements run as written.
 #[test]

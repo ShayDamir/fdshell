@@ -65,6 +65,16 @@ fn a_run_that_opens_nothing_is_not_a_block() {
     }
 }
 
+/// The definer gate walks `line` from the run's **first non-space byte**, so a run
+/// indented inside a longer line is recognized at its own offset: the walk starts
+/// where the definer word is, not where the run begins (task #535 pins the sum).
+#[test]
+fn an_indented_run_inside_the_line_opens_at_its_first_non_space_byte() {
+    let line: &'static [u8] = b"echo a;   f() { :; }";
+    let start = line.iter().position(|&b| b == b';').unwrap() + 1;
+    assert!(opens_run(line, &line[start..], start, Quotes::new()));
+}
+
 /// The plain-`&` branch of a run that opens a block pushes the block segment and
 /// moves the cursor past its span, so the scan never reads the `&` written
 /// inside the block's text.
