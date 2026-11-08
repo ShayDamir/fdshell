@@ -5,6 +5,8 @@
 //! an absolute target (filesystem-root resolution) is banned. Non-strict
 //! redirect opening (redirect/open.rs) is byte-for-byte unchanged.
 
+// mutants: -C --lib -- -E 'test(/^redirect::open::/)'
+
 use super::target;
 use crate::error::redirect::OpenRedirectError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
@@ -21,6 +23,23 @@ use sys::fork_cell::ForkCell;
 use sys::openat2::OpenHow;
 
 use crate::state::ShellState;
+
+/// The pinned `%CWD` dirfd clone strict mode opens every target through;
+/// `None` for non-strict (the process-CWD `open()` calls, unchanged) and for
+/// the defensive case of an unseeded `%CWD` (startup is the only producer).
+pub(super) fn strict_base(
+    cell: &ForkCell<ShellState>,
+    strict: bool,
+) -> Result<Option<LocalFd>, Report<OpenRedirectError>> {
+    if !strict {
+        return Ok(None);
+    }
+    let state = cell.borrow().change_context(OpenRedirectError::Never)?;
+    state
+        .cwd_fd()
+        .map(|fd| fd.try_clone().change_context(OpenRedirectError::Open))
+        .transpose()
+}
 
 /// One path redirect target under strict: expand and glob it rooted at the
 /// pinned `%CWD` fd `base` (the absolute ban runs on every **expanded**

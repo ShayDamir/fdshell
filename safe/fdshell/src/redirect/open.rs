@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^redirect::open::/)'
+
 mod cwd;
 mod strict;
 mod target;
@@ -13,23 +15,6 @@ use sys::LocalFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
-/// The pinned `%CWD` dirfd clone strict mode opens every target through;
-/// `None` for non-strict (the process-CWD `open()` calls, unchanged) and for
-/// the defensive case of an unseeded `%CWD` (startup is the only producer).
-fn strict_base(
-    cell: &ForkCell<ShellState>,
-    strict: bool,
-) -> Result<Option<LocalFd>, Report<OpenRedirectError>> {
-    if !strict {
-        return Ok(None);
-    }
-    let state = cell.borrow().change_context(OpenRedirectError::Never)?;
-    state
-        .cwd_fd()
-        .map(|fd| fd.try_clone().change_context(OpenRedirectError::Open))
-        .transpose()
-}
-
 pub fn open_redirect_files(
     redirects: &[RedirectDef],
     cell: &ForkCell<ShellState>,
@@ -41,7 +26,7 @@ pub fn open_redirect_files(
         let state = cell.borrow().change_context(OpenRedirectError::Never)?;
         state.strict()
     };
-    let base = strict_base(cell, strict)?;
+    let base = strict::strict_base(cell, strict)?;
     let noclobber = {
         let state = cell.borrow().change_context(OpenRedirectError::Never)?;
         state.options & crate::options::NOCLOBBER != 0
