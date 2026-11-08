@@ -8,13 +8,16 @@
 //! `--backlog N` (default 1) belongs to `listen` alone — `bind` and
 //! `connect` never call `listen(2)`, so they reject the flag.
 
+// mutants: -C --lib -- -E 'test(/^child::netaddr::/)'
+
 mod address;
+mod parsed;
 
 use core::ffi::CStr;
-use error_stack::{Report, bail, ensure};
+use error_stack::{Report, bail};
 use sys::ShortCStr;
 
-use builtins::error::{BuiltinError, Suggestion};
+use builtins::error::BuiltinError;
 
 use address::make_address;
 
@@ -55,50 +58,12 @@ pub(crate) fn parse_net_args(
     if builtins::argparse::wants_help(refs) {
         bail!(BuiltinError::Help);
     }
-    let mut ty: Option<SocketType> = None;
-    let mut bind_addr: Option<&CStr> = None;
-    let mut port: Option<&CStr> = None;
-    let mut backlog: Option<&CStr> = None;
-    let mut addr: Option<&CStr> = None;
-    let mut i = 0;
-    while i < refs.len() {
-        let arg = refs.get(i).ok_or(BuiltinError::Never)?;
-        i += 1;
-        let (key, val) = builtins::argparse::split(arg)?;
-        match key {
-            b"--type" => {
-                ensure!(ty.is_none(), BuiltinError::InvalidArgument("type"));
-                let v = builtins::argparse::next_val(refs, &mut i, val)?;
-                ty = Some(address::parse_type(v)?);
-            }
-            b"--bind" | b"--addr" => {
-                ensure!(bind_addr.is_none(), BuiltinError::InvalidArgument("bind"));
-                bind_addr = Some(builtins::argparse::next_val(refs, &mut i, val)?);
-            }
-            b"--port" => {
-                ensure!(port.is_none(), BuiltinError::InvalidArgument("port"));
-                port = Some(builtins::argparse::next_val(refs, &mut i, val)?);
-            }
-            b"--backlog" => {
-                ensure!(
-                    allows_backlog,
-                    Report::new(BuiltinError::InvalidArgument("backlog"))
-                        .attach_opaque(Suggestion("--backlog is accepted only by listen"))
-                );
-                ensure!(backlog.is_none(), BuiltinError::InvalidArgument("backlog"));
-                backlog = Some(builtins::argparse::next_val(refs, &mut i, val)?);
-            }
-            a if a.starts_with(b"-") => bail!(BuiltinError::InvalidArgument("flag")),
-            _ => {
-                ensure!(addr.is_none(), BuiltinError::InvalidArgument("address"));
-                addr = Some(arg);
-            }
-        }
-    }
-    let backlog = backlog.map(address::parse_backlog).transpose()?;
+    let mut collected = parsed::Parsed::default();
+    collected.collect(refs, allows_backlog)?;
+    let backlog = collected.backlog.map(address::parse_backlog).transpose()?;
     Ok(NetArgs {
-        ty: ty.unwrap_or(SocketType::Stream),
-        addr: make_address(addr, bind_addr, port)?,
+        ty: collected.ty.unwrap_or(SocketType::Stream),
+        addr: make_address(collected.addr, collected.bind_addr, collected.port)?,
         backlog,
     })
 }
