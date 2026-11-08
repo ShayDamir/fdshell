@@ -1,4 +1,8 @@
-//! Flag/field parsing helpers for [`super::spec`].
+// mutants: -C --lib -C --test -C printf -- -E 'test(/^child::printf::/) | binary(printf)'
+
+//! Flag/field parsing helpers for [`super::spec`]. Task #545: `apply_flag` and
+//! `assign_field` take `&mut Spec` yet stay free functions — `spec/parse.rs` is
+//! their only caller, so the method shape would serve exactly one site.
 
 use super::spec::{Field, MAX_FIELD, Spec};
 

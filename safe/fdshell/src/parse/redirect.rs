@@ -1,5 +1,11 @@
 // mutants: -C --lib -C --test -C redirect -- -E 'test(/^parse::/) | binary(redirect)'
 
+//! The parse layer's redirect-word gates. Task #545: the `&ShortCStr`
+//! predicates here stay free functions — three of them read this crate's
+//! `MaskBit`, and the orphan rule will not let a `sys` type take a
+//! parse-layer argument; `parse_fd` is the descriptor-number rule they feed, so
+//! it stays with them rather than splitting one family across two crates.
+
 mod attached;
 mod bare;
 mod clobber;

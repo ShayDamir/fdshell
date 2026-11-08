@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C heredoc -- -E 'test(/^parse::cond_bodies::/) | binary(heredoc)'
+
 //! Extract the heredoc bodies a token slice claims from its text. The bodies
 //! sit after the command line (in the text), in operator order, and the slice
 //! claims only the regions its own operators write: the operators written on
@@ -5,6 +7,10 @@
 //! the stream. Consumed by a block condition (whose bodies `condition_bodies`
 //! hands to the cond-list run) and by a token slice whose text is rebuilt from
 //! its body bytes (`part_text`, an arm body).
+//!
+//! Task #545: these `&ScriptText` functions stay free functions. `ScriptText`
+//! is a `sys` type and the second argument is this crate's `Token`, so the
+//! orphan rule freezes the split — no `impl ScriptText` here can take it.
 
 use super::Token;
 use super::heredoc::operators;
