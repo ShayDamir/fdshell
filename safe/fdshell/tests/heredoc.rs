@@ -2371,11 +2371,11 @@ fn midrun_block_body_heredoc_is_region_scanned() {
 /// **multi-line** mid-run construct whose region swallows its closer is rc 1
 /// where bash is rc 2 (pinned in `tests/cond_blocks.rs`
 /// `multi_line_mid_run_constructs_with_a_body_heredoc_stay_measured`, same
-/// family as `block_body_heredoc_delimiter_line_operator_is_region_data`), a
-/// group / function **body** here-doc claims no region (tasks **#315** /
-/// **#305**, pinned below), a delimiter line that never arrives is task
-/// **#364**, and the `&`-deferred flush is task **#468** (the `#`-terminated
-/// twin reached parity in task **#333**, pinned by
+/// family as `block_body_heredoc_delimiter_line_operator_is_region_data`).
+/// The other named members have reached parity: the group / function **body**
+/// here-doc (tasks **#315** / **#305**, pinned below), the delimiter line that
+/// never arrives (task **#364**), and the `&`-deferred flush (task **#468**,
+/// alongside the `#`-terminated twin task **#333** closed, pinned by
 /// `a_comment_terminated_line_owns_its_body_stream`).
 #[test]
 fn mid_run_heredoc_parity_family() {
@@ -2430,7 +2430,7 @@ fn mid_run_heredoc_parity_family() {
         ("true && while :; do cat <<<str; break; done", "str\n"),
         // A `#` behind the run, and a comment line above it: the flush is on
         // the run's own line, so nothing is deferred (the `&`-deferred twin is
-        // #468's).
+        // parity since #468).
         (
             "true && while :; do cat <<T; break; done # c\nbodyT\nT",
             "bodyT\n",
@@ -3800,14 +3800,13 @@ fn a_heredoc_behind_an_ampersand_reports_a_missing_body() {
 /// Task #313, the deferral and block-behind-`&` rows (measured 2026-10-20):
 ///
 /// * `cat <<A\n & cat <<B` — the line-deferral of task #326 (a newline whose
-///   next line opens with `&`): fdshell runs the pair (rc 0), bash runs the
-///   deferred line as garbage (`"y" not found`, rc 127). fdshell is the *nicer*
-///   side here; the row pins it so the deferral cannot regress into the junk
-///   shape. Task #403 moved the line set: the body of an operator on a physical
-///   line is every region that definition assigns to the bytes after it, and the
-///   deferred line is those bytes — so the first heredoc prints `" & cat <<B"`
-///   and `x` exactly as bash does (measured 2026-11-02), and only `y`/`B` are
-///   fdshell's own (the deferral runs them instead of executing them).
+///   next line opens with `&`). Task **#468** flipped this row toward bash:
+///   the physical line claims a body region (the delimiter line `A` arrives),
+///   so the gate at the deferral decision suppresses the deferral and the line
+///   ends itself with its region attached — the first heredoc prints
+///   `" & cat <<B"` and `x` exactly as bash does (re-measured 2026-11-08), and
+///   `y`/`B` are commands again: the reports are fdshell's own and so is the
+///   rc 1 they end at (bash's are rc 127).
 /// * `cat <<A & cat <<B` + a third heredoc line below: both shells produce
 ///   junk (the body of the third operator lands in the middle of the run).
 /// * `cat <<A & if true; then cat <<B … fi` — a **block opened behind the
@@ -3817,10 +3816,12 @@ fn a_heredoc_behind_an_ampersand_reports_a_missing_body() {
 #[test]
 fn a_heredoc_behind_an_ampersand_deferral_and_block_rows() {
     let (out, err, code) = run("cat <<A\n & cat <<B\nx\nA\ny\nB");
-    assert_eq!(code, 0, "out={out} stderr={err}");
+    assert_eq!(code, 1, "bash rc 127: out={out} stderr={err}");
     let mut lines: Vec<&str> = out.lines().collect();
     lines.sort_unstable();
-    assert_eq!(lines, [" & cat <<B", "x", "y"], "stdout={out}");
+    assert_eq!(lines, [" & cat <<B", "x"], "stdout={out}");
+    assert!(err.contains("\"y\" not found"), "stderr={err}");
+    assert!(err.contains("\"B\" not found"), "stderr={err}");
 
     let (out, _err, code) = run("cat <<A & cat <<B\ncat <<C\nx\nA\ny\nB\nz\nC");
     assert_eq!(code, 1);
@@ -4339,15 +4340,17 @@ fn a_comment_behind_an_ampersand_lets_the_suffix_carry_its_body() {
 
 /// The starved-stream rows reach **parity** with bash (task **#364**: the
 /// delimiter line never arrives, the claim covers the remaining lines, the run
-/// carries the end-of-file warning; measured 2026-10-29). The members that stay
-/// divergent are pinned **as measured** with their owner named (never silently
-/// accepted):
+/// carries the end-of-file warning; measured 2026-10-29). The line-opening `&`
+/// members reached parity too, in task **#468**: the gate at the deferral
+/// decisions asks the one definition of an opaque body for the physical line,
+/// a line that claims a region ends itself with the region attached, and the
+/// `&` line below is region data — never re-scanned as a statement. The only
+/// member that stays divergent is pinned **as measured** with its behavior
+/// named (never silently accepted):
 ///
-/// * a line-opening `&` **below** a comment-terminated here-doc line: the flush
-///   is deferred into the region and the region's tail runs as a command, the
-///   `segment/bg.rs::mark` family of task **#468**.
 /// * `echo a # note` + a line-opening `&`: the accepted line-deferral family
-///   (bash's rc 2 syntax error, fdshell runs both).
+///   (bash's rc 2 syntax error, fdshell runs both) — the line claims nothing,
+///   so the gate leaves the deferral alone.
 #[test]
 fn a_comment_terminated_line_starved_rows_reach_parity_and_deferred_rows_keep_their_owners() {
     // #275's all-or-nothing rule is gone; the #429/#364 family is parity (bash
@@ -4364,14 +4367,26 @@ fn a_comment_terminated_line_starved_rows_reach_parity_and_deferred_rows_keep_th
             "script {script:?}: stderr={err}"
         );
     }
-    // #468: the `&` line is swallowed by the region, whose tail then runs as a
-    // command (the `& echo b` job's own output lands in stdout; the `body` tail
-    // answers with the shell's report). bash prints `& echo b` and `body` at
-    // rc 0.
-    let (out, err, code) = run("cat <<X # note\n& echo b\nbody\nX");
-    assert_eq!((code, out.as_str()), (1, "b\n"), "out={out}");
-    assert!(err.contains("delimited by end-of-file"), "stderr={err}");
-    assert!(err.contains("\"body\" not found"), "stderr={err}");
+    // Task **#468**'s pair: the whole block is heredoc body, so bash's values
+    // are the answers (re-measured 2026-11-08 on this branch) — the title
+    // shape through the newline arm's gate, the comment twin through
+    // `end_comment`'s. The `& echo b` and `body` lines print in order (one
+    // foreground statement), rc 0, no stderr.
+    for script in [
+        "cat <<X\n& echo b\nbody\nX",
+        "cat <<X # note\n& echo b\nbody\nX",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (code, out.as_str()),
+            (0, "& echo b\nbody\n"),
+            "script {script:?}: bash agrees: out={out}"
+        );
+        assert!(
+            err.is_empty(),
+            "script {script:?}: bash is silent: stderr={err:?}"
+        );
+    }
     // The accepted line-deferral family: bash stops at the line-opening `&`
     // with rc 2, fdshell runs both statements. The `& echo b` is a background
     // job, so its output has no order (the `tests/async.rs` convention).
@@ -4566,29 +4581,28 @@ fn an_escaped_delimiter_word_at_the_line_end_keeps_its_owners() {
 }
 
 /// Task #347, the `&`-deferred members of the delimiter-word family: the
-/// line-opening-`&` **deferral** (`segment/bg.rs::mark`, the #326/#333 family)
-/// reads the next physical line's raw bytes **before** the flush computes that
-/// line's region claims, so when the next line is a here-doc's first body line
-/// or its delimiter line the deferral swallows region data. Every row here is
-/// pinned as measured with **owner #468** named (its scope is exactly "what a
-/// line-opening `&` may claim when the deferred flush has claimed a body
-/// region"), and it flips these rows when it lands — **task #403 landed it**
-/// (2026-11-02): the flush now hands the operator the regions the single
-/// definition assigns to the bytes after it, so the delimiter lines and body
-/// lines below arrive, and the rows that were region-swallow shapes now match
-/// bash's output; the rows that stay fdshell's are the deferral running the `&`
-/// line as a command. The task #347 report measured `cat <<"&x"` rc 0 on
-/// `60a2ebd`: the row keeps its rc 1 (the deferral's report) and lost only the
-/// end-of-file warning. bash 5.3.9's value is beside every row.
+/// line-opening-`&` **deferral** (`segment/bg.rs::async_ahead`, the #326/#333
+/// family) read the next physical line's raw bytes **before** the flush
+/// computed that line's region claims, so when the next line was a here-doc's
+/// first body line or its delimiter line the deferral swallowed region data.
+/// Task **#468** landed the gate at the deferral decisions — the decision asks
+/// the one definition of an opaque body (`scan::heredoc::skip` for the physical
+/// line) and the deferral survives only when it answers `None` — so every row
+/// here is pinned at **bash's value** (re-measured 2026-11-08 on this branch):
+/// a line that claims a region ends itself with the region attached, the
+/// delimiter line below is region data, and it runs no command. The deferral
+/// still owns the rows that claim nothing (`echo a # note` + a line-opening
+/// `&`, pinned in
+/// `a_comment_terminated_line_starved_rows_reach_parity_and_deferred_rows_keep_their_owners`).
+/// The gate's two answers are pinned at segment granularity in
+/// `segment/bg/tests.rs::a_line_opening_with_ampersand_defers_the_flush_above_it`.
 #[test]
 fn a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468() {
-    // The delimiter line IS the `&` line: with the mechanism landed (task **#403**)
-    // the body of the operator is the region the single definition assigns to the
-    // bytes after it, so the delimiter line arrives and the end-of-file warning is
-    // gone — bash's shape (rc 0, silent, the delimiter is `&x`; measured
-    // 2026-11-02). Only the deferral's command report (`"&x"/`&&" not found`)
-    // remains, and it is fdshell's own (bash never runs the line as a command):
-    // rc 1 stays pinned.
+    // The delimiter line IS the `&` line: with the gate landed (task **#468**)
+    // the deferral is suppressed, line 1's own flush claims the region, the
+    // delimiter line is structure and no command runs on it — bash's shape (rc
+    // 0, silent, the delimiter is `&x`; measured 2026-11-08). The old
+    // as-measured half-report (`"&x" not found`) is gone.
     for script in [
         "cat <<\"&x\"\n&x",
         "cat <<'&x'\n&x",
@@ -4599,44 +4613,38 @@ fn a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468()
         let (out, err, code) = run(script);
         assert_eq!(
             (out.as_str(), code),
-            ("", 1),
-            "script {script:?}: out={out}"
+            ("", 0),
+            "bash agrees: {script:?}: out={out}"
         );
-        assert!(
-            err.contains("\"&x\" not found"),
-            "script {script:?}: stderr={err:?}"
-        );
+        assert!(err.is_empty(), "bash is silent: {script:?}: stderr={err:?}");
     }
-    // The `&&` twin: `&&` is an operator word the deferral swallows whole, so no
-    // command report rides along and the run ends at rc 0. Task #403 put the row
-    // fully on bash (rc 0, **silent**, measured 2026-11-02): the delimiter line
-    // arrives, so the end-of-file warning is gone. The `&x` rows keep their
-    // command reports, owner #468.
+    // The `&&` twin: the delimiter line is the `&`-pair word. It was parity
+    // before the gate too (the deferral then ran no command on it), and it
+    // stays there (rc 0, **silent**, measured 2026-11-08) — now by the gate:
+    // the line claims its region and the `&&` line below is region data.
     let (out, err, code) = run("cat <<\"&&\"\n&&");
     assert_eq!((out.as_str(), code), ("", 0), "bash agrees: out={out}");
     assert!(err.is_empty(), "bash is silent: stderr={err:?}");
-    // A `&` word with a space behind it: the swallowed region leaves `x` as a
-    // command word (bash: rc 0, silent).
+    // A `&` word with a space behind it: the delimiter line is region data, so
+    // `x` no longer stands as a command word (bash: rc 0, silent; measured
+    // 2026-11-08).
     let (out, err, code) = run("cat <<\"& x\"\n& x");
-    assert_eq!((out.as_str(), code), ("", 1), "out={out}");
-    assert!(
-        err.contains("failed to resolve command path: \"x\""),
-        "stderr={err:?}"
-    );
-    // The `&` line is a **body** line: task #403 gives the operator its own body
-    // back — `cat` prints `&x` and `wc -c` says 3, exactly bash's measured output
-    // (2026-11-02). What stays fdshell's is the deferral of task #326 running the
-    // `&` line as a command: the report rides on stderr and the run ends at rc 1
-    // where bash is rc 0.
+    assert_eq!((out.as_str(), code), ("", 0), "bash agrees: out={out}");
+    assert!(err.is_empty(), "bash is silent: stderr={err:?}");
+    // The `&` line is a **body** line: the operator's region arrives
+    // unbroken — `cat` prints `&x` and `wc -c` says 3, exactly bash's measured
+    // output (2026-11-08). The deferral no longer runs the `&` line as a
+    // command: the gate suppresses it, so the run ends at rc 0, silent.
     let (out, err, code) = run("cat <<EOF\n&x\nEOF");
-    assert_eq!((out.as_str(), code), ("&x\n", 1), "out={out}");
-    assert!(err.contains("\"&x\" not found"), "stderr={err:?}");
+    assert_eq!((out.as_str(), code), ("&x\n", 0), "bash agrees: out={out}");
+    assert!(err.is_empty(), "bash is silent: stderr={err:?}");
     let (out, err, code) = run("wc -c <<EOF\n&x\nEOF");
-    assert_eq!(code, 1, "stderr={err:?}");
+    assert_eq!(code, 0, "bash agrees: stderr={err:?}");
     assert!(
         out.starts_with("3"),
         "the body is no longer lost: stdout={out:?}"
     );
+    assert!(err.is_empty(), "bash is silent: stderr={err:?}");
 }
 
 /// The join × region rows of task #492 (POSIX #2.9), next to

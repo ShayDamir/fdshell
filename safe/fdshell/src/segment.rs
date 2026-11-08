@@ -11,7 +11,7 @@ mod types;
 pub(crate) use types::Segment;
 
 use crate::keywords::{Decision, Pairing, keyword_len};
-use crate::scan::{Boundary, boundary, skip_comment};
+use crate::scan::{Boundary, boundary, heredoc, skip_comment};
 use alloc::vec::Vec;
 use book::{Book, Run};
 
@@ -129,7 +129,15 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
             }
             let sep = book.i;
             if line.get(book.i) == Some(&b'\n') || book.i == line.len() {
-                deferred = line.get(book.i) == Some(&b'\n') && bg::async_ahead(line, book.i);
+                // The deferral is for lines that claim **nothing** (POSIX_COMPATIBILITY,
+                // "Line deferral"): a line that claims a body region ends itself with
+                // that region attached, and the `&` line below it is region data — bash
+                // never sees an operator there. The deferral decision asks the one
+                // definition of an opaque body for the physical line, and survives only
+                // when its answer is `None`.
+                deferred = line.get(book.i) == Some(&b'\n')
+                    && bg::async_ahead(line, book.i)
+                    && heredoc::skip(line, book.line_start, book.i).is_none();
                 book.i = line::end_line(&mut book, line, deferred).max(book.body_floor);
             }
             book.resume_past(sep, kind, deferred, line);

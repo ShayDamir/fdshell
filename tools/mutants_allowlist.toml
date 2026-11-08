@@ -9,3 +9,23 @@
 # `intercept/timeout_cmd.rs`'s `delete match arm CmdError::Never` is killed by
 # `intercept/timeout_cmd/tests.rs::a_held_shared_borrow_answers_the_never_arm`,
 # which feeds the helper the held shared borrow the *script* path cannot (rule 19).
+
+[[allow]]
+file = "safe/fdshell/src/segment/line.rs"
+line = 40
+column = 33
+mutant = "replace == with != in end_comment"
+reason = """Task #468's gate term. The mutant flips the answer only when the comment ends
+on a real newline (this term true), the next line opens with `&` (async_ahead
+true) and the line claims nothing (skip None); every other input reaches the
+same decision through the other conjuncts (nl == line.len() forces
+async_ahead false; a claiming line forces the gate false, where both answers
+suppress the deferral). On exactly those inputs the two outcomes converge at
+segment granularity: flush-on-the-comment-line and flush-at-the-`&`-mark emit
+the same runs in the same order with the same background flag, because
+split.rs's mark retargets the last flushed statement whenever the deferral path
+would mark the buffered run (end_comment keeps a flushed run a `&` target). The
+pinned rows at those shapes (`echo a # note` + a line-opening `&` in
+tests/heredoc.rs, the deferral table in segment/bg/tests.rs) keep their values
+under the mutant, so no test inside the map's `test(/^segment::/)` filter can
+kill it."""

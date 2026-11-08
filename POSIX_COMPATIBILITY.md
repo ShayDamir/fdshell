@@ -213,7 +213,10 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   line-opening `&` with rc 2. fdshell scans each line as its own statement
   text, so the flush of a line is deferred exactly to give that `&` a target;
   the deferral is also what lets `echo a &\necho b` run both statements
-  bash-like. Pinned in `safe/fdshell/tests/async.rs` and in
+  bash-like. Task **#468** narrowed the deferral to lines that claim **no**
+  body region: when the line above claims one, the `&` line below it is region
+  data, the deferral is suppressed and the line ends with its region attached,
+  so those rows are parity. Pinned in `safe/fdshell/tests/async.rs` and in
   `safe/fdshell/src/segment/bg/tests.rs`.
 
 ## Operators are recognized at word starts

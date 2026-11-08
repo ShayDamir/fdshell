@@ -20,6 +20,12 @@ use split::Split;
 /// advances past the `&` either way). An invalid split also clears the
 /// buffered runs: the pre-pass bails, so they must not leak into a later
 /// statement's text.
+///
+/// The cursor rule below (the three-row table pinned by task #313's test) is
+/// the **mid-line** `&`'s. A line-opening `&` whose line above claims a body
+/// region never reaches this function: region lines are data, the `&` is not
+/// an operator there, and the gate at the deferral decisions
+/// (`segment.rs`, `line::end_comment`) owns that case.
 pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
     let amp = book.i;
     // One computation of the index just past the `&`, shared by both consumers —
@@ -87,7 +93,11 @@ fn line_continues(line: &[u8], amp: usize) -> bool {
 }
 
 /// A line whose first non-blank byte is `&` follows `i` (a newline split
-/// defers its flush so the `&` can claim the runs buffered above it).
+/// defers its flush so the `&` can claim the runs buffered above it). The
+/// callers gate the deferral on the **one** definition of an opaque body
+/// (`scan::heredoc::skip`, asked for the physical line): it survives only when
+/// that line claims nothing; a line that claims a region ends itself with the
+/// region attached and the `&` line below is region data (task #468).
 pub(super) fn async_ahead(line: &[u8], i: usize) -> bool {
     let mut j = i + 1;
     while matches!(line.get(j), Some(&b' ') | Some(&b'\t')) {

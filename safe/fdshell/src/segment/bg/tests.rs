@@ -150,6 +150,13 @@ fn an_ampersand_never_targets_an_already_terminated_run() {
 /// "no `&` ahead": the runs flush above it, and the `&` below loses its
 /// target (`AsyncInvalid`, bash's shape here is rc 2 with line 1 executed —
 /// the deferral divergence documented in POSIX_COMPATIBILITY).
+///
+/// Task **#468** pinned the gate's two answers: the deferral stands for lines
+/// that claim nothing (the table — including the `#`-terminated twin, whose
+/// arm is `line::end_comment`), and is **suppressed** when the line above
+/// claims a body region — that line ends itself with the region attached, the
+/// `&` line below is region data (bash never sees an operator there), and no
+/// region line is ever re-scanned as a statement.
 #[test]
 fn a_line_opening_with_ampersand_defers_the_flush_above_it() {
     let cases: &[(&[u8], &[(&str, bool)])] = &[
@@ -162,10 +169,30 @@ fn a_line_opening_with_ampersand_defers_the_flush_above_it() {
         (b"echo a\n & echo b\n", &[("S", true), ("S", false)]),
         (b"echo a\n\t& echo b\n", &[("S", true), ("S", false)]),
         (b"echo a \n \t & echo b\n", &[("S", true), ("S", false)]),
+        (b"echo a # c\n& echo b", &[("S", true), ("S", false)]),
     ];
     for (line, want) in cases {
         assert_eq!(&faces(line), want, "{line:?}");
     }
+    // The suppression side, at both decision points: one foreground statement
+    // owning its region, nothing of the region a statement (the e2e values are
+    // pinned in `tests/heredoc.rs`).
+    assert_eq!(
+        statements(b"cat <<X\n& echo b\nbody\nX"),
+        alloc::vec![(
+            b"cat <<X".as_slice(),
+            alloc::vec![b"& echo b\nbody\nX".to_vec()],
+            false
+        )],
+    );
+    assert_eq!(
+        statements(b"cat <<X # c\n& echo b\nbody\nX"),
+        alloc::vec![(
+            b"cat <<X".as_slice(),
+            alloc::vec![b"& echo b\nbody\nX".to_vec()],
+            false
+        )],
+    );
 }
 
 #[test]

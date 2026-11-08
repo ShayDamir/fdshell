@@ -117,8 +117,11 @@ fn flush_line_semicolon_terminated_line() {
 /// past the line's newline by a line-opening `&` (`bg::async_ahead`) — are
 /// emitted body-less: the run's own line is unidentifiable once `line_start`
 /// has moved, so this arm is the total-function defense that keeps an earlier
-/// line's run from indexing *this* line's region list. A trailing `#` comment
-/// no longer reaches here: `super::end_comment` flushes a comment-terminated
+/// line's run from indexing *this* line's region list. After task **#468**'s
+/// gate no real scan carries a region-claiming line's runs here: a line that
+/// claims a body region ends itself with the region attached, so the deferral
+/// never reaches a flush with a cross-line run. A trailing `#` comment no
+/// longer reaches here: `super::end_comment` flushes a comment-terminated
 /// line's runs **on** it, with that line's regions (task #333). This is *not*
 /// about a run whose own text spans lines: such a run is flushed on its line
 /// and claims its region stream, pinned by

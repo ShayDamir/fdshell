@@ -3217,22 +3217,26 @@ the EOF-starved delimiter rows (**#275** / **#429**) these tests used to pin are
 parity now.
 - **A region's first body/delimiter line is data for the deferral rule too.**
 The line-opening-`&` deferral (`segment/bg.rs::async_ahead`, the #326/#333
-family) reads the **next** physical line's raw bytes *before* the flush computes
-this line's region claims, so it swallows the region the current line's operator
-owns whenever that next line is the region's body or delimiter line. A swallowed
-**delimiter** line is the end-of-file shape of task **#364**:
-`cat <<"&x"` + `&x` answers the end-of-file warning with rc 1 (bash rc 0, silent;
-its command report rides on the same stderr; the `&&` twin is parity at rc 0),
-while a swallowed **body** line keeps the old reading:
-`cat <<EOF` + `&x` + `EOF` runs `&x` as a command and loses the body
-(`wc -c` says 0, bash says 3). The task #347 report measured `cat <<"&x"` rc 0
-on `60a2ebd` — the row **regressed** when the deferral landed. Owner **#468**,
-whose pinned rows now include the delimiter-word family (`cat <<"&x"`, `<<'&x'`,
-`<<\&x`, `<< "&x"`, `<<-"&x"`, `<<"&&"`, `<<"& x"` and the `&`-body rows), pinned
-as measured with bash's value beside each in
-`tests/heredoc.rs::a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468`;
-a candidate gate is to consult `scan::heredoc::skip` for the physical line and
-suppress the deferral when its resume passes the `&`.
+family) read the **next** physical line's raw bytes *before* the flush computed
+this line's region claims, so it swallowed the region the current line's operator
+owns whenever that next line was the region's body or delimiter line. **#468**
+landed the gate at the deferral decisions (the newline arm of `segment.rs` and
+the comment arm of `segment/line.rs` ask the **one** definition of an opaque
+body — `scan::heredoc::skip` for the physical line — and the deferral survives
+only when it answers `None`): a line that claims a region ends itself with the
+region attached, the `&` line below it is region data, bash never sees an
+operator there, and the gate needs kills on both answers. The delimiter-word
+family (`cat <<"&x"`, `<<'&x'`, `<<\&x`, `<< "&x"`, `<<-"&x"`, `<<"&&"`,
+`<<"& x"`) and the `&`-body rows (`cat <<EOF` + `&x` + `EOF` prints `&x` rc 0,
+`wc -c <<EOF` + `&x` + `EOF` says `3` rc 0) are pinned at bash's values —
+silent, no command report, no end-of-file warning (the swallowed-delimiter
+shape of task **#364** is gone for them: the delimiter line arrives on the
+claim) — in
+`tests/heredoc.rs::a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468`,
+with the two answers pinned at segment granularity in
+`segment/bg/tests.rs::a_line_opening_with_ampersand_defers_the_flush_above_it`.
+The deferral keeps its documented shapes for lines that claim nothing
+(POSIX_COMPATIBILITY "Line deferral").
 - **the byte scan's word-break test is the tokenizer's separator arm
 byte-wise** (the helper was `is_token_byte`; task #345 folded its byte set into
 the word-break / run-start arms of `scan/heredoc/ops.rs::opens_word`):
@@ -5934,22 +5938,28 @@ emitted them **body-less** (the `missing terminating delimiter line` half).
 #333 closed both halves: **a `#` is an end of the physical line**, so
 `segment/line.rs::end_comment` gives the line the newline arm's bookkeeping —
 flush with **that line's** region stream in operator order, keep the
-line-opening `&` deferral, jump past every region the line claimed, with
-`line_start` and the floor travelling to the resume so the regions are gone for
-every later flush. bash reads a here-doc body after the **logical** line,
-comment included, so a `#`-terminated line owns a body stream: `cat <<X # note`
-+ body + `X` is the same end of line as a plain newline, and `# note; echo
-after` is comment data. Pins: `segment/tests.rs::a_comment_terminated_line_flushes_its_runs_and_jumps_its_regions`,
-`tests/heredoc.rs::a_comment_terminated_line_owns_its_body_stream`; the
-`&`-deferred member (`cat <<X\n& echo b\nbody\nX`) is **#468**'s. Task #347
-pinned the delimiter-word members of the same deferral beside it —
-`cat <<"&x"` + `&x`, `<<'&x'`, `<<\&x`, `<< "&x"`, `<<-"&x"`, `<<"&&"`,
-`<<"& x"` and the `&`-body rows (`cat <<EOF` + `&x` + `EOF`,
-`wc -c <<EOF` + `&x` + `EOF`) — as measured, with owner **#468** named, in
-`tests/heredoc.rs::a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468`;
-the deferral reads the next line's raw bytes **before** the flush computes the
-line's region claims, so a region's first body/delimiter line is data for it
-too, and #468 flips those rows when it lands.
+line-opening `&` deferral **only for lines that claim no region** (the gate
+**#468** landed, at both deferral decisions: the decision asks the **one**
+definition of an opaque body — `scan::heredoc::skip` for the physical line —
+and the deferral survives only when its answer is `None`), jump past every
+region the line claimed, with `line_start` and the floor travelling to the
+resume so the regions are gone for every later flush. bash reads a here-doc
+body after the **logical** line, comment included, so a `#`-terminated line
+owns a body stream: `cat <<X # note` + body + `X` is the same end of line as a
+plain newline, and `# note; echo after` is comment data. Pins:
+`segment/tests.rs::a_comment_terminated_line_flushes_its_runs_and_jumps_its_regions`,
+`tests/heredoc.rs::a_comment_terminated_line_owns_its_body_stream`; and the
+`&`-deferred members reached parity when the gate landed: the title shape
+`cat <<X\n& echo b\nbody\nX` and its `#`-terminated twin print `& echo b` and
+`body` at rc 0, silent (bash's values). Task #347's delimiter-word members of
+the same deferral — `cat <<"&x"` + `&x`, `<<'&x'`, `<<\&x`, `<< "&x"`,
+`<<-"&x"`, `<<"&&"`, `<<"& x"` — and the `&`-body rows (`cat <<EOF` + `&x` +
+`EOF`, `wc -c <<EOF` + `&x` + `EOF`) are pinned at bash's values in
+`tests/heredoc.rs::a_heredoc_delimiter_word_below_a_line_opening_ampersand_keeps_its_owner_468`.
+The deferral still owns the rows whose line claims nothing: `echo a # note` + a
+line-opening `&` stays the accepted divergence, and the gate's two answers are
+pinned at segment granularity in
+`segment/bg/tests.rs::a_line_opening_with_ampersand_defers_the_flush_above_it`.
 
 
 **In a shared module, record the arm one caller cannot reach instead of

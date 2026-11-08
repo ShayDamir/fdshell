@@ -1,7 +1,10 @@
 //! End-of-physical-line handling: the newline and `#` comment endings, whose
 //! run flush lives in [`flush`].
 
+// mutants: -C --lib -- -E 'test(/^segment::/)'
+
 use crate::scan;
+use crate::scan::heredoc;
 use crate::segment::bg;
 use crate::segment::book::Book;
 
@@ -27,12 +30,16 @@ pub(super) fn end_line(book: &mut Book<'_>, line: &[u8], deferred: bool) -> usiz
 /// line's** body regions — bash reads a here-document body after the *logical*
 /// line, comment included, so a `#`-terminated line owns a body stream — and
 /// the cursor lands past every region the line claimed, never inside one. The
-/// deferral a next-line-opening `&` needs is the newline arm's rule too.
+/// deferral a next-line-opening `&` needs is the newline arm's rule too, gate
+/// included: a line that claims a body region ends it with the region attached,
+/// and the `&` line below is region data.
 pub(super) fn end_comment(book: &mut Book<'_>, line: &[u8]) {
     // The flush window ends at the comment's own newline, so the comment's
     // bytes are never read as operators.
     let nl = scan::comment_end(line, book.i);
-    let deferred = line.get(nl) == Some(&b'\n') && bg::async_ahead(line, nl);
+    let deferred = line.get(nl) == Some(&b'\n')
+        && bg::async_ahead(line, nl)
+        && heredoc::skip(line, book.line_start, nl).is_none();
     book.i = nl;
     // `skip_comment` is the newline's successor: the next physical line's
     // start, the address of a line that claims no region at all.
