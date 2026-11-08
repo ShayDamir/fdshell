@@ -1,4 +1,4 @@
-// mutants: -C --lib -C --test -C herestring -- -E 'test(/^parse::here_string::/) | binary(herestring)'
+// mutants: -C --lib -C --test -C herestring -- -E 'test(/^parse::/) | binary(herestring)'
 
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;

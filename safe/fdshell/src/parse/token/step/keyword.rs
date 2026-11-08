@@ -1,4 +1,4 @@
-// mutants: -C --lib -- -E 'test(/^parse::token::/)'
+// mutants: -C --lib -C --test -C block_redirect -C --test -C loops -- -E 'test(/^parse::/) | binary(block_redirect) | binary(loops)'
 
 //! The keyword-word split of the unquoted-byte dispatcher (task #396): a
 //! metacharacter byte ends the word **only when the bytes accumulated so far
@@ -23,9 +23,8 @@ impl State {
     /// word has started, its text is exactly a reserved word
     /// ([`crate::keywords::reserved`], the one list), and its raw span carries
     /// no quote/escape byte — `ShortCStr::is_shorter_than_span`, called not
-    /// re-derived
-    /// (POSIX §2.9.1: a quoted keyword word is data, and `'for'((…)`/`"for"((…)`
-    /// /`\for((…)` stay command words).
+    /// re-derived (POSIX §2.9.1: a quoted keyword word is data, and
+    /// `'for'((…)`/`"for"((…)`/`\for((…)` stay command words).
     pub(super) fn keyword_run(&self, b: u8) -> bool {
         self.word_started
             && word_break(b)

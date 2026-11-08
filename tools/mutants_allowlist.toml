@@ -29,3 +29,19 @@ pinned rows at those shapes (`echo a # note` + a line-opening `&` in
 tests/heredoc.rs, the deferral table in segment/bg/tests.rs) keep their values
 under the mutant, so no test inside the map's `test(/^segment::/)` filter can
 kill it."""
+
+[[allow]]
+file = "safe/fdshell/src/parse/word_quoted.rs"
+line = 102
+column = 28
+mutant = "replace && with || in is_the_word"
+reason = """Task #545's gate term. Every row of `THE_SET` that reaches this `&&` is a
+`separator_shape` word (the set IS `keywords::position::separators::separator_shape`
+s list, the `|` row is the only one taking the `if` branch), so the two spellings
+agree whenever `eq_bytes(w)` holds; when it does not, `span_word` s own
+`eq_bytes(w)` half is false too, and the outer conjunction answers false both
+ways. No token reaching `is_the_word` through `operator_word` separates them, so
+no test in the map`s filter can kill it; the pinned rows in
+`parse/word_quoted/tests.rs` (every row of the set, quoted, escaped, glued and
+synthesized spellings) keep their values under the mutant."""
+

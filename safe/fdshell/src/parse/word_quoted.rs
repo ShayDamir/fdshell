@@ -1,4 +1,4 @@
-// mutants: -C --lib -- -E 'test(/^parse::word_quoted::/)'
+// mutants: -C --lib -C --test -C redirect -- -E 'test(/^parse::/) | binary(redirect)'
 
 //! The parse layer's quote gate on a word's **raw** span `(start, end)`. The
 //! string-level half of the test — "the span is longer than the word's own
