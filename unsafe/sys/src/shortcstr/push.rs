@@ -1,7 +1,8 @@
+// mutants: -C --test -C shortcstr -- -E 'binary(shortcstr)'
+
 use alloc::sync::Arc;
 
 use crate::shortcstr::copy::copy_to_shortcstr;
-use crate::shortcstr::push_fallback::extend_from_slice_fallback;
 use crate::shortcstr::{INLINE_CAP, InlineSize, NoNul, ShortCStr, ShortCStrError};
 
 impl ShortCStr {
@@ -104,6 +105,6 @@ impl ShortCStr {
         }
 
         // 5. Everything else — allocate Arc
-        extend_from_slice_fallback(self, bytes);
+        self.extend_from_slice_fallback(bytes);
     }
 }
