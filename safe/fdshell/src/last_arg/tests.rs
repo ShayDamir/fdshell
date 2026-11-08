@@ -40,3 +40,28 @@ fn is_tag_matches_reserved_tag_only() {
     assert!(super::is_tag(reserved));
     assert!(!super::is_tag(other));
 }
+
+#[test]
+fn last_word_returns_the_last_field() {
+    let fallback = ShortCStr::from(c"cmd");
+    let words = [ShortCStr::from(c"one"), ShortCStr::from(c"two")];
+    assert!(super::last_word(&words, &fallback).eq_bytes(b"two"));
+}
+
+#[test]
+fn last_word_falls_back_only_on_an_empty_list() {
+    let fallback = ShortCStr::from(c"cmd");
+    assert!(super::last_word(&[], &fallback).eq_bytes(b"cmd"));
+    // A quoted word that expanded to nothing is an (empty) field: it wins.
+    let quoted_empty = [ShortCStr::from(c"one"), ShortCStr::new()];
+    assert!(super::last_word(&quoted_empty, &fallback).eq_bytes(b""));
+}
+
+#[test]
+fn last_word_by_maps_the_last_field() {
+    let fallback = ShortCStr::from(c"cmd");
+    let map = |w: &ShortCStr| ShortCStr::concat(&[&ShortCStr::from(c"m"), w]);
+    let words = [ShortCStr::from(c"one"), ShortCStr::from(c"two")];
+    assert!(super::last_word_by(&words, &map, &fallback).eq_bytes(b"mtwo"));
+    assert!(super::last_word_by(&[], &map, &fallback).eq_bytes(b"cmd"));
+}

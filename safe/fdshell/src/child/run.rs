@@ -57,7 +57,7 @@ pub fn child_main(
     )
     .change_context(ChildProcessError::SubstituteFailed)?;
     if let Some(sock) = &child_sock {
-        let last = resolved.last().cloned().unwrap_or_else(|| cmd.name.clone());
+        let last = crate::last_arg::last_word(&resolved, &cmd.name);
         crate::last_arg::send(sock, &last).change_context(ChildProcessError::LastArgSend)?;
     }
     // The scoped prefix applies after substitution: the command's own words

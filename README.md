@@ -990,9 +990,15 @@ leaves `$_` at `sub`, and the quoted twin `cd '$V'` leaves it at the literal
 `cd --` leaves `$_` at `--` and `cd -- sub` at `sub`. A fully quoted word that expands
 to nothing counts as an (empty) field, and the command word is the `$_` only when
 there were no operand words at all. Bash sets `$_` the same way for every command
-it runs, and every intercept that expands its words (`hash`, `cd`, `eval`,
-`source`, `local`, `let`, `wait`) hands its field list to that one frame;
-`set --` keeps its own store of the expanded list.
+it runs, and every surface that reports it — the intercepts that expand their
+words (`hash`, `cd`, `eval`, `source`, `local`, `let`, `wait`) through the frame,
+`set --` over its whole consumed list (the `--` word itself included, so a bare
+`set --` leaves `--`), `unset` over its operand names, the forked-command report,
+and a function call — runs through that one rule (`src/last_arg.rs`), each
+supplying only its own list. A function call stamps its own value **after** its
+body returns, on every path: bash's asymmetry is that the `eval`/`source` frames
+suppress inner updates, while function calls and loops let the body's updates
+stand inside it and the call's value lands when it returns.
 
 The bare `cd` reads `HOME` through the **same lookup `$HOME` and `~` use**: the
 shell's own variables first, then the environment fdshell was started with. A

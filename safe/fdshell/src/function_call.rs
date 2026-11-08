@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C last_arg -C --test -C function_keyword -- -E 'test(/^function_call::/) | binary(last_arg) | binary(function_keyword)'
+
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::parse::BuiltinPrefix;
@@ -34,6 +36,14 @@ pub(crate) fn call(
     // propagating, so a body that fails (or `return`s out) leaks nothing.
     restore_positional(cell, saved)?;
     crate::state::frames::cell::pop_frame(cell)?;
+    // Bash applies the call's own `$_` after the body returns, on every exit
+    // path (measured): the shared rule over the call's expanded arguments, the
+    // call's command word when it consumed none. Inner updates stay visible
+    // inside the body — the call is not an `eval`/`source` frame.
+    {
+        let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+        state.set_last_arg(crate::last_arg::last_word(&substituted, &cmdline.command));
+    }
     let mut control = result?;
     if matches!(control, Some(LoopControl::Return)) {
         control = None;

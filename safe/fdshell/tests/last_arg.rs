@@ -295,6 +295,92 @@ fn expanded_command_name_is_the_fallback() {
     assert_eq!(out, "cd\n");
 }
 
+// Bug #508 and bug #509: every surface reports `$_` through the one rule in
+// `src/last_arg.rs`, each supplying its own consumed word list. Every row is a
+// bash 5.3.9 measurement (2026-11-08), re-measured on the final script text.
+
+#[test]
+fn bare_set_positional_stores_the_dashdash_word() {
+    // The rule sees every word `set --` consumed, the `--` word itself included;
+    // the deque keeps taking only the words after it.
+    for (script, want) in [
+        ("set --; builtin echo \"[$_]\"", "[--]\n"),
+        ("zz=; set -- $zz; builtin echo \"[$_]\"", "[--]\n"),
+        ("zz=; set -- \"$zz\"; builtin echo \"[$_]\"", "[]\n"),
+        ("set -- a; builtin echo \"[$_]\"", "[a]\n"),
+        ("a=zeta; set -- x $a; builtin echo \"[$_]\"", "[zeta]\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "stderr={err:?}");
+        assert_eq!(out, want, "{script}");
+    }
+}
+
+#[test]
+fn function_call_reports_its_last_expanded_argument() {
+    for (script, want) in [
+        ("f(){ :; }; f a b; builtin echo \"[$_]\"", "[b]\n"),
+        ("f(){ :; }; f \"$(true)\"; builtin echo \"[$_]\"", "[]\n"),
+        ("zz=; f(){ :; }; f \"$zz\"; builtin echo \"[$_]\"", "[]\n"),
+        ("f(){ false z; }; f a b; builtin echo \"[$_]\"", "[b]\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "stderr={err:?}");
+        assert_eq!(out, want, "{script}");
+    }
+}
+
+#[test]
+fn function_call_falls_back_to_the_command_word() {
+    // The call's word 0 arrives expanded, so `$V` falls back to `f` — the same
+    // rule `expanded_command_name_is_the_fallback` pins for the forked path.
+    for (script, want) in [
+        ("f(){ :; }; f; builtin echo \"[$_]\"", "[f]\n"),
+        ("V=f; f(){ :; }; $V; builtin echo \"[$_]\"", "[f]\n"),
+        ("zz=; f(){ :; }; f $zz; builtin echo \"[$_]\"", "[f]\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "stderr={err:?}");
+        assert_eq!(out, want, "{script}");
+    }
+}
+
+#[test]
+fn function_call_stamps_after_the_body_returns() {
+    // Inner updates stay visible inside the body (the call is no `eval`/`source`
+    // frame); the call's own value lands after the body returns, on every exit
+    // path — including the `return` row.
+    for (script, want) in [
+        ("f(){ local x; }; f; builtin echo \"[$_]\"", "[f]\n"),
+        (
+            "f(){ V=hello; local \"x=$V\"; builtin echo \"inner=[$_]\"; }; f; builtin echo \"outer=[$_]\"",
+            "inner=[x=hello]\nouter=[f]\n",
+        ),
+        (
+            "g(){ :; }; f(){ g ig; builtin echo \"mid=[$_]\"; }; f oa; builtin echo \"[$_]\"",
+            "mid=[ig]\n[oa]\n",
+        ),
+        (
+            "f(){ true inner; return; }; f arg; builtin echo \"[$_]\"",
+            "[arg]\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "stderr={err:?}");
+        assert_eq!(out, want, "{script}");
+    }
+}
+
+#[test]
+fn pipeline_function_call_keeps_the_parents_value() {
+    // A call in a pipeline stage runs inside the fork, and the parent keeps its
+    // own `$_` — bash measures the same, like `pipeline_does_not_update_last_arg`.
+    let (out, err, code) =
+        run("f(){ :; }; builtin echo prev >/dev/null; f a b | cat; builtin echo \"[$_]\"");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[prev]\n");
+}
+
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// A per-test scratch dir (pid + counter), removed on drop: pids are recycled,

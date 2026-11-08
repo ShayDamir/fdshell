@@ -4,6 +4,8 @@
 //! `ShellState::unset_name` call, because the state owns the stores the name can
 //! reach (task #386 put the namespace choice there).
 
+// mutants: -C --lib -C --test -C unset -C --test -C last_arg -- -E 'test(/^run_dispatch::unset::/) | binary(unset) | binary(last_arg)'
+
 use crate::error::cmd::CmdError;
 use crate::parse::UnsetTarget;
 use crate::state::ShellState;
@@ -23,7 +25,7 @@ pub(super) fn run(
     for target in targets {
         unset_one(&mut state, target);
     }
-    let last = targets.last().map_or_else(|| c"unset".into(), stored_name);
+    let last = crate::last_arg::last_word_by(targets, &stored_name, &ShortCStr::from(c"unset"));
     state.set_last_arg(last);
     state.set_last_exit(0);
     Ok(())

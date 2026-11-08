@@ -1,5 +1,7 @@
 //! `$_` bookkeeping for intercepted commands and `eval`/`source` frames.
 
+// mutants: -C --lib -C --test -C last_arg -- -E 'test(/^intercept::last_arg_frame::/) | binary(last_arg)'
+
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -11,9 +13,9 @@ use crate::state::ShellState;
 /// Bash sets `$_` to the last argument (or the command name) of an
 /// intercepted command — the last field the command **consumed**, so a handler
 /// that ran the substitution pipeline hands its expanded list to `expanded`.
-/// A fully quoted word that expands to nothing is an (empty) field; the command
-/// word is the fallback only when there were no operand words at all.
-/// `set --` stores its own expanded value, so skip it.
+/// The rule itself is [`crate::last_arg::last_word`]; this frame is its
+/// dispatch adapter. `set --` decides its own form and stores the value, so
+/// skip it here.
 pub(super) fn set_intercepted_last_arg(
     cmdline: &CommandLine,
     expanded: Option<&[ShortCStr]>,
@@ -28,19 +30,9 @@ pub(super) fn set_intercepted_last_arg(
         return Ok(());
     }
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-    state.set_last_arg(last_field(cmdline, expanded));
+    let words = expanded.unwrap_or(&cmdline.args);
+    state.set_last_arg(crate::last_arg::last_word(words, &cmdline.command));
     Ok(())
-}
-
-/// The last word the command consumed: the field list the handler reports, or
-/// the parsed words when it reports none; the command word when there were no
-/// operand words.
-fn last_field(cmdline: &CommandLine, expanded: Option<&[ShortCStr]>) -> ShortCStr {
-    let words: &[ShortCStr] = expanded.unwrap_or(&cmdline.args);
-    words
-        .last()
-        .cloned()
-        .unwrap_or_else(|| cmdline.command.clone())
 }
 
 /// Run `f` inside an `eval`/`source` frame: inner commands must not update

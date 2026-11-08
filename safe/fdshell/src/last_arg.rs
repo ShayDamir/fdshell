@@ -1,6 +1,10 @@
 //! `$_` reporting: a foreground child reports its last expanded word (or the
 //! command name when it has no arguments) to the parent over the capture
 //! socket, as a memfd tagged `$_`. The parent stores it in the `_` variable.
+//! The rule itself lives here as one function ([`last_word`]), shared by every
+//! surface that reports `$_`.
+
+// mutants: -C --lib -C --test -C last_arg -- -E 'test(/^last_arg::/) | binary(last_arg)'
 
 use alloc::vec::Vec;
 use core::ffi::CStr;
@@ -12,6 +16,22 @@ use sys::Pid;
 use sys::ShortCStr;
 
 const TAG: &[u8] = b"$_";
+
+/// THE rule: the last word the command consumed; `fallback` (the command word)
+/// only when it consumed no operand words at all. A fully quoted word that
+/// expands to nothing is an (empty) field and wins over the fallback.
+pub(crate) fn last_word(words: &[ShortCStr], fallback: &ShortCStr) -> ShortCStr {
+    words.last().cloned().unwrap_or_else(|| fallback.clone())
+}
+
+/// The same rule behind a per-site mapping of its operands (`unset`'s name shape).
+pub(crate) fn last_word_by<T>(
+    words: &[T],
+    map: &dyn Fn(&T) -> ShortCStr,
+    fallback: &ShortCStr,
+) -> ShortCStr {
+    words.last().map_or_else(|| fallback.clone(), map)
+}
 
 /// Send `word` to the parent as the `$_` message.
 pub(crate) fn send(sock: &sys::LocalFd, word: &ShortCStr) -> Result<(), Report<ChildProcessError>> {

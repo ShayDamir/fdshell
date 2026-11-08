@@ -6527,27 +6527,35 @@ handlers whose words go through the pipeline — `hash`, `cd`, `eval`, `source`,
 `None` and keeps the raw-word rule. **Why the handler reports and the frame does
 not expand:** the pipeline already ran, and a frame that expanded on its own
 would re-run command substitutions and forks. One adapter (`handled_fields`) and
-one rule site (`last_field`) keep the sentence in one place, so the ~22 handlers
-that consume raw words (`read`, `shopt`, `export` — where bash disagrees, the
-disagreement is the expansion-policy task) keep their signatures untouched.
-`cd`'s `%name` path reports `None`, because its pipeline never ran; `local`
-reports the **consumed** word — name, `=`, expanded value — because that is the
-word it processed.
+one rule site (`last_arg::last_word`) keep the sentence in one place, so the ~22
+handlers that consume raw words (`read`, `shopt`, `export` — where bash
+disagrees, the disagreement is the expansion-policy task) keep their signatures
+untouched. `cd`'s `%name` path reports `None`, because its pipeline never ran;
+`local` reports the **consumed** word — name, `=`, expanded value — because that
+is the word it processed.
 
 `eval`/`source` land their value *after* their run returns, which is exactly
 bash's timing: the `with_eval_frame` rule suppresses inner updates, so the
-command's own field is what survives. `set --` keeps its own inline store of the
-expanded list (the frame skips it; its bare-form fallback word is task #508).
-Function-call `$_` scoping is task #509: bash keeps inner updates inside a call
-and sets `$_` from the call's last argument, and does *not* do that for loops,
-where both shells let the body's last command win.
+command's own field is what survives. `set --` hands the shared rule its **whole**
+consumed list — the `--` word itself plus the expanded operands (the frame skips
+it: the handler decides which form ran), so a bare `set --` leaves `--` (task
+#508 closed). Function-call `$_` is the same rule applied after the body returns
+(task #509 closed): inner updates stay visible inside the body — a call is **no**
+`eval`/`source` frame — and the call stamps its last expanded argument, its
+command word when it consumed none, on every exit path including `return`. Loops
+keep the body's last command, as bash does.
 
 Pins: `tests/last_arg.rs` (`eval_reports_its_expanded_word`,
 `let_reports_the_expanded_expression`, `local_reports_the_consumed_word`,
 `wait_reports_the_expanded_pid`, `source_reports_its_expanded_path`,
 `eval_reports_the_quoted_word_that_expanded_to_nothing`,
 `zero_field_expansion_falls_back_to_command_name`,
-`expanded_command_name_is_the_fallback`), the flipped
+`expanded_command_name_is_the_fallback`,
+`bare_set_positional_stores_the_dashdash_word`,
+`function_call_reports_its_last_expanded_argument`,
+`function_call_falls_back_to_the_command_word`,
+`function_call_stamps_after_the_body_returns`,
+`pipeline_function_call_keeps_the_parents_value`), the flipped
 `tests/cd_expand.rs::cd_last_arg_is_the_expanded_field` and its `'…'` twin,
 `tests/hash.rs::last_arg_is_the_expanded_field`, and the unit pins that go
 through `try_intercept` — `intercept/cd/tests.rs`,
