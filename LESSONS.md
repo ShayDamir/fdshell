@@ -132,12 +132,23 @@ the variant. And a dispatch catch-all is proven at the dispatch level:
 `timeout` call site, so its `_ =>` arm there is completeness padding, not a
 reachable error.
 
+Chore #537 adds the reverse direction: a `Never` whose producer is a real,
+user-visible failure must not stand. `hash NAME` prints the resolved path, and that
+print is the first thing on the **user's** stdout that can fail, so
+`hash NAME >/dev/full` is the reproducible probe — `/dev/full` answers `ENOSPC`
+deterministically, no load, no timing, no pipe. A full or closed destination is a
+fact about the user's environment they can act on (§4.7), so the site owns
+`CmdError::HashWriteFailed` and the errno rides in the chain as the source frame
+(§4.5, one `.change_context()`); the NUL-bookkeeping `Never` one line above it
+stays. A `Never` is truly unreachable only when no script can reach its producer.
+
 Pins: the printed-words row
 `tests/cli_args.rs::script_file_with_a_nul_byte_names_the_nul_and_not_an_impossible_state`
 — the rc alone cannot tell these paths apart, every one of them exits 1 — beside
 the in-process variant assert
-`intercept/source/tests.rs::run_source_nul_byte_content_fails`, and the printed
-row
+`intercept/source/tests.rs::run_source_nul_byte_content_fails`, the printed
+row `tests/hash.rs::hash_name_write_failure_is_reported` (the `/dev/full` write
+probe), and the printed row
 `tests/signalfd.rs::signalfd_non_utf8_flag_value_names_the_argument`.
 Debug builds add `at …` source frames to the report, so assert text, never a
 frame.

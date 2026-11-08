@@ -588,3 +588,24 @@ fn last_arg_of_a_zero_field_line_is_the_command_word() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "hash\n");
 }
+
+/// A failed write to the user's standard output is a domain error the user can act
+/// on, not an invariant: `hash NAME` prints the resolved path, and `/dev/full`
+/// answers `ENOSPC` (LESSONS: "A NUL byte is reachable only at the entry points
+/// that ingest outside bytes"). bash answers `hash: write error: No space left on
+/// device` at rc 1 and prints nothing on this form; fdshell says it in its own
+/// words at rc 1 and aborts the run — the task #179 family — so the row pins the
+/// text and the rc, never a source frame.
+#[test]
+fn hash_name_write_failure_is_reported() {
+    let (out, err, code) = run_with_path("hash exec_ok >/dev/full");
+    assert_eq!(
+        code, 1,
+        "the write failure is reported, not an invariant: stderr={err:?}"
+    );
+    assert!(out.is_empty(), "nothing reaches stdout: {out:?}");
+    assert!(
+        err.contains("hash: failed to write to standard output"),
+        "the variant's own text: {err:?}"
+    );
+}

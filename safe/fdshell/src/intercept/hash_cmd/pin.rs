@@ -1,6 +1,8 @@
 //! `hash`'s pin/lookup path: `hash name` prints the entry (PATH-searching and
 //! storing on a miss); `hash name path` pins the entry.
 
+// mutants: -C --lib -C --test -C hash -- -E 'test(/^intercept::hash_cmd::/) | binary(hash)'
+
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt, bail};
@@ -39,7 +41,9 @@ fn lookup(name: &ShortCStr, state: &mut ShellState) -> Result<i32, Report<CmdErr
             let nl: ShortCStr = c"\n".into();
             let line = ShortCStr::concat(&[&p, &nl]);
             let bytes = line.as_bytes().change_context(CmdError::Never)?;
-            sys::OUT.write_all(bytes).change_context(CmdError::Never)?;
+            sys::OUT
+                .write_all(bytes)
+                .change_context(CmdError::HashWriteFailed)?;
             Ok(0)
         }
         None => {

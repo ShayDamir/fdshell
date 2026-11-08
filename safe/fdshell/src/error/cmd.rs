@@ -89,6 +89,8 @@ pub enum CmdError {
     CaptureLimitBad(&'static str, &'static str, sys::ShortCStr),
     /// hash: bad usage (hash [-rd] [name [path]])
     HashUsage,
+    /// hash: failed to write to standard output
+    HashWriteFailed,
     /// let: expression expected
     LetExpressionExpected,
     /// local: can only be used in a function
