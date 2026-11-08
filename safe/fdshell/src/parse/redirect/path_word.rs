@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C redirect -- -E 'test(/^parse::/) | binary(redirect)'
+
 //! The redirect target **word**: the one derivation of its text, quote mask,
 //! zero-byte quote spans and `quoted` flag, so the bare operator form (the
 //! operand is a whole token) and the attached form (the word is a token
@@ -7,7 +9,6 @@
 use crate::error::parse::ParseError;
 use crate::parse::Token;
 use crate::parse::here_string::{word_mask, word_spans};
-use crate::parse::word_quoted::word_quoted;
 use crate::redirect::RedirectSource;
 use error_stack::{Report, bail};
 
@@ -20,7 +21,7 @@ pub(crate) fn full(token: &Token) -> RedirectSource {
         t.clone(),
         mask.clone(),
         spans.clone(),
-        word_quoted(t, *start, *end),
+        t.is_shorter_than_span(*start, *end),
     )
 }
 
@@ -41,6 +42,6 @@ pub(crate) fn suffix(token: &Token, offset: usize) -> Result<RedirectSource, Rep
         path,
         word_mask(mask, offset),
         word_spans(spans, offset),
-        word_quoted(t, *start, *end),
+        t.is_shorter_than_span(*start, *end),
     ))
 }

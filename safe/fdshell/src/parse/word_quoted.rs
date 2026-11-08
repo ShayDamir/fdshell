@@ -1,18 +1,20 @@
+// mutants: -C --lib -- -E 'test(/^parse::word_quoted::/)'
+
+//! The parse layer's quote gate on a word's **raw** span `(start, end)`. The
+//! string-level half of the test — "the span is longer than the word's own
+//! bytes" — is a property of the string type, so it lives on
+//! `ShortCStr::is_shorter_than_span` (task #545); what this module owns is the
+//! parse reading of it, because the span here is the word's *raw* span and so
+//! carries bytes the word dropped (quotes, escapes).
+//!
+//! An empty quoted region contributes no bytes to the word (and its per-byte
+//! mask), so "this word was quoted" is not representable in the mask — it has
+//! to be derived from the span. The same test is true for escaped bytes
+//! (`"a\"b"`), which is intended: bash keeps such a word whole when its
+//! expansion is empty, too.
+
 use super::{Token, pipe_token_span};
 use crate::keywords::{quoted_word, separator_shape};
-use sys::ShortCStr;
-
-/// Whether the word's raw text (the byte span `(start, end)`) contained
-/// quotes or escapes: the raw span is longer than the word's own bytes.
-///
-/// An empty quoted region contributes no bytes to the word (and its per-byte
-/// mask), so "this word was quoted" is not representable in the mask — it has
-/// to be derived from the span. The same test is true for escaped bytes
-/// (`"a\"b"`), which is intended: bash keeps such a word whole when its
-/// expansion is empty, too.
-pub(crate) fn word_quoted(t: &ShortCStr, start: usize, end: usize) -> bool {
-    end - start > t.len()
-}
 
 /// The keyword-recognition gate (POSIX §2.9.1, task #247): `tok` *is* the
 /// keyword word `kw` only when the word carries no quote byte. Token-level
@@ -27,12 +29,13 @@ pub(crate) fn keyword_word(tok: &Token, line: &[u8], kw: &[u8]) -> bool {
 }
 
 /// The definer-word gate: the word's raw span carries no quote byte, by **both**
-/// tests — [`word_quoted`] (the span is longer than the word's own bytes) and
-/// [`quoted_word`]'s scan-back, because a definer word can end in the POSIX `(`
-/// (`foo'('`) and the scan alone never reaches the quote bytes behind it.
+/// tests — `ShortCStr::is_shorter_than_span` (the span is longer than the word's
+/// own bytes) and [`quoted_word`]'s scan-back, because a definer word can end in
+/// the POSIX `(` (`foo'('`) and the scan alone never reaches the quote bytes
+/// behind it.
 pub(crate) fn gated_word(tok: &Token, line: &[u8]) -> bool {
     let (t, start, end, _fq, _mask, _spans) = tok;
-    !word_quoted(t, *start, *end) && !quoted_word(line, *end)
+    !t.is_shorter_than_span(*start, *end) && !quoted_word(line, *end)
 }
 
 /// The separator-recognition gate (POSIX §2.9.1, task #336): `tok` **is** the
@@ -56,7 +59,7 @@ pub(crate) fn gated_word(tok: &Token, line: &[u8]) -> bool {
 /// `parse::redirect::clobber::pipe::pipe_token_span` is this rule for the `|`.
 pub(crate) fn span_word(tok: &Token, w: &[u8]) -> bool {
     let (t, start, end, _fq, _mask, _spans) = tok;
-    t.eq_bytes(w) && !word_quoted(t, *start, *end)
+    t.eq_bytes(w) && !t.is_shorter_than_span(*start, *end)
 }
 
 /// The ONE **standalone operator word** predicate (task #524): `tok` is the

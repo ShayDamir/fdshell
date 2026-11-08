@@ -9,7 +9,6 @@
 
 use crate::keywords::Place;
 use crate::parse::Token;
-use crate::parse::word_quoted::word_quoted;
 
 /// The words the plain rule of [`super::after`] reads as a command restart: the
 /// separators and the parens, **one set** — the words of
@@ -46,10 +45,11 @@ pub(crate) fn word_place(place: Place) -> Place {
 /// words **and** its raw span carries quote bytes, so POSIX §2.9.1 makes it word
 /// data and not the separator [`super::after`]'s rows read (task #336 — the token-level
 /// twin of `parse::word_quoted::span_word`, which is text **and** span, reached
-/// through [`word_quoted`]). The text is trimmed as [`super::after`] trims it, because a
-/// quoted `" ; "` word carries its spaces in the text.
+/// through `ShortCStr::is_shorter_than_span`). The text is trimmed as
+/// [`super::after`] trims it, because a quoted `" ; "` word carries its spaces in
+/// the text.
 pub(crate) fn separator_data(tok: &Token) -> bool {
     let (t, start, end, _fq, _mask, _spans) = tok;
     t.as_bytes()
-        .is_ok_and(|w| separator_shape(w.trim_ascii()) && word_quoted(t, *start, *end))
+        .is_ok_and(|w| separator_shape(w.trim_ascii()) && t.is_shorter_than_span(*start, *end))
 }

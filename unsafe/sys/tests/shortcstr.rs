@@ -270,6 +270,28 @@ fn len_variants() {
     assert_eq!(rc.len(), rc_bytes.len());
 }
 
+// --- is_shorter_than_span ---
+
+/// The span test the parse layer used to own now lives on the type (task #545).
+/// Every row is the row on which one mutation of `end - start > self.len()`
+/// changes the answer, so each mutant has a row that kills it.
+#[test]
+fn span_longer_than_the_string() {
+    let s = ShortCStr::from(c"ab");
+    // `len == span`: kills `==`, `>=` and `-> true`. The `is_empty` half is the
+    // `len()` side of the comparison, and it must answer on a non-empty string —
+    // every other `is_empty` row here pins the empty answer only.
+    assert!(!s.is_empty());
+    assert!(!s.is_shorter_than_span(0, 2));
+    // Longer than the string: kills `<` and `-> false`.
+    assert!(s.is_shorter_than_span(0, 6));
+    let s = ShortCStr::from(c"abcdef");
+    // A non-zero `start`: kills `-` → `+` (the sum overshoots `len`).
+    assert!(!s.is_shorter_than_span(4, 6));
+    // Kills `-` → `/` (the quotient undershoots `len`).
+    assert!(s.is_shorter_than_span(2, 10));
+}
+
 // --- Clone + PartialEq ---
 
 #[test]

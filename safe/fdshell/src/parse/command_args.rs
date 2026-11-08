@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::/)'
+
 use crate::error::parse::ParseError;
 use crate::parse::BuiltinPrefix;
 use crate::parse::CommandLine;
@@ -25,7 +27,7 @@ pub(super) fn finish_command(
     let word0 = tokens.get(args_from - 1);
     let command_mask = word0.map(|t| t.4.clone()).unwrap_or_default();
     let command_span = word0.map(|t| t.5.clone()).unwrap_or_default();
-    let command_quoted = word0.is_some_and(|t| super::word_quoted::word_quoted(&t.0, t.1, t.2));
+    let command_quoted = word0.is_some_and(|t| t.0.is_shorter_than_span(t.1, t.2));
     // Word 0 is a substitution surface (task #268): its escape pairs are folded
     // by the substitution pass, and its fields are split and globbed, so the
     // raw text, mask and quoted flag travel to `command_word::expand` — the

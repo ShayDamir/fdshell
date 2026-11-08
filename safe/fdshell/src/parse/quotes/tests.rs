@@ -80,7 +80,7 @@ fn quoted_dollar_paren_with_inner_quotes_is_fully_quoted() {
 
 // Row 10/11: the `${ … }` body's quotes are markers, so they are dropped from
 // the text (the substitution pass takes the body verbatim) and the span keeps
-// them (so `word_quoted` sees the quotes).
+// them (so `ShortCStr::is_shorter_than_span` sees the quotes).
 #[test]
 fn quoted_brace_region_drops_its_inner_quotes() {
     let tokens = toks(b"\"${u:-\"z w\"}\"");
@@ -90,7 +90,7 @@ fn quoted_brace_region_drops_its_inner_quotes() {
     assert!(tokens[0].3);
     assert_eq!(tokens[0].4, runs(&[(true, 9)]));
     assert!(
-        crate::parse::word_quoted::word_quoted(&tokens[0].0, tokens[0].1, tokens[0].2),
+        tokens[0].0.is_shorter_than_span(tokens[0].1, tokens[0].2),
         "the span holds the 4 dropped quote bytes"
     );
 }

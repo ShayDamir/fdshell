@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C command -- -E 'test(/^parse::/) | binary(command)'
+
 //! The shared tail of a simple command: every word from word 0 on, collected
 //! by the loop `command_args` and `redirect_first` both drive — the redirect
 //! operators, the `%` captures and the plain words.
@@ -7,7 +9,7 @@ use crate::parse::bg_redirect::{insert_redirect, parse_bg_redirect};
 use crate::parse::classify::{parse_capture, parse_redirect};
 use crate::parse::here_string::parse_here_string;
 use crate::parse::heredoc::{HeredocBody, is_operator, parse_operator};
-use crate::parse::word_quoted::{span_word, word_quoted};
+use crate::parse::word_quoted::span_word;
 use crate::parse::{CommandLine, Token};
 use error_stack::{Report, bail};
 use sys::Position;
@@ -84,7 +86,7 @@ pub(crate) fn collect(
 /// builds them), into `args` otherwise.
 fn word(cmd: &mut CommandLine, tok: &Token, slot: &mut bool) {
     let (t, ts, te, _fq, mask, spans) = tok;
-    let quoted = word_quoted(t, *ts, *te);
+    let quoted = t.is_shorter_than_span(*ts, *te);
     if *slot {
         cmd.command = t.clone();
         cmd.command_mask = mask.to_vec();

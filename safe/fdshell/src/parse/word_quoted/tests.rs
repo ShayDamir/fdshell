@@ -1,12 +1,14 @@
 #![allow(clippy::unwrap_used)]
-use super::{operator_word, span_word, word_quoted};
+use super::{operator_word, span_word};
 use crate::parse::token::tokenize;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
 /// `(word bytes, start, end)`: the unquoted word and its raw span.
 fn case(word: &[u8], start: usize, end: usize) -> bool {
-    word_quoted(&ShortCStr::from_vec(word.to_vec()).unwrap(), start, end)
+    ShortCStr::from_vec(word.to_vec())
+        .unwrap()
+        .is_shorter_than_span(start, end)
 }
 
 #[test]

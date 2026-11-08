@@ -1,6 +1,7 @@
+// mutants: -C --lib -C --test -C time -- -E 'test(/^parse::time_block::/) | binary(time)'
+
 use super::Token;
 use super::semi::verbatim;
-use super::word_quoted::word_quoted;
 use crate::error::parse::ParseError;
 use crate::keywords::keyword_delta;
 use crate::parse::line::ParsedLine;
@@ -33,7 +34,7 @@ pub(super) fn detect(
 ) -> Result<Option<ParsedLine>, Report<ParseError>> {
     let is_prefix = tokens
         .first()
-        .is_some_and(|(w, s, e, _, _, _)| w.eq_bytes(b"time") && !word_quoted(w, *s, *e));
+        .is_some_and(|(w, s, e, _, _, _)| w.eq_bytes(b"time") && !w.is_shorter_than_span(*s, *e));
     if !is_prefix {
         return Ok(None);
     }
@@ -49,13 +50,13 @@ pub(super) fn detect(
     // unquoted `-p` right behind a `time`.
     let mut taken = 0usize;
     while let Some((w, s, e, _, _, _)) = tokens.get(taken) {
-        if !w.eq_bytes(b"time") || word_quoted(w, *s, *e) {
+        if !w.eq_bytes(b"time") || w.is_shorter_than_span(*s, *e) {
             break;
         }
         taken += 1;
         if let Some((w, s, e, _, _, _)) = tokens.get(taken)
             && w.eq_bytes(b"-p")
-            && !word_quoted(w, *s, *e)
+            && !w.is_shorter_than_span(*s, *e)
         {
             posix = true;
             taken += 1;
@@ -99,7 +100,7 @@ fn inner_text(
     // the scorer would make such a comparison live again;
     // `keywords/tests.rs::keyword_delta_wait_block_vs_builtin` is the row that
     // notices the change.
-    if !word_quoted(word, *start, *end)
+    if !word.is_shorter_than_span(*start, *end)
         && keyword_delta(
             word.as_bytes().change_context(ParseError::Never)?,
             line,

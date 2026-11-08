@@ -280,7 +280,7 @@ fn adjacent_single_quotes_make_one_word() {
 }
 
 // `''` is one empty word: `fq` set, empty text and mask, span 2 bytes
-// (`word_quoted` is what makes the empty word count).
+// (`ShortCStr::is_shorter_than_span` is what makes the empty word count).
 #[test]
 fn empty_single_quotes_are_one_empty_word() {
     let w = full(b"echo ''");
@@ -289,7 +289,7 @@ fn empty_single_quotes_are_one_empty_word() {
     assert!(w[1].3, "fq");
     assert_eq!(w[1].2 - w[1].1, 2, "the span is the two quote bytes");
     assert!(
-        super::super::word_quoted::word_quoted(&w[1].0, w[1].1, w[1].2),
+        w[1].0.is_shorter_than_span(w[1].1, w[1].2),
         "the span is longer than the word: a word that counts"
     );
 }

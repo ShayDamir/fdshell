@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C herestring -- -E 'test(/^parse::here_string::/) | binary(herestring)'
+
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
 use crate::parse::Token;
@@ -44,7 +46,7 @@ pub fn parse_here_string(
             word_spans(spans, off),
             0,
         )
-    } else if super::word_quoted::word_quoted(t, *start, *end) {
+    } else if t.is_shorter_than_span(*start, *end) {
         (ShortCStr::new(), Vec::new(), Vec::new(), 0)
     } else {
         match tokens.get(i + 1) {
@@ -107,7 +109,7 @@ pub(crate) fn word_indices(line: &[u8], tokens: &[Token]) -> Vec<usize> {
         let Some((_op, prefix)) = string_span(line, *start, *end) else {
             continue;
         };
-        if has_attached_word(t.len(), prefix) || super::word_quoted::word_quoted(t, *start, *end) {
+        if has_attached_word(t.len(), prefix) || t.is_shorter_than_span(*start, *end) {
             out.push(i);
         } else if tokens.get(i + 1).is_some() {
             out.push(i + 1);

@@ -1,3 +1,5 @@
+// mutants: -C --test -C shortcstr -- -E 'binary(shortcstr)'
+
 use crate::shortcstr::{INLINE_CAP, InlineSize, ShortCStr};
 
 impl ShortCStr {
@@ -20,5 +22,13 @@ impl ShortCStr {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Whether the raw span `(start, end)` this string was cut from is longer
+    /// than the string itself, i.e. the span carried bytes the string dropped
+    /// (quotes, escapes). An empty quoted region contributes no bytes to the
+    /// string, so such a span is the only place the fact can live.
+    pub fn is_shorter_than_span(&self, start: usize, end: usize) -> bool {
+        end - start > self.len()
     }
 }

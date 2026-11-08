@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::for_block::/)'
+
 //! The `for` block's word list: the `in` words with their quote masks and
 //! per-word quoted flags, and the ONE operator-word rule that decides which of
 //! them are words at all (task #524).
@@ -6,7 +8,7 @@ use super::super::Token;
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
 use crate::parse::semi::trim_semi;
-use crate::parse::word_quoted::{self, operator_word};
+use crate::parse::word_quoted::operator_word;
 use alloc::vec::Vec;
 use error_stack::Report;
 use sys::ShortCStr;
@@ -79,7 +81,7 @@ pub(super) fn collect_words(
         .collect();
     let words_quoted: Vec<bool> = word_tokens
         .iter()
-        .map(|(t, s, e, _, _, _)| word_quoted::word_quoted(t, *s, *e))
+        .map(|(t, s, e, _, _, _)| t.is_shorter_than_span(*s, *e))
         .collect();
     Ok(ForWords {
         words,
