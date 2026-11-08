@@ -7160,3 +7160,27 @@ The word-split family caveat stands: bash splits a word at an unquoted operator
 byte and fdshell never does, so `>&>f`, `>&|f` and `>&-5` are syntax errors or
 separate words in bash and **whole** words here — the pins encode fdshell's own
 readings and name the divergence.
+
+## A predicate whose only data is the domain type's state is a method; the orphan rule marks the border
+
+`parse/word_quoted.rs` owned the span test `end - start > t.len()` and was called
+with it from ten files; every argument but the span belonged to `ShortCStr`, so
+STYLE §6.4 says the operation is the type's, and it now lives on
+`ShortCStr::is_shorter_than_span` in `unsafe/sys/src/shortcstr/len.rs`. The parse
+module keeps what it owns: the reading of the span as "quotes or escapes", and the
+gates that combine the test with a `Token`. The mirror case was already inside the
+type's own module family — `extend_from_slice_fallback(this, bytes)` named its
+first argument `this`, so it became a method beside the `push` family it serves.
+
+What cannot cross stays free, and that is the answer, not an oversight: a
+predicate that reads a safe-crate type (`Token`, `MaskBit`) beside the domain type
+cannot become a `sys` method — the orphan rule forbids an `impl ScriptText` or
+`impl ShortCStr` here — and `Token` is a tuple alias, so it carries no methods at
+all. Each rejected family says so in its own module doc: `parse/cond_bodies.rs`,
+`parse/redirect.rs`, `child/printf/spec_helper.rs`.
+
+Pins: `tests/shortcstr.rs::span_longer_than_the_string`. The sys crate's own test
+binary is the only scope the gate gives a sys file, so the rows have to live there,
+one per mutation of `end - start > self.len()`: equal span and text, a longer span,
+a non-zero `start` so `-` → `+` changes the answer, and a quotient short enough
+that `-` → `/` changes it too.
