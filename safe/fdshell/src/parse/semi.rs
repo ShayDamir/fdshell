@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C semi_semi -- -E 'test(/^parse::semi::/) | binary(semi_semi)'
+
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
@@ -37,7 +39,13 @@ pub(crate) fn try_join_masked(tokens: &[Token]) -> (ShortCStr, Vec<MaskBit>, Vec
     let mut out = ShortCStr::new();
     let mut mask = Vec::new();
     let mut spans = Vec::new();
-    for (t, _, _, _, t_mask, t_spans) in tokens {
+    for Token {
+        word: t,
+        mask: t_mask,
+        spans: t_spans,
+        ..
+    } in tokens
+    {
         let offset = out.len();
         if !out.is_empty() {
             out.push(c" ");
@@ -82,7 +90,7 @@ pub(crate) fn span_verbatim(
 /// Byte range `(start, end)` covered by the first and last tokens, or `(0, 0)`.
 pub(crate) fn token_range(tokens: &[Token]) -> (usize, usize) {
     match (tokens.first(), tokens.last()) {
-        (Some(f), Some(l)) => (f.1, l.2),
+        (Some(f), Some(l)) => (f.start, l.end),
         _ => (0, 0),
     }
 }

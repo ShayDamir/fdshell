@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C case -- -E 'test(/^parse::case_clause::/) | binary(case)'
+
 //! What a judged depth-0 `)` token means (task #300 and task #419). The walk
 //! in [`super`] finds the candidate and asks this module; the caller owns the
 //! messages (STYLE §4.7). Each arm is measured against bash 5.3.9; the place
@@ -28,7 +30,9 @@ pub(crate) fn arith_seed(tokens: &[Token], body_start: usize) -> usize {
     // `take_open_paren`'s discriminator: only an unquoted leading `(` is the
     // token POSIX writes; the closer is the pattern walk's span-clean `)`.
     let arms_pair = |tok: &Token| {
-        let (text, _, _, _, mask, _) = tok;
+        let Token {
+            word: text, mask, ..
+        } = tok;
         text.as_bytes()
             .is_ok_and(|b| b.starts_with(b"((") && !mask.is_empty() && !quoted_at(mask, 0))
     };

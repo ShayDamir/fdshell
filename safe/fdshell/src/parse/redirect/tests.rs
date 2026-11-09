@@ -10,6 +10,7 @@
 use crate::mask::MaskBit;
 use crate::mask::MaskBit::Unquoted;
 use crate::mask::tests::runs;
+use crate::parse::Token;
 use crate::parse::bg_redirect::parse_bg_redirect;
 use crate::parse::redirect::{parse_redirect, quoted_bytes, token_fd};
 use crate::parse::token::tokenize_statement;
@@ -22,7 +23,7 @@ use sys::ShortCStr;
 /// `>`/`<` byte position — the prefix and the gate's `from` bound.
 fn op_token(line: &[u8]) -> (ShortCStr, Vec<MaskBit>, usize) {
     let tokens = tokenize_statement(line).unwrap();
-    let (t, _s, _e, _fq, mask, _spans) = tokens.get(1).unwrap();
+    let Token { word: t, mask, .. } = tokens.get(1).unwrap();
     let bytes = t.as_bytes().unwrap();
     let op_pos = bytes
         .iter()

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C command -- -E 'test(/^parse::/) | binary(command)'
+
 pub(crate) mod collect_tail;
 mod redirect_first;
 
@@ -34,15 +36,15 @@ pub fn parse_command(
     // bypasses user functions) dispatches as a builtin if the name is one,
     // else falls through to the external (PATH) search.
     let (kw, cmd_prefix) = match tokens.get(prefix) {
-        Some(t) if t.0.eq_bytes(b"builtin") => (1usize, BuiltinPrefix::Builtin),
-        Some(t) if t.0.eq_bytes(b"command") => (1usize, BuiltinPrefix::Command),
-        Some(t) if is_builtin(&t.0) => (0usize, BuiltinPrefix::Builtin),
+        Some(t) if t.word.eq_bytes(b"builtin") => (1usize, BuiltinPrefix::Builtin),
+        Some(t) if t.word.eq_bytes(b"command") => (1usize, BuiltinPrefix::Command),
+        Some(t) if is_builtin(&t.word) => (0usize, BuiltinPrefix::Builtin),
         _ => (0usize, BuiltinPrefix::None),
     };
     let command = tokens
         .get(prefix + kw)
         .ok_or(ParseError::ExpectedCommand)?
-        .0
+        .word
         .clone();
     super::command_args::finish_command(
         cmd_prefix,

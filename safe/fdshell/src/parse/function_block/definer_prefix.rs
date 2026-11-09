@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C function_keyword -- -E 'test(/^parse::function_block::/) | binary(function_keyword)'
+
 //! The definer prefix the parse dispatch rejects (task #433): POSIX #2.9 puts a
 //! `function_def`'s `{` right behind the definer words, so a **redirection** word
 //! written between them is a syntax error in bash (rc 2) and a report here (rc 1)
@@ -51,7 +53,7 @@ fn is_redirect<'a>(
     i: usize,
     line: &[u8],
 ) -> Result<Option<&'a ShortCStr>, Report<ParseError>> {
-    let word = &tokens.get(i).ok_or(ParseError::Never)?.0;
+    let word = &tokens.get(i).ok_or(ParseError::Never)?.word;
     let claims = parse_bg_redirect(tokens, i)?.is_some()
         || parse_here_string(line, tokens, i)?.is_some()
         || parse_redirect(tokens, i)?.is_some()

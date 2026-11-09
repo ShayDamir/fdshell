@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C redirect -- -E 'test(/^parse::/) | binary(redirect)'
+
 //! The ONE owner of "the byte offset at which a redirect **operand** begins in
 //! this token's raw span". A pre-parse word rewriter needs exactly that offset
 //! to judge the operand on its own (POSIX XCU 2.7 `worddef`: the operand
@@ -31,7 +33,12 @@ use sys::ShortCStr;
 /// span — the decode is the identity unless a quote pair was stripped before
 /// the operand (task #458).
 pub(crate) fn operand_offset(tokens: &[Token], i: usize) -> Option<usize> {
-    let (t, _start, _end, _fq, mask, spans) = tokens.get(i)?;
+    let Token {
+        word: t,
+        mask,
+        spans,
+        ..
+    } = tokens.get(i)?;
     let off = bg_operand(t, mask)
         .or_else(|| attached_operand(t, mask))
         .or_else(|| bare_operand(tokens, i))?;
@@ -93,7 +100,7 @@ fn attached_operand(t: &ShortCStr, mask: &[MaskBit]) -> Option<usize> {
 /// (`bare::parse_bare` and `bg_redirect`'s bare arm), so a token is claimed as
 /// an operand exactly where a parser reads an operand.
 fn bare_operand(tokens: &[Token], i: usize) -> Option<usize> {
-    let (t, _start, _end, _fq, mask, _spans) = tokens.get(i.checked_sub(1)?)?;
+    let Token { word: t, mask, .. } = tokens.get(i.checked_sub(1)?)?;
     (is_bare_operator(t, mask) || is_bare_bg_operator(t, mask)).then_some(0)
 }
 

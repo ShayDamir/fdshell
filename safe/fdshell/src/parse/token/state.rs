@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C block_redirect -C --test -C loops -- -E 'test(/^parse::/) | binary(block_redirect) | binary(loops)'
+
 //! The tokenizer's [`State`] accumulator: the word under construction, its
 //! per-byte quote mask, the quote spans that contributed no bytes, and the
 //! quote-state flags. The struct is the shared state of the byte-by-byte loop,
@@ -77,14 +79,14 @@ impl State {
     /// `|` all have the same shape — the token text, the byte range it occupies,
     /// no quote region and no zero-byte span.
     pub(in crate::parse) fn push_separator(&mut self, sep: &'static CStr) {
-        self.tokens.push((
-            sep.into(),
-            self.pos - 1,
-            self.pos,
-            false,
-            Vec::new(),
-            Vec::new(),
-        ));
+        self.tokens.push(Token {
+            word: sep.into(),
+            start: self.pos - 1,
+            end: self.pos,
+            fully_quoted: false,
+            mask: Vec::new(),
+            spans: Vec::new(),
+        });
     }
 
     /// End of line: an open quote is an error; otherwise flush the tail.

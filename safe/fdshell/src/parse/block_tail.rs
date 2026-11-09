@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C block_bodies -C --test -C block_closers -C --test -C block_conditions -C --test -C block_redirect -- -E 'test(/^parse::block_tail::/) | binary(block_bodies) | binary(block_closers) | binary(block_conditions) | binary(block_redirect)'
+
 //! The keyword block's **tail**: the redirections written after its closing
 //! keyword (`while :; do :; done > f`) — path, here-doc ([`heredoc`], task #408),
 //! here-string and the `&>` family ([`bg`], task #409) — and the **word** written
@@ -39,7 +41,7 @@ const GLUE: &[u8] = b"<>";
 /// Whether `tok` is the block's closing keyword `kw`: the bare word, or the word
 /// glued to a redirection operator (the form [`redirects`] splits).
 pub(crate) fn is_closer(tok: &Token, kw: &[u8]) -> bool {
-    let (t, _, _, _, _, _) = tok;
+    let Token { word: t, .. } = tok;
     if t.eq_bytes(kw) {
         return true;
     }

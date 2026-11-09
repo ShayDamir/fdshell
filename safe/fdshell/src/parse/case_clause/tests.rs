@@ -27,7 +27,7 @@ fn stext(bytes: &[u8]) -> ScriptText {
 fn clauses_of(line: &[u8]) -> Result<Vec<CaseClause>, Report<ParseError>> {
     let tokens = tokenize_statement(line).unwrap();
     let in_idx = (1..tokens.len())
-        .find(|&i| tokens.get(i).is_some_and(|t| t.0.eq_bytes(b"in")))
+        .find(|&i| tokens.get(i).is_some_and(|t| t.word.eq_bytes(b"in")))
         .unwrap();
     let esac_idx = tokens.len() - 1;
     parse_clauses(&tokens, in_idx + 1, esac_idx, &stext(line))
@@ -342,39 +342,39 @@ fn the_window_search_skips_a_nested_block_s_own_window() {
 /// rejection forbids). Values measured on the clean tree.
 #[test]
 fn take_open_paren_answers_with_the_exact_shifted_tuple() {
-    let token: Token = (
-        ShortCStr::from(c"(a*x"),
-        5,
-        9,
-        false,
-        vec![
+    let token: Token = Token {
+        word: ShortCStr::from(c"(a*x"),
+        start: 5,
+        end: 9,
+        fully_quoted: false,
+        mask: vec![
             MaskBit::Unquoted,
             MaskBit::QuotedStart,
             MaskBit::Unquoted,
             MaskBit::Unquoted,
         ],
-        vec![1],
-    );
+        spans: vec![1],
+    };
     assert_eq!(
         take_open_paren(&token),
-        Some(vec![(
-            ShortCStr::from(c"a*x"),
-            6,
-            9,
-            false,
-            vec![MaskBit::QuotedStart, MaskBit::Unquoted, MaskBit::Unquoted],
-            vec![0],
-        )]),
+        Some(vec![Token {
+            word: ShortCStr::from(c"a*x"),
+            start: 6,
+            end: 9,
+            fully_quoted: false,
+            mask: vec![MaskBit::QuotedStart, MaskBit::Unquoted, MaskBit::Unquoted],
+            spans: vec![0],
+        }]),
     );
     // The token *is* the `(` (POSIX's spaced `( pattern )`): nothing is left of it,
     // so the answer is the empty list, not a shifted row.
-    let token: Token = (
-        ShortCStr::from(c"("),
-        4,
-        5,
-        false,
-        vec![MaskBit::Unquoted],
-        vec![],
-    );
+    let token: Token = Token {
+        word: ShortCStr::from(c"("),
+        start: 4,
+        end: 5,
+        fully_quoted: false,
+        mask: vec![MaskBit::Unquoted],
+        spans: vec![],
+    };
     assert_eq!(take_open_paren(&token), Some(vec![]));
 }

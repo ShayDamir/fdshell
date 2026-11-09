@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C wait -- -E 'test(/^parse::wait_block::/) | binary(wait)'
+
 //! The event-case gate of `parse/wait_block`: does a `wait` statement open a
 //! block, or is it the POSIX builtin? Extracted from `parse/wait_block.rs` for
 //! the line budget (task #298 added the closer's redirections).
@@ -15,7 +17,7 @@ use sys::ScriptText;
 /// `wait`, `;`, `readable`, …), so the loop is reachable (a same-line `;`
 /// never arrives — the statement splitter claims it first).
 pub(crate) fn is_block(tokens: &[Token], text: &ScriptText) -> bool {
-    let Some((_wt, _ws, we, _wq, _wm, _spans)) = tokens.first() else {
+    let Some(Token { end: we, .. }) = tokens.first() else {
         return false;
     };
     let mut pos = 1;
@@ -25,7 +27,13 @@ pub(crate) fn is_block(tokens: &[Token], text: &ScriptText) -> bool {
         }
         pos += 1;
     }
-    let Some((t, ts, _te, quoted, _tm, _spans)) = tokens.get(pos) else {
+    let Some(Token {
+        word: t,
+        start: ts,
+        fully_quoted: quoted,
+        ..
+    }) = tokens.get(pos)
+    else {
         return false;
     };
     if *quoted {

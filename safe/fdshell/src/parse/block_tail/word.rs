@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C block_bodies -C --test -C block_closers -C --test -C block_conditions -C --test -C block_redirect -- -E 'test(/^parse::block_tail::/) | binary(block_bodies) | binary(block_closers) | binary(block_conditions) | binary(block_redirect)'
+
 //! The **word** written after a keyword block's closing keyword: bash demands a
 //! separator there, so the word is its syntax error and this module reports it at
 //! the house rc 1 (task #405, the keyword-block twin of `group_block::tail`'s
@@ -45,7 +47,7 @@ pub(crate) fn judge(kw: &[u8], tok: &Token, line: &[u8]) -> Result<(), Report<Pa
 /// to key the group's append/extension pair on). A quoted or escaped shape is word
 /// data and reaches the report — the group tail's pinned reading (task #336).
 fn stops(tok: &Token, line: &[u8]) -> bool {
-    let (_, start, _, _, _, _) = tok;
+    let Token { start, .. } = tok;
     terminator_spans(line)
         .iter()
         .any(|(from, to)| (*from..*to).contains(start))

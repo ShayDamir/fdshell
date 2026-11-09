@@ -20,7 +20,7 @@ pub(super) fn parse_path_redirect(
     dir: u8,
     prefix: &ShortCStr,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    let (s, _start, _end, _fq, mask, _spans) = t;
+    let Token { word: s, mask, .. } = t;
     let after_op = s.get(op_pos + 1..).ok_or(ParseError::InvalidRedirect)?;
     let after_op_len = after_op.len();
     // The operator tail's mask: `redirect_op` gates its `>|`/`>>`/`<>`

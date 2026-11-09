@@ -390,7 +390,7 @@ fn cond_bodies_of(line: &[u8], keyword: &[u8]) -> Vec<ShortCStr> {
     let tokens = tokenize_statement(line).unwrap();
     let kw = tokens
         .iter()
-        .position(|(t, _, _, _, _, _)| t.eq_bytes(keyword))
+        .position(|Token { word: t, .. }| t.eq_bytes(keyword))
         .unwrap();
     let then = find_preceded_by(&tokens, kw + 1, b"then", line, Term::Semi).unwrap();
     condition_bodies(&text, trim_semi(tokens.get(kw + 1..then).unwrap()))
@@ -418,7 +418,7 @@ fn arm_slice(line: &[u8], keyword: &[u8]) -> Vec<Token> {
     let closing = closing_keyword_index(&tokens, line).unwrap();
     let kw = tokens
         .iter()
-        .position(|(t, _, _, _, _, _)| t.eq_bytes(keyword))
+        .position(|Token { word: t, .. }| t.eq_bytes(keyword))
         .unwrap();
     let then = find_preceded_by(&tokens, kw + 1, b"then", line, Term::Semi).unwrap();
     trim_semi(tokens.get(then + 1..closing - 1).unwrap()).to_vec()

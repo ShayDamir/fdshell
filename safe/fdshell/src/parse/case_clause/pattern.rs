@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C case -- -E 'test(/^parse::case_clause::/) | binary(case)'
+
 //! A `case` pattern word with the quote mask parallel to it (task #280).
 //!
 //! A pattern is a **word**: it is folded and expanded with its own mask before
@@ -54,7 +56,14 @@ pub(crate) fn join(tokens: &[Token]) -> Pattern {
 /// steps back one (a span at 0 is a quote pair written in front of the `(` and
 /// stays at 0), and `start` follows the text.
 pub(crate) fn take_open_paren(token: &Token) -> Option<Vec<Token>> {
-    let (text, start, end, fully_quoted, mask, spans) = token;
+    let Token {
+        word: text,
+        start,
+        end,
+        fully_quoted,
+        mask,
+        spans,
+    } = token;
     // The mask is the discriminator, never the per-word `fully_quoted` flag:
     // only an unquoted leading `(` is the token POSIX writes, the rest is text.
     if quoted_at(mask, 0) {
@@ -68,13 +77,13 @@ pub(crate) fn take_open_paren(token: &Token) -> Option<Vec<Token>> {
     if stripped.is_empty() {
         return Some(Vec::new());
     }
-    let opened: Token = (
-        stripped,
-        start + 1,
-        *end,
-        *fully_quoted,
-        mask.iter().skip(1).copied().collect(),
-        spans.iter().map(|&i| i.saturating_sub(1)).collect(),
-    );
+    let opened: Token = Token {
+        word: stripped,
+        start: start + 1,
+        end: *end,
+        fully_quoted: *fully_quoted,
+        mask: mask.iter().skip(1).copied().collect(),
+        spans: spans.iter().map(|&i| i.saturating_sub(1)).collect(),
+    };
     Some(vec![opened])
 }

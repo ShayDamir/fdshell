@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C semi_semi -- -E 'test(/^parse::semi::/) | binary(semi_semi)'
+
 //! The stray-`;;` rule of task #423: a `;;` outside a `case` clause is a parse
 //! error — POSIX #2.10 puts it inside a clause and nowhere else, and bash stops
 //! there (fdshell's house rc 1). The rule is **one predicate** — two `;`-class
@@ -77,9 +79,9 @@ fn real_pair_gap(tokens: &[Token], line: &[u8], i: usize) -> bool {
         Some(t) => t,
         None => return false,
     };
-    line.get(tail.1) == Some(&b';')
+    line.get(tail.start) == Some(&b';')
         && line
-            .get(head.2..tail.1)
+            .get(head.end..tail.start)
             .is_some_and(|gap| gap.iter().all(|b| matches!(b, b' ' | b'\t')))
 }
 

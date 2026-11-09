@@ -26,7 +26,7 @@ fn asked(line: &[u8]) -> Vec<Option<Terminator>> {
     for i in 0..tokens.len() {
         if tokens
             .get(i)
-            .is_some_and(|t| t.0.eq_bytes(b";") || t.0.eq_bytes(b"\";\""))
+            .is_some_and(|t| t.word.eq_bytes(b";") || t.word.eq_bytes(b"\";\""))
         {
             out.push(kind_at(&tokens, line, i));
         }

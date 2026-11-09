@@ -3,6 +3,7 @@ use super::*;
 use crate::capture::Capture;
 use crate::error::cmd::CmdError;
 use crate::error::parse::ParseError;
+use crate::mask::MaskBit;
 use crate::mask::MaskBit::Unquoted;
 use crate::mask::tests::runs;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
@@ -37,14 +38,14 @@ fn assign(name: &str, value: &str, quoted: bool) -> Assign {
 /// length — the shape `envassign::prefix_len` inspects (word bytes + the `;`
 /// guard). Its range is nominal; `prefix_len` never reads the range.
 fn word_token(word: &[u8], start: usize) -> Token {
-    (
-        sys::ShortCStr::from_vec(word.to_vec()).unwrap(),
+    Token {
+        word: sys::ShortCStr::from_vec(word.to_vec()).unwrap(),
         start,
-        start + word.len(),
-        false,
-        vec![Unquoted; word.len()],
-        Vec::new(),
-    )
+        end: start + word.len(),
+        fully_quoted: false,
+        mask: vec![Unquoted; word.len()],
+        spans: Vec::new(),
+    }
 }
 
 fn pos() -> Position {
@@ -2133,7 +2134,15 @@ fn tokenize_if_newline_separators() {
     ];
     let expected_pos: &[usize] = &[0, 3, 7, 8, 12, 13, 19, 24, 25];
     assert_eq!(tokens.len(), expected.len());
-    for (i, (token, pos, _, _, _, _)) in tokens.iter().enumerate() {
+    for (
+        i,
+        Token {
+            word: token,
+            start: pos,
+            ..
+        },
+    ) in tokens.iter().enumerate()
+    {
         assert_eq!(token.as_bytes().unwrap(), expected[i]);
         assert_eq!(*pos, expected_pos[i]);
     }
@@ -2267,29 +2276,29 @@ fn for_parse_dispatch() {
 fn tokenize_backtick_command() {
     let result = token::tokenize(b"echo `seq 1 10`").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].0, c"echo".into());
-    assert_eq!(result[1].0, c"`seq 1 10`".into());
+    assert_eq!(result[0].word, c"echo".into());
+    assert_eq!(result[1].word, c"`seq 1 10`".into());
 }
 
 #[test]
 fn tokenize_dollar_paren_command() {
     let result = token::tokenize(b"echo $(seq 1 10)").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].0, c"echo".into());
-    assert_eq!(result[1].0, c"$(seq 1 10)".into());
+    assert_eq!(result[0].word, c"echo".into());
+    assert_eq!(result[1].word, c"$(seq 1 10)".into());
 }
 
 #[test]
 fn tokenize_backtick_empty() {
     let result = token::tokenize(b"for x in ``; do body; done").unwrap();
-    assert_eq!(result[3].0, c"``".into());
+    assert_eq!(result[3].word, c"``".into());
 }
 
 #[test]
 fn tokenize_dollar_paren_nested() {
     let result = token::tokenize(b"$(echo $(seq 3))").unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].0, c"$(echo $(seq 3))".into());
+    assert_eq!(result[0].word, c"$(echo $(seq 3))".into());
 }
 
 #[test]
@@ -2299,56 +2308,56 @@ fn tokenize_backtick_escape_positions() {
     // body re-parses the pair as its own literal.
     let result = token::tokenize(b"`a\\`\\\\\\z` b").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].0, c"`a\\`\\\\\\z`".into());
-    assert_eq!(result[0].1, 0);
-    assert_eq!(result[1].0, c"b".into());
-    assert_eq!(result[1].1, 10);
+    assert_eq!(result[0].word, c"`a\\`\\\\\\z`".into());
+    assert_eq!(result[0].start, 0);
+    assert_eq!(result[1].word, c"b".into());
+    assert_eq!(result[1].start, 10);
 }
 
 #[test]
 fn tokenize_dollar_paren_positions() {
     let result = token::tokenize(b"$(a(b)c) x").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].0, c"$(a(b)c)".into());
-    assert_eq!(result[0].1, 0);
-    assert_eq!(result[1].0, c"x".into());
-    assert_eq!(result[1].1, 9);
+    assert_eq!(result[0].word, c"$(a(b)c)".into());
+    assert_eq!(result[0].start, 0);
+    assert_eq!(result[1].word, c"x".into());
+    assert_eq!(result[1].start, 9);
 }
 
 #[test]
 fn tokenize_dollar_paren_paren_in_quotes_is_data() {
     let result = token::tokenize(b"x=$(echo \"a)b\") y").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].0, c"x=$(echo \"a)b\")".into());
-    assert_eq!(result[0].1, 0);
-    assert_eq!(result[1].0, c"y".into());
-    assert_eq!(result[1].1, 16);
+    assert_eq!(result[0].word, c"x=$(echo \"a)b\")".into());
+    assert_eq!(result[0].start, 0);
+    assert_eq!(result[1].word, c"y".into());
+    assert_eq!(result[1].start, 16);
 }
 
 #[test]
 fn tokenize_dollar_paren_open_paren_in_quotes_is_data() {
     let result = token::tokenize(b"$(a\"(b)c\") d").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].0, c"$(a\"(b)c\")".into());
-    assert_eq!(result[1].0, c"d".into());
+    assert_eq!(result[0].word, c"$(a\"(b)c\")".into());
+    assert_eq!(result[1].word, c"d".into());
 }
 
 #[test]
 fn tokenize_dollar_paren_escaped_quote_in_quotes_is_data() {
     let result = token::tokenize(b"x=$(echo \"a\\\"b)\")").unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].0, c"x=$(echo \"a\\\"b)\")".into());
+    assert_eq!(result[0].word, c"x=$(echo \"a\\\"b)\")".into());
 }
 
 #[test]
 fn tokenize_dollar_paren_escaped_quote_positions() {
     let result = token::tokenize(b"x=$(echo \"a\\\"b\") y").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].0, c"x=$(echo \"a\\\"b\")".into());
-    assert_eq!(result[0].1, 0);
-    assert_eq!(result[1].0, c"y".into());
+    assert_eq!(result[0].word, c"x=$(echo \"a\\\"b\")".into());
+    assert_eq!(result[0].start, 0);
+    assert_eq!(result[1].word, c"y".into());
     assert_eq!(
-        result[1].1, 17,
+        result[1].start, 17,
         "pos must advance past both escape bytes before 'y'"
     );
 }
@@ -2375,10 +2384,10 @@ fn tokenize_dollar_paren_trailing_escape_in_quotes_is_eof() {
 fn tokenize_quoted_escape_positions() {
     let result = token::tokenize(b"\"a\\\"b\" c").unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].0, c"a\"b".into());
-    assert_eq!(result[0].1, 0);
-    assert_eq!(result[1].0, c"c".into());
-    assert_eq!(result[1].1, 7);
+    assert_eq!(result[0].word, c"a\"b".into());
+    assert_eq!(result[0].start, 0);
+    assert_eq!(result[1].word, c"c".into());
+    assert_eq!(result[1].start, 7);
 }
 
 #[test]
@@ -2386,8 +2395,8 @@ fn tokenize_dquote_backslash_non_special_preserved() {
     // `\n` is data inside double quotes: the backslash is retained.
     let tokens = token::tokenize(b"\"a\\nb\"").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"a\\nb".into());
-    assert!(tokens[0].3);
+    assert_eq!(tokens[0].word, c"a\\nb".into());
+    assert!(tokens[0].fully_quoted);
 }
 
 #[test]
@@ -2405,8 +2414,8 @@ fn tokenize_dquote_backslash_before_special_dropped() {
     for (input, expected) in cases {
         let tokens = token::tokenize(input).unwrap();
         assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].0, expected.into());
-        assert!(tokens[0].3);
+        assert_eq!(tokens[0].word, expected.into());
+        assert!(tokens[0].fully_quoted);
     }
 }
 
@@ -2415,8 +2424,8 @@ fn tokenize_dquote_backslash_newline_is_continuation() {
     // `\<newline>` inside double quotes is line continuation: both bytes removed.
     let tokens = token::tokenize(b"\"a\\\nb\"").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"ab".into());
-    assert!(tokens[0].3);
+    assert_eq!(tokens[0].word, c"ab".into());
+    assert!(tokens[0].fully_quoted);
 }
 
 #[test]
@@ -2539,7 +2548,7 @@ fn while_not_starting_with_while_is_a_cmd() {
     assert!(
         !tokens
             .first()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"while"))
+            .is_some_and(|Token { word: t, .. }| t.eq_bytes(b"while"))
     );
 }
 
@@ -2606,7 +2615,7 @@ fn until_not_starting_with_until_is_a_cmd() {
     assert!(
         !tokens
             .first()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"until"))
+            .is_some_and(|Token { word: t, .. }| t.eq_bytes(b"until"))
     );
 }
 
@@ -3593,35 +3602,35 @@ fn case_leading_semi_skipped() {
 fn tokenize_pipe_after_gt_token() {
     let tokens = token::tokenize(b"foo>bar | cmd").unwrap();
     assert_eq!(tokens.len(), 3);
-    assert_eq!(tokens[0].0, c"foo>bar".into());
-    assert_eq!(tokens[1].0, c"|".into());
-    assert_eq!(tokens[2].0, c"cmd".into());
+    assert_eq!(tokens[0].word, c"foo>bar".into());
+    assert_eq!(tokens[1].word, c"|".into());
+    assert_eq!(tokens[2].word, c"cmd".into());
 }
 
 #[test]
 fn tokenize_pipe_position() {
     let tokens = token::tokenize(b"a|b").unwrap();
     assert_eq!(tokens.len(), 3);
-    assert_eq!(tokens[0].0, c"a".into());
-    assert_eq!(tokens[0].1, 0);
-    assert_eq!(tokens[1].0, c"|".into());
-    assert_eq!(tokens[1].1, 1);
-    assert_eq!(tokens[2].0, c"b".into());
-    assert_eq!(tokens[2].1, 2, "post-pipe word starts after the pipe");
-    assert_eq!(tokens[0].2, 1, "pre-pipe token ends at the '|'");
-    assert_eq!(tokens[1].2, 2, "pipe token end");
-    assert_eq!(tokens[2].2, 3, "final token end");
+    assert_eq!(tokens[0].word, c"a".into());
+    assert_eq!(tokens[0].start, 0);
+    assert_eq!(tokens[1].word, c"|".into());
+    assert_eq!(tokens[1].start, 1);
+    assert_eq!(tokens[2].word, c"b".into());
+    assert_eq!(tokens[2].start, 2, "post-pipe word starts after the pipe");
+    assert_eq!(tokens[0].end, 1, "pre-pipe token ends at the '|'");
+    assert_eq!(tokens[1].end, 2, "pipe token end");
+    assert_eq!(tokens[2].end, 3, "final token end");
 }
 
 #[test]
 fn tokenize_caret_pipe_position() {
     let tokens = token::tokenize(b"%>%fd|cmd").unwrap();
     assert_eq!(tokens.len(), 3);
-    assert_eq!(tokens[0].0, c"%>%fd".into());
-    assert_eq!(tokens[1].0, c"|".into());
-    assert_eq!(tokens[1].1, 5);
-    assert_eq!(tokens[2].0, c"cmd".into());
-    assert_eq!(tokens[2].1, 6, "post-pipe word starts after the pipe");
+    assert_eq!(tokens[0].word, c"%>%fd".into());
+    assert_eq!(tokens[1].word, c"|".into());
+    assert_eq!(tokens[1].start, 5);
+    assert_eq!(tokens[2].word, c"cmd".into());
+    assert_eq!(tokens[2].start, 6, "post-pipe word starts after the pipe");
 }
 
 #[test]
@@ -3629,45 +3638,45 @@ fn tokenize_close_paren_position() {
     let tokens = token::tokenize(b"case x in a) echo one;; esac").unwrap();
     let paren_token = tokens
         .iter()
-        .find(|(t, _, _, _, _, _)| t.eq_bytes(b")"))
+        .find(|Token { word: t, .. }| t.eq_bytes(b")"))
         .unwrap();
-    assert_eq!(paren_token.0, c")".into());
-    assert_eq!(paren_token.1, 11);
+    assert_eq!(paren_token.word, c")".into());
+    assert_eq!(paren_token.start, 11);
 }
 
 #[test]
 fn tokenize_comment_shifts_positions() {
     let tokens = token::tokenize(b"hello # comment\nworld").unwrap();
     assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0].0, c"hello".into());
-    assert_eq!(tokens[1].0, c"world".into());
+    assert_eq!(tokens[0].word, c"hello".into());
+    assert_eq!(tokens[1].word, c"world".into());
 }
 
 #[test]
 fn tokenize_comment_no_newline_shifts_positions() {
     let tokens = token::tokenize(b"hello # trailing comment").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"hello".into());
+    assert_eq!(tokens[0].word, c"hello".into());
 }
 
 #[test]
 fn tokenize_comment_with_trailing_token_position() {
     let tokens = token::tokenize(b"a # comment\nb").unwrap();
     assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0].0, c"a".into());
-    assert_eq!(tokens[0].1, 0);
-    assert_eq!(tokens[1].0, c"b".into());
-    assert_eq!(tokens[1].1, 12);
+    assert_eq!(tokens[0].word, c"a".into());
+    assert_eq!(tokens[0].start, 0);
+    assert_eq!(tokens[1].word, c"b".into());
+    assert_eq!(tokens[1].start, 12);
 }
 
 #[test]
 fn tokenize_token_ending_before_comment() {
     let tokens = token::tokenize(b"ab # c").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"ab".into());
-    assert_eq!(tokens[0].1, 0);
+    assert_eq!(tokens[0].word, c"ab".into());
+    assert_eq!(tokens[0].start, 0);
     assert_eq!(
-        tokens[0].2, 2,
+        tokens[0].end, 2,
         "end must be at the end of the word, before the comment"
     );
 }
@@ -3677,8 +3686,8 @@ fn tokenize_hash_mid_word_is_literal() {
     // `#` inside a word is data, not a comment.
     let tokens = token::tokenize(b"ab# c").unwrap();
     assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0].0, c"ab#".into());
-    assert_eq!(tokens[1].0, c"c".into());
+    assert_eq!(tokens[0].word, c"ab#".into());
+    assert_eq!(tokens[1].word, c"c".into());
 }
 
 #[test]
@@ -3687,8 +3696,8 @@ fn tokenize_empty_quote_then_hash_kept() {
     // literal even though the accumulated bytes are empty.
     let tokens = token::tokenize(b"\"\"#x").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"#x".into());
-    assert!(!tokens[0].3, "#x is not fully quoted");
+    assert_eq!(tokens[0].word, c"#x".into());
+    assert!(!tokens[0].fully_quoted, "#x is not fully quoted");
 }
 
 #[test]
@@ -3734,115 +3743,115 @@ fn tokenize_unbalanced_backtick_error_position() {
 fn tokenize_amp_pipe_valid() {
     let tokens = token::tokenize(b"&|").unwrap();
     assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0].0, c"&".into());
-    assert_eq!(tokens[1].0, c"|".into());
+    assert_eq!(tokens[0].word, c"&".into());
+    assert_eq!(tokens[1].word, c"|".into());
 }
 
 #[test]
 fn tokenize_percent_pipe_valid() {
     let tokens = token::tokenize(b"%|").unwrap();
     assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0].0, c"%".into());
-    assert_eq!(tokens[1].0, c"|".into());
+    assert_eq!(tokens[0].word, c"%".into());
+    assert_eq!(tokens[1].word, c"|".into());
 }
 
 #[test]
 fn tokenize_fully_quoted_dollar_at_end() {
     let tokens = token::tokenize(b"printf \"%s\\n\" \"$@\"").unwrap();
     assert_eq!(tokens.len(), 3);
-    assert_eq!(tokens[0].0, c"printf".into());
-    assert!(!tokens[0].3);
-    assert_eq!(tokens[1].0, c"%s\\n".into());
-    assert!(tokens[1].3);
-    assert_eq!(tokens[2].0, c"$@".into());
-    assert!(tokens[2].3);
+    assert_eq!(tokens[0].word, c"printf".into());
+    assert!(!tokens[0].fully_quoted);
+    assert_eq!(tokens[1].word, c"%s\\n".into());
+    assert!(tokens[1].fully_quoted);
+    assert_eq!(tokens[2].word, c"$@".into());
+    assert!(tokens[2].fully_quoted);
 }
 
 #[test]
 fn tokenize_fully_quoted_dollar_at_middle() {
     let tokens = token::tokenize(b"printf \"%s\\n\" \"$@\" extra").unwrap();
     assert_eq!(tokens.len(), 4);
-    assert_eq!(tokens[0].0, c"printf".into());
-    assert!(!tokens[0].3);
-    assert_eq!(tokens[1].0, c"%s\\n".into());
-    assert!(tokens[1].3);
-    assert_eq!(tokens[2].0, c"$@".into());
-    assert!(tokens[2].3);
-    assert_eq!(tokens[3].0, c"extra".into());
-    assert!(!tokens[3].3);
+    assert_eq!(tokens[0].word, c"printf".into());
+    assert!(!tokens[0].fully_quoted);
+    assert_eq!(tokens[1].word, c"%s\\n".into());
+    assert!(tokens[1].fully_quoted);
+    assert_eq!(tokens[2].word, c"$@".into());
+    assert!(tokens[2].fully_quoted);
+    assert_eq!(tokens[3].word, c"extra".into());
+    assert!(!tokens[3].fully_quoted);
 }
 
 #[test]
 fn tokenize_fully_quoted_dollar_star() {
     let tokens = token::tokenize(b"$*").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"$*".into());
-    assert!(!tokens[0].3);
+    assert_eq!(tokens[0].word, c"$*".into());
+    assert!(!tokens[0].fully_quoted);
 }
 
 #[test]
 fn tokenize_fully_quoted_literal() {
     let tokens = token::tokenize(b"\"hello\"").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"hello".into());
-    assert!(tokens[0].3);
+    assert_eq!(tokens[0].word, c"hello".into());
+    assert!(tokens[0].fully_quoted);
 }
 
 #[test]
 fn tokenize_unquoted_prefix_not_fully_quoted() {
     let tokens = token::tokenize(b"foo\"bar\"").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"foobar".into());
-    assert!(!tokens[0].3);
+    assert_eq!(tokens[0].word, c"foobar".into());
+    assert!(!tokens[0].fully_quoted);
 }
 
 #[test]
 fn tokenize_mixed_quoted_unquoted() {
     let tokens = token::tokenize(b"\"$@\" \"$*\" literal").unwrap();
     assert_eq!(tokens.len(), 3);
-    assert_eq!(tokens[0].0, c"$@".into());
-    assert!(tokens[0].3);
-    assert_eq!(tokens[1].0, c"$*".into());
-    assert!(tokens[1].3);
-    assert_eq!(tokens[2].0, c"literal".into());
-    assert!(!tokens[2].3);
+    assert_eq!(tokens[0].word, c"$@".into());
+    assert!(tokens[0].fully_quoted);
+    assert_eq!(tokens[1].word, c"$*".into());
+    assert!(tokens[1].fully_quoted);
+    assert_eq!(tokens[2].word, c"literal".into());
+    assert!(!tokens[2].fully_quoted);
 }
 
 #[test]
 fn tokenize_fully_quoted_with_separator() {
     let tokens = token::tokenize(b"\"$@\";").unwrap();
     assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0].0, c"$@".into());
-    assert!(tokens[0].3);
-    assert_eq!(tokens[1].0, c";".into());
-    assert!(!tokens[1].3);
+    assert_eq!(tokens[0].word, c"$@".into());
+    assert!(tokens[0].fully_quoted);
+    assert_eq!(tokens[1].word, c";".into());
+    assert!(!tokens[1].fully_quoted);
 }
 
 #[test]
 fn tokenize_fully_quoted_with_pipe() {
     let tokens = token::tokenize(b"\"$@\" | cat").unwrap();
     assert_eq!(tokens.len(), 3);
-    assert_eq!(tokens[0].0, c"$@".into());
-    assert!(tokens[0].3);
-    assert_eq!(tokens[1].0, c"|".into());
-    assert!(!tokens[1].3);
-    assert_eq!(tokens[2].0, c"cat".into());
-    assert!(!tokens[2].3);
+    assert_eq!(tokens[0].word, c"$@".into());
+    assert!(tokens[0].fully_quoted);
+    assert_eq!(tokens[1].word, c"|".into());
+    assert!(!tokens[1].fully_quoted);
+    assert_eq!(tokens[2].word, c"cat".into());
+    assert!(!tokens[2].fully_quoted);
 }
 
 #[test]
 fn tokenize_adjacent_quotes_still_fully_quoted() {
     let tokens = token::tokenize(b"\"a\"\"b\"").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"ab".into());
-    assert!(tokens[0].3);
+    assert_eq!(tokens[0].word, c"ab".into());
+    assert!(tokens[0].fully_quoted);
 }
 
 #[test]
 fn tokenize_dollar_paren_not_fully_quoted() {
     let tokens = token::tokenize(b"\"x\"$(y)").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert!(!tokens[0].3);
+    assert!(!tokens[0].fully_quoted);
 }
 
 #[test]
@@ -3850,29 +3859,29 @@ fn tokenize_empty_adjacent_quotes() {
     // Adjacent empty quotes are one quoted empty word, not nothing.
     let tokens = token::tokenize(b"\"\"\"\"").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert!(tokens[0].0.is_empty());
-    assert!(tokens[0].3);
-    assert!(tokens[0].4.is_empty());
+    assert!(tokens[0].word.is_empty());
+    assert!(tokens[0].fully_quoted);
+    assert!(tokens[0].mask.is_empty());
 }
 
 #[test]
 fn tokenize_empty_quotes_are_one_empty_token() {
     let tokens = token::tokenize(b"\"\"").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert!(tokens[0].0.is_empty());
-    assert!(tokens[0].3, "a bare `\"\"` word is fully quoted");
-    assert!(tokens[0].4.is_empty());
+    assert!(tokens[0].word.is_empty());
+    assert!(tokens[0].fully_quoted, "a bare `\"\"` word is fully quoted");
+    assert!(tokens[0].mask.is_empty());
 }
 
 #[test]
 fn tokenize_empty_quote_then_word() {
     let tokens = token::tokenize(b"\"\" x").unwrap();
     assert_eq!(tokens.len(), 2);
-    assert!(tokens[0].0.is_empty());
-    assert!(tokens[0].3);
-    assert!(tokens[0].4.is_empty());
-    assert_eq!(tokens[1].0, c"x".into());
-    assert_eq!(tokens[1].4, vec![Unquoted]);
+    assert!(tokens[0].word.is_empty());
+    assert!(tokens[0].fully_quoted);
+    assert!(tokens[0].mask.is_empty());
+    assert_eq!(tokens[1].word, c"x".into());
+    assert_eq!(tokens[1].mask, vec![Unquoted]);
 }
 
 #[test]
@@ -3880,11 +3889,11 @@ fn tokenize_empty_quote_before_separators() {
     // The flag resets at separators, so a later unquoted word is unaffected.
     let tokens = token::tokenize(b"\"\"; x").unwrap();
     assert_eq!(tokens.len(), 3);
-    assert!(tokens[0].0.is_empty());
-    assert!(tokens[0].3);
-    assert_eq!(tokens[1].0, c";".into());
-    assert_eq!(tokens[2].0, c"x".into());
-    assert!(!tokens[2].3);
+    assert!(tokens[0].word.is_empty());
+    assert!(tokens[0].fully_quoted);
+    assert_eq!(tokens[1].word, c";".into());
+    assert_eq!(tokens[2].word, c"x".into());
+    assert!(!tokens[2].fully_quoted);
 }
 
 #[test]
@@ -3892,8 +3901,8 @@ fn tokenize_dollar_paren_alone_stays_one_token() {
     // Unchanged: a `$()` word is literal text at tokenization time.
     let tokens = token::tokenize(b"$(true)").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"$(true)".into());
-    assert!(!tokens[0].3);
+    assert_eq!(tokens[0].word, c"$(true)".into());
+    assert!(!tokens[0].fully_quoted);
 }
 
 #[test]
@@ -3901,9 +3910,9 @@ fn tokenize_quoted_dollar_paren_is_all_true_mask() {
     // Unchanged: the quotes protect every byte, mask is all-true.
     let tokens = token::tokenize(b"\"$(true)\"").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0, c"$(true)".into());
-    assert!(tokens[0].3);
-    assert_eq!(tokens[0].4, runs(&[(true, 7)]));
+    assert_eq!(tokens[0].word, c"$(true)".into());
+    assert!(tokens[0].fully_quoted);
+    assert_eq!(tokens[0].mask, runs(&[(true, 7)]));
 }
 
 #[test]
@@ -3969,25 +3978,25 @@ fn tokenize_mixed_quotes_mark_quoted_bytes() {
     // keeps them — those bytes must survive IFS splitting intact.
     let tokens = token::tokenize(b"x\"a b\"c").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0.as_bytes().unwrap(), b"xa bc");
-    assert!(!tokens[0].3);
-    assert_eq!(tokens[0].4, runs(&[(false, 1), (true, 3), (false, 1)]));
+    assert_eq!(tokens[0].word.as_bytes().unwrap(), b"xa bc");
+    assert!(!tokens[0].fully_quoted);
+    assert_eq!(tokens[0].mask, runs(&[(false, 1), (true, 3), (false, 1)]));
 }
 
 #[test]
 fn tokenize_fully_quoted_word_has_all_true_mask() {
     let tokens = token::tokenize(b"\"a b\"").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert!(tokens[0].3);
-    assert_eq!(tokens[0].4, runs(&[(true, 3)]));
+    assert!(tokens[0].fully_quoted);
+    assert_eq!(tokens[0].mask, runs(&[(true, 3)]));
 }
 
 #[test]
 fn tokenize_unquoted_word_has_all_false_mask() {
     let tokens = token::tokenize(b"abc").unwrap();
     assert_eq!(tokens.len(), 1);
-    assert!(!tokens[0].3);
-    assert_eq!(tokens[0].4, vec![Unquoted; 3]);
+    assert!(!tokens[0].fully_quoted);
+    assert_eq!(tokens[0].mask, vec![Unquoted; 3]);
 }
 
 #[test]
@@ -4130,8 +4139,22 @@ fn parse_capture_malformed_index_is_plain_name() {
 fn find_preceded_by_semi_start_zero_no_match() {
     let line = b"echo hi";
     let tokens = [
-        (c"echo".into(), 0, 4, false, vec![], vec![]),
-        (c"hi".into(), 5, 7, false, vec![], vec![]),
+        Token {
+            word: c"echo".into(),
+            start: 0,
+            end: 4,
+            fully_quoted: false,
+            mask: vec![],
+            spans: vec![],
+        },
+        Token {
+            word: c"hi".into(),
+            start: 5,
+            end: 7,
+            fully_quoted: false,
+            mask: vec![],
+            spans: vec![],
+        },
     ];
     assert_eq!(
         super::semi::find_preceded_by(&tokens, 0, b"echo", line, super::semi::Term::Semi),
@@ -4143,10 +4166,38 @@ fn find_preceded_by_semi_start_zero_no_match() {
 fn find_preceded_by_semi_skips_to_start() {
     let line = b";done;done";
     let tokens = [
-        (c";".into(), 0, 1, false, vec![], vec![]),
-        (c"done".into(), 1, 5, false, vec![], vec![]),
-        (c";".into(), 6, 7, false, vec![], vec![]),
-        (c"done".into(), 7, 11, false, vec![], vec![]),
+        Token {
+            word: c";".into(),
+            start: 0,
+            end: 1,
+            fully_quoted: false,
+            mask: vec![],
+            spans: vec![],
+        },
+        Token {
+            word: c"done".into(),
+            start: 1,
+            end: 5,
+            fully_quoted: false,
+            mask: vec![],
+            spans: vec![],
+        },
+        Token {
+            word: c";".into(),
+            start: 6,
+            end: 7,
+            fully_quoted: false,
+            mask: vec![],
+            spans: vec![],
+        },
+        Token {
+            word: c"done".into(),
+            start: 7,
+            end: 11,
+            fully_quoted: false,
+            mask: vec![],
+            spans: vec![],
+        },
     ];
     assert_eq!(
         super::semi::find_preceded_by(&tokens, 2, b"done", line, super::semi::Term::Semi),
@@ -4455,7 +4506,7 @@ fn test_token_mask_is_parallel_to_the_word() {
         "%fd <%q \"a\\$b\" $x*y",
     ] {
         let tokens = token::tokenize_statement(line.as_bytes()).unwrap();
-        for (word, _, _, _, mask, _spans) in &tokens {
+        for Token { word, mask, .. } in &tokens {
             assert_eq!(
                 mask.len(),
                 word.len(),

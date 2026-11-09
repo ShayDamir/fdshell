@@ -269,7 +269,7 @@ fn layout_substitution_closing_paren_keeps_word() {
     let tokens = tokenize_statement(line).unwrap();
     assert_eq!(tokens.len(), 6);
     assert!(
-        tokens[1].0.eq_bytes(b"$(x)<<EOF"),
+        tokens[1].word.eq_bytes(b"$(x)<<EOF"),
         "the token must stay whole"
     );
     assert!(layout(line, &tokens).unwrap().is_empty());

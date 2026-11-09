@@ -40,7 +40,7 @@ pub(crate) fn tokens_to_case(
     ensure!(
         tokens
             .first()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"case")),
+            .is_some_and(|Token { word: t, .. }| t.eq_bytes(b"case")),
         ParseError::MalformedCaseBlock
     );
 

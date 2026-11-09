@@ -2,6 +2,7 @@
 use super::try_join_masked;
 use crate::mask::MaskBit;
 use crate::mask::MaskBit::Unquoted;
+use crate::parse::Token;
 use crate::parse::token::tokenize;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -41,7 +42,7 @@ fn case_word_join_keeps_the_zero_byte_span() {
     let tokens = tokenize(b"case ~\"\" in x) ;; esac").unwrap();
     let in_idx = tokens
         .iter()
-        .position(|(t, _, _, _, _, _)| t.eq_bytes(b"in"))
+        .position(|Token { word: t, .. }| t.eq_bytes(b"in"))
         .unwrap();
     let (word, word_mask, word_span) = try_join_masked(tokens.get(1..in_idx).unwrap());
     assert_eq!(word, ShortCStr::from(c"~"));
@@ -52,7 +53,7 @@ fn case_word_join_keeps_the_zero_byte_span() {
     let tokens = tokenize(b"case ~\"\" x\"\" in x) ;; esac").unwrap();
     let in_idx = tokens
         .iter()
-        .position(|(t, _, _, _, _, _)| t.eq_bytes(b"in"))
+        .position(|Token { word: t, .. }| t.eq_bytes(b"in"))
         .unwrap();
     let (word, word_mask, word_span) = try_join_masked(tokens.get(1..in_idx).unwrap());
     assert_eq!(word, ShortCStr::from(c"~ x"));
@@ -71,7 +72,7 @@ fn body_end_keeps_the_amp_and_drops_the_semi() {
         let tokens = tokenize(line).unwrap();
         let idx = tokens
             .iter()
-            .rposition(|(t, _, _, _, _, _)| t.eq_bytes(closer))
+            .rposition(|Token { word: t, .. }| t.eq_bytes(closer))
             .unwrap();
         super::body_end(&tokens, line, idx)
     };

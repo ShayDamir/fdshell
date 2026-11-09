@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::for_block::/)'
+
 //! The `(( … ))` region of the arithmetic `for`: its raw-byte span and the
 //! three clauses cut at its top-level `;` (rules 2 and 3 of `arith.rs`).
 
@@ -26,7 +28,7 @@ pub(crate) struct Region {
 /// `for` keyword word is not followed by `((` (the gap is whitespace-only:
 /// `for ((`, `for\t((`, `for  ((`; no gap inside the pair).
 pub(crate) fn open_at(raw: &[Token], line: &[u8]) -> Option<usize> {
-    let after = raw.first()?.2;
+    let after = raw.first()?.end;
     let open = after
         + line
             .get(after..)?

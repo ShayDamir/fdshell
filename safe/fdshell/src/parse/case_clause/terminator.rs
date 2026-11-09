@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C case -- -E 'test(/^parse::case_clause::/) | binary(case)'
+
 //! The clause terminators of the `case` walk (task #420): `;;` stops, `;&` runs
 //! the next clause, `;;&` tests the next clause's patterns against the same word.
 //! The scan of `extract.rs` and the kind a clause carries are the two halves of
@@ -75,7 +77,7 @@ pub(crate) fn tokens(kind: Terminator) -> usize {
 /// The glue test of a terminator pair: `head`'s span ends where `tail`'s begins
 /// (the pair rule `h.2 == t.1`, pinned by `tests/glued_pair.rs` and the #355 pins).
 pub(crate) fn glued(head: &Token, tail: &Token) -> bool {
-    head.2 == tail.1
+    head.end == tail.start
 }
 
 #[cfg(test)]

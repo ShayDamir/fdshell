@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use super::{operator_word, span_word};
+use crate::parse::Token;
 use crate::parse::token::tokenize;
 use alloc::vec::Vec;
 use sys::ShortCStr;
@@ -100,14 +101,14 @@ fn keyword_word_gates_every_quote_spelling() {
         (b"\"i\"f x".as_slice(), 4, false),
         (b" echo \"a\" if".as_slice(), 12, true),
     ] {
-        let tok = (
-            ShortCStr::from(c"if"),
-            0,
+        let tok = Token {
+            word: ShortCStr::from(c"if"),
+            start: 0,
             end,
-            false,
-            Vec::new(),
-            Vec::new(),
-        );
+            fully_quoted: false,
+            mask: Vec::new(),
+            spans: Vec::new(),
+        };
         assert_eq!(
             super::keyword_word(&tok, line, b"if"),
             want,
@@ -115,7 +116,14 @@ fn keyword_word_gates_every_quote_spelling() {
         );
     }
     // The text must match the keyword too: the gate is not a quoting test alone.
-    let tok = (ShortCStr::from(c"fi"), 0, 2, false, Vec::new(), Vec::new());
+    let tok = Token {
+        word: ShortCStr::from(c"fi"),
+        start: 0,
+        end: 2,
+        fully_quoted: false,
+        mask: Vec::new(),
+        spans: Vec::new(),
+    };
     assert!(!super::keyword_word(&tok, b"fi|", b"if"));
 }
 
@@ -152,7 +160,7 @@ fn span_word_gates_every_separator_spelling() {
     assert_eq!(glued.len(), 1);
     assert!(!span_word(glued.first().unwrap(), b";"));
     // The escape pair stays in the text, so no arm sees a separator.
-    assert_eq!(at(b"a \\; b", 1).0.as_bytes().unwrap(), b"\\;");
+    assert_eq!(at(b"a \\; b", 1).word.as_bytes().unwrap(), b"\\;");
     assert!(!span_word(&at(b"a \\; b", 1), b";"));
     assert!(!span_word(&at(b"a \\) b", 1), b")"));
     assert!(!span_word(&at(b"a \\| b", 1), b"|"));
@@ -215,7 +223,14 @@ fn operator_word_reads_the_gate_and_the_owners_set() {
     // `|` tokens, so no real token ever arrives with this text — the row is the
     // byte-level set's spelling (task #396), and a set row nobody reaches is dead
     // data. The span equals the text, so the gate passes and the row answers.
-    let tok = (ShortCStr::from(c"||"), 0, 2, false, Vec::new(), Vec::new());
+    let tok = Token {
+        word: ShortCStr::from(c"||"),
+        start: 0,
+        end: 2,
+        fully_quoted: false,
+        mask: Vec::new(),
+        spans: Vec::new(),
+    };
     assert_eq!(
         operator_word(&tok, b"a || b", &owns_nothing),
         Some(b"||".as_slice())

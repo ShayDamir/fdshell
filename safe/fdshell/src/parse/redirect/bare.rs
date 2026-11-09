@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C redirect -- -E 'test(/^parse::/) | binary(redirect)'
+
 //! Bare redirect operator tokens: `>`, `>>`, `<`, `<>`, `>|` (with an optional
 //! numeric fd prefix) as standalone words. Each takes the next token as its
 //! path operand — the token-level counterpart of the bare `<<`/`<<<` forms.
@@ -39,7 +41,7 @@ pub(super) fn parse_bare(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    let Some((t, _start, _end, _fq, mask, _spans)) = tokens.get(i) else {
+    let Some(Token { word: t, mask, .. }) = tokens.get(i) else {
         return Ok(None);
     };
     let Some(op) = operator_suffix(t) else {
@@ -62,7 +64,9 @@ pub(super) fn parse_bare(
     let Some(operand) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
-    let (word, _os, _oe, _ofq, omask, _ospans) = operand;
+    let Token {
+        word, mask: omask, ..
+    } = operand;
     // The operand must be a plain word: the shared bare-operand guard
     // (`scan::heredoc::op::invalid_delimiter`, gate = the operand's own quote
     // mask), also used by the bare `<<` delimiter and the bare

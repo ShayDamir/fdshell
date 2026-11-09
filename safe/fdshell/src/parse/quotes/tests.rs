@@ -15,16 +15,16 @@ fn toks(line: &[u8]) -> Vec<crate::parse::Token> {
 }
 
 fn mask_of(line: &[u8]) -> Vec<MaskBit> {
-    toks(line)[0].4.clone()
+    toks(line)[0].mask.clone()
 }
 
 fn text_of(line: &[u8]) -> Vec<u8> {
-    toks(line)[0].0.as_bytes().unwrap().to_vec()
+    toks(line)[0].word.as_bytes().unwrap().to_vec()
 }
 
 fn span_of(line: &[u8]) -> (usize, usize) {
     let t = &toks(line)[0];
-    (t.1, t.2)
+    (t.start, t.end)
 }
 
 /// The quote state and mask length the region readers must leave behind: the
@@ -41,12 +41,12 @@ fn quoted_region_keeps_the_quote_open_and_the_mask_parallel() {
         assert_eq!(tokens.len(), 1, "{line:?}");
         let t = tokens.first().unwrap();
         assert_eq!(
-            t.4.len(),
-            t.0.as_bytes().unwrap().len(),
+            t.mask.len(),
+            t.word.as_bytes().unwrap().len(),
             "{line:?}: one mask bit per byte"
         );
         assert!(
-            t.4.iter().copied().all(MaskBit::quoted),
+            t.mask.iter().copied().all(MaskBit::quoted),
             "{line:?}: the region is quoted"
         );
     }
@@ -58,12 +58,12 @@ fn quoted_region_keeps_the_quote_open_and_the_mask_parallel() {
 fn quoted_nested_dollar_paren_is_one_word_with_a_quoted_region() {
     let tokens = toks(b"a\"$(echo \"x y\")\"");
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0.as_bytes().unwrap(), b"a$(echo \"x y\")");
-    assert_eq!((tokens[0].1, tokens[0].2), (0, 16));
-    assert!(!tokens[0].3, "the word starts unquoted");
+    assert_eq!(tokens[0].word.as_bytes().unwrap(), b"a$(echo \"x y\")");
+    assert_eq!((tokens[0].start, tokens[0].end), (0, 16));
+    assert!(!tokens[0].fully_quoted, "the word starts unquoted");
     let mut mask = vec![Unquoted, QuotedStart];
     mask.extend(vec![Quoted; 12]);
-    assert_eq!(tokens[0].4, mask);
+    assert_eq!(tokens[0].mask, mask);
 }
 
 // Row 3: a fully quoted `$( … )` keeps `fq` and the all-true mask, so the
@@ -72,10 +72,10 @@ fn quoted_nested_dollar_paren_is_one_word_with_a_quoted_region() {
 fn quoted_dollar_paren_with_inner_quotes_is_fully_quoted() {
     let tokens = toks(b"\"$(printf \"a b\")\"");
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0.as_bytes().unwrap(), b"$(printf \"a b\")");
-    assert_eq!((tokens[0].1, tokens[0].2), (0, 17));
-    assert!(tokens[0].3);
-    assert_eq!(tokens[0].4, runs(&[(true, 15)]));
+    assert_eq!(tokens[0].word.as_bytes().unwrap(), b"$(printf \"a b\")");
+    assert_eq!((tokens[0].start, tokens[0].end), (0, 17));
+    assert!(tokens[0].fully_quoted);
+    assert_eq!(tokens[0].mask, runs(&[(true, 15)]));
 }
 
 // Row 10/11: the `${ … }` body's quotes are markers, so they are dropped from
@@ -85,12 +85,14 @@ fn quoted_dollar_paren_with_inner_quotes_is_fully_quoted() {
 fn quoted_brace_region_drops_its_inner_quotes() {
     let tokens = toks(b"\"${u:-\"z w\"}\"");
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0.as_bytes().unwrap(), b"${u:-z w}");
-    assert_eq!((tokens[0].1, tokens[0].2), (0, 13));
-    assert!(tokens[0].3);
-    assert_eq!(tokens[0].4, runs(&[(true, 9)]));
+    assert_eq!(tokens[0].word.as_bytes().unwrap(), b"${u:-z w}");
+    assert_eq!((tokens[0].start, tokens[0].end), (0, 13));
+    assert!(tokens[0].fully_quoted);
+    assert_eq!(tokens[0].mask, runs(&[(true, 9)]));
     assert!(
-        tokens[0].0.is_shorter_than_span(tokens[0].1, tokens[0].2),
+        tokens[0]
+            .word
+            .is_shorter_than_span(tokens[0].start, tokens[0].end),
         "the span holds the 4 dropped quote bytes"
     );
 }
@@ -120,7 +122,7 @@ fn separators_inside_a_quoted_region_stay_in_the_word() {
     ] {
         let tokens = toks(line);
         assert_eq!(tokens.len(), 1, "{line:?}");
-        assert!(tokens[0].3, "{line:?} is fully quoted");
+        assert!(tokens[0].fully_quoted, "{line:?} is fully quoted");
     }
 }
 
@@ -146,9 +148,9 @@ fn nested_quoted_regions_are_one_word() {
 fn quoted_region_without_inner_quotes_keeps_the_all_true_mask() {
     let tokens = toks(b"\"$(true)\"");
     assert_eq!(tokens.len(), 1);
-    assert_eq!(tokens[0].0.as_bytes().unwrap(), b"$(true)");
-    assert!(tokens[0].3);
-    assert_eq!(tokens[0].4, runs(&[(true, 7)]));
+    assert_eq!(tokens[0].word.as_bytes().unwrap(), b"$(true)");
+    assert!(tokens[0].fully_quoted);
+    assert_eq!(tokens[0].mask, runs(&[(true, 7)]));
 }
 
 // An unterminated `$( … )` keeps the existing `unexpected eof` report, with
@@ -214,14 +216,17 @@ fn region_after_a_closed_quote_keeps_the_unquoted_mask() {
         1,
         "the empty quoted word and the region are one word"
     );
-    assert_eq!(tokens[0].0.as_bytes().unwrap(), b"$(echo \"a b\")");
-    assert_eq!((tokens[0].1, tokens[0].2), (0, 15));
+    assert_eq!(tokens[0].word.as_bytes().unwrap(), b"$(echo \"a b\")");
+    assert_eq!((tokens[0].start, tokens[0].end), (0, 15));
     assert_eq!(
-        tokens[0].4,
+        tokens[0].mask,
         runs(&[(false, 13)]),
         "no byte of the region is quoted"
     );
-    assert!(!tokens[0].3, "the quote closed before the region");
+    assert!(
+        !tokens[0].fully_quoted,
+        "the quote closed before the region"
+    );
 }
 
 // Row 15 + brace expansion: the token spans must stay exact for the pre-parse
@@ -231,8 +236,8 @@ fn quoted_regions_keep_exact_spans_for_the_rewriters() {
     assert_eq!(span_of(b"\"$(echo {a,b})\""), (0, 15));
     let tokens = toks(b"echo \"$(echo \"a b\")\" x");
     assert_eq!(tokens.len(), 3);
-    assert_eq!((tokens[1].1, tokens[1].2), (5, 20));
-    assert_eq!((tokens[2].1, tokens[2].2), (21, 22));
+    assert_eq!((tokens[1].start, tokens[1].end), (5, 20));
+    assert_eq!((tokens[2].start, tokens[2].end), (21, 22));
 }
 
 // `$( … )` bodies are kept verbatim — quotes and escapes included — because
@@ -260,8 +265,8 @@ fn region_inside_a_longer_word_keeps_the_mask_parallel() {
     ] {
         let tokens = toks(line);
         assert_eq!(tokens.len(), 1, "{line:?}");
-        let st = tokens[0].0.as_bytes().unwrap();
-        assert_eq!(tokens[0].4.len(), st.len(), "{line:?}");
+        let st = tokens[0].word.as_bytes().unwrap();
+        assert_eq!(tokens[0].mask.len(), st.len(), "{line:?}");
     }
 }
 
@@ -301,7 +306,7 @@ fn separators_inside_a_quoted_region_stay_word_data() {
     fn words(line: &[u8]) -> Vec<Vec<u8>> {
         toks(line)
             .iter()
-            .map(|t| t.0.as_bytes().unwrap().to_vec())
+            .map(|t| t.word.as_bytes().unwrap().to_vec())
             .collect()
     }
     fn want(words: &[&[u8]]) -> Vec<Vec<u8>> {

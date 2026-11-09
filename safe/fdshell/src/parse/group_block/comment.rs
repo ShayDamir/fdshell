@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C group -- -E 'test(/^parse::group_block::/) | binary(group)'
+
 //! The group arm's `;`-before-`}` predecessor: extracted for the line budget.
 //!
 //! Its base is the shared closer-predecessor set ([`is_closer_predecessor`]: the
@@ -22,10 +24,16 @@ use crate::scan::{Boundary, ScanState, boundary};
 /// starts fresh and the `#` it finds is a run's first byte after whitespace: exactly the
 /// word-start rule [`boundary`] applies, so no byte compare is needed here.
 pub(super) fn terminates_closer(tokens: &[Token], line: &[u8], idx: usize) -> bool {
-    let Some(&(_, prev_end, _, _, _, _)) = tokens.get(idx) else {
+    let Some(&Token {
+        start: prev_end, ..
+    }) = tokens.get(idx)
+    else {
         return false;
     };
-    let Some(&(_, close_start, _, _, _, _)) = tokens.get(idx + 1) else {
+    let Some(&Token {
+        start: close_start, ..
+    }) = tokens.get(idx + 1)
+    else {
         return false;
     };
     is_closer_predecessor(tokens, line, idx) || comment_in_gap(line, prev_end, close_start)

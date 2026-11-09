@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C case -- -E 'test(/^parse::case_clause::/) | binary(case)'
+
 //! The `|`-separated pattern walk of one `case` clause: the pattern list, up to
 //! and including the `)` that ends it (POSIX 2.9.4.3's `( pattern-list )`).
 
@@ -66,7 +68,7 @@ pub(super) fn collect_patterns(
         *pos += 1;
     }
     while *pos <= esac_idx {
-        let Some(tok @ (_t, start, end, _fq, _mask, _spans)) = tokens.get(*pos) else {
+        let Some(tok @ Token { start, end, .. }) = tokens.get(*pos) else {
             break;
         };
         if span_word(tok, b")") {

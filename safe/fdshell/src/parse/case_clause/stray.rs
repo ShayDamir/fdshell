@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C case -- -E 'test(/^parse::case_clause::/) | binary(case)'
+
 //! The stray parens inside a `case` arm: bash reads an arm as a command list,
 //! so the `)` of the next clause's pattern list is a token that list cannot
 //! take when the `;;` before it is missing (task #300 — a `)` written in
@@ -94,7 +96,13 @@ pub(crate) fn verdict(
         .enumerate()
         .take(limit.unwrap_or(region.len()))
     {
-        let (word, start, end, _fq, mask, _spans) = tok;
+        let Token {
+            word,
+            start,
+            end,
+            mask,
+            ..
+        } = tok;
         let Ok(bytes) = word.as_bytes() else {
             continue;
         };

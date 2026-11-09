@@ -7,6 +7,7 @@
 #![allow(clippy::unwrap_used)]
 use super::guard;
 use crate::error::cmd::CmdError;
+use crate::parse::Token;
 use crate::parse::token::tokenize_statement;
 use alloc::format;
 use alloc::string::String;
@@ -15,7 +16,7 @@ use error_stack::Report;
 /// Run the guard on token `i` of `line`, with the token's raw span.
 fn guard_line(line: &str, i: usize) -> Result<(), Report<CmdError>> {
     let tokens = tokenize_statement(line.as_bytes()).unwrap();
-    let (_t, start, end, _fq, _mask, _spans) = tokens.get(i).unwrap();
+    let Token { start, end, .. } = tokens.get(i).unwrap();
     let span = line.as_bytes().get(*start..*end).unwrap();
     guard(&tokens, i, span)
 }

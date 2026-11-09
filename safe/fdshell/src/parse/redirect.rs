@@ -111,7 +111,7 @@ pub fn parse_redirect(
     let Some(token) = tokens.get(i) else {
         return Ok(None);
     };
-    let (t, _start, _end, _fq, _mask, _spans) = token;
+    let Token { word: t, .. } = token;
     if bare::is_bare(t) {
         return bare::parse_bare(tokens, i).map(|def| def.map(|d| (d, 1)));
     }

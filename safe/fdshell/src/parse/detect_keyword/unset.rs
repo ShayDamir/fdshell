@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::detect_keyword::/)'
+
 //! `unset`'s operand list (task #290): every word after the keyword is a name.
 //!
 //! A leading `%` selects the fd namespace (`%name`, and the array-entry form
@@ -18,7 +20,7 @@ pub(crate) fn detect(tokens: &[Token]) -> ParsedLine {
     let targets = tokens
         .iter()
         .skip(1)
-        .map(|token| target(&token.0))
+        .map(|token| target(&token.word))
         .collect();
     ParsedLine::Unset(targets)
 }

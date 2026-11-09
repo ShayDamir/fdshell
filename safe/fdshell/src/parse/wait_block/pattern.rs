@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C wait -- -E 'test(/^parse::wait_block::/) | binary(wait)'
+
 use super::fdref::parse_fdref;
 use super::{FdRef, WaitPattern};
 use crate::capture::Capture;
@@ -12,7 +14,7 @@ pub(super) fn parse_pattern(
     start: sys::Position,
 ) -> Result<(WaitPattern, Vec<Capture>), Report<ParseError>> {
     let (kw, rest) = match tokens.first() {
-        Some((kw, _, _, _, _, _)) => (kw, rest_from(tokens, 1)?),
+        Some(Token { word: kw, .. }) => (kw, rest_from(tokens, 1)?),
         None => bail!(ParseError::WaitEmptyPattern),
     };
     if let Some(make) = wait_kind(kw) {
@@ -46,7 +48,7 @@ fn arm(
     start: sys::Position,
 ) -> Result<(WaitPattern, Vec<Capture>), Report<ParseError>> {
     let (fd_tok, caps) = match rest.first() {
-        Some((fd, _, _, _, _, _)) => (fd, rest_from(rest, 1)?),
+        Some(Token { word: fd, .. }) => (fd, rest_from(rest, 1)?),
         None => bail!(ParseError::WaitMissingFd),
     };
     let ref_ = parse_fdref(fd_tok)?;
@@ -57,7 +59,7 @@ fn arm(
 fn after(rest: &[Token]) -> Result<(WaitPattern, Vec<Capture>), Report<ParseError>> {
     let ms_tok = rest
         .first()
-        .map(|t| &t.0)
+        .map(|t| &t.word)
         .ok_or(ParseError::WaitMissingTimeout)?;
     let ms = ms_tok
         .parse::<usize>()
@@ -71,7 +73,7 @@ fn parse_captures(
     start: sys::Position,
 ) -> Result<Vec<Capture>, Report<ParseError>> {
     let mut out = Vec::new();
-    for (t, _, _, _, _, _) in toks {
+    for Token { word: t, .. } in toks {
         match crate::parse::capture::parse_capture(t, start)? {
             Some(c) => out.push(c),
             None => bail!(ParseError::WaitUnexpectedToken),

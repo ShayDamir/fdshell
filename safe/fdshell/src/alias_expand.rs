@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C alias -- -E 'test(/^alias_expand::/) | binary(alias)'
+
 mod expand_at;
 
 use crate::error::cmd::CmdError;
@@ -40,13 +42,13 @@ fn command_positions<'a>(
 ) -> alloc::vec::Vec<(&'a ShortCStr, &'a usize, &'a usize, &'a bool)> {
     let mut out = alloc::vec::Vec::new();
     if let Some(first) = tokens.first() {
-        out.push((&first.0, &first.1, &first.2, &first.3));
+        out.push((&first.word, &first.start, &first.end, &first.fully_quoted));
     }
-    for (i, (_t, start, end, _fq, _mask, _spans)) in tokens.iter().enumerate() {
+    for (i, Token { start, end, .. }) in tokens.iter().enumerate() {
         if pipe_token_span(line, *start, *end)
             && let Some(n) = tokens.get(i + 1)
         {
-            out.push((&n.0, &n.1, &n.2, &n.3));
+            out.push((&n.word, &n.start, &n.end, &n.fully_quoted));
         }
     }
     out

@@ -49,7 +49,12 @@ pub(crate) fn word_place(place: Place) -> Place {
 /// [`super::after`] trims it, because a quoted `" ; "` word carries its spaces in
 /// the text.
 pub(crate) fn separator_data(tok: &Token) -> bool {
-    let (t, start, end, _fq, _mask, _spans) = tok;
+    let Token {
+        word: t,
+        start,
+        end,
+        ..
+    } = tok;
     t.as_bytes()
         .is_ok_and(|w| separator_shape(w.trim_ascii()) && t.is_shorter_than_span(*start, *end))
 }

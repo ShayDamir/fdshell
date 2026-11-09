@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::/)'
+
 //! The statement parse chain: from one line's bytes to a `ParsedLine`.
 //!
 //! The order of the five detection arms is the contract, not an implementation
@@ -48,5 +50,5 @@ pub(crate) fn parse_statement(
 /// True when a raw token covers a pipe byte, i.e. the statement is a pipeline.
 fn has_pipe(raw: &[Token], line: &[u8]) -> bool {
     raw.iter()
-        .any(|(_t, start, end, _fq, _mask, _spans)| pipe_token_span(line, *start, *end))
+        .any(|Token { start, end, .. }| pipe_token_span(line, *start, *end))
 }

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C semi_semi -- -E 'test(/^parse::semi::/) | binary(semi_semi)'
+
 //! The closing-keyword search of `parse/semi.rs`, gated by the shared
 //! command-position rule (task #236) and the `case`/`for` word-list rule (task
 //! #273, [`List`]); the word rules it reads live in [`word`], and the walk they
@@ -50,7 +52,7 @@ pub(crate) fn closing_keyword_index(tokens: &[Token], line: &[u8]) -> Option<usi
 fn opened_closer(tokens: &[Token], line: &[u8]) -> Closer {
     tokens
         .first()
-        .and_then(|(t, _, end, _, _, _)| {
+        .and_then(|Token { word: t, end, .. }| {
             t.as_bytes()
                 .ok()
                 .and_then(|word| keyword_kind(word, line, *end))

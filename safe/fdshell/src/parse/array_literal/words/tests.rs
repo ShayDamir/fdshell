@@ -15,7 +15,14 @@ fn s(b: &[u8]) -> ShortCStr {
 /// already consumed) and a zero-byte span list — the shape the tokenizer hands
 /// the arm.
 fn token(word: &[u8], mask: Vec<MaskBit>, spans: Vec<usize>) -> Token {
-    (s(word), 0, word.len(), false, mask, spans)
+    Token {
+        word: s(word),
+        start: 0,
+        end: word.len(),
+        fully_quoted: false,
+        mask,
+        spans,
+    }
 }
 
 fn mask(bits: &[bool]) -> Vec<MaskBit> {

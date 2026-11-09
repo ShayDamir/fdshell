@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C redirect -- -E 'test(/^parse::/) | binary(redirect)'
+
 //! The bare `&>` / `&>>` operator token: the token-level twin of
 //! `parse::redirect::bare`, sharing its operand rule.
 
@@ -22,7 +24,9 @@ pub(super) fn parse(
     let Some(operand) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
-    let (word, _s, _e, _fq, omask, _spans) = operand;
+    let Token {
+        word, mask: omask, ..
+    } = operand;
     // `false`: only the guard's **empty** arm reads this flag — the mask has no
     // bit for a zero-byte quoted region — and the path families pass `false`, as
     // the bare `>` family does (bash's `&> ""` fails at the open, rc 1). The

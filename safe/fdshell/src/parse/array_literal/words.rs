@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::array_literal::/)'
+
 //! The word-level predicates of the array arm (task #422): which word opens a
 //! region, what its first element is, and when the whole statement is the arm's.
 //! The assembly walk itself is [`super::detect`].
@@ -22,7 +24,13 @@ pub(super) fn all_array(assigns: &[ArrayAssign]) -> Option<Vec<ArrayAssign>> {
 /// one name predicate, whose value starts with an **unquoted** `(` — read from
 /// the word's mask at that byte, never derived. The name may end with `+`.
 pub(super) fn open_word(tok: &Token) -> Option<ArrayAssign> {
-    let (text, _, _, fq, mask, spans) = tok;
+    let Token {
+        word: text,
+        fully_quoted: fq,
+        mask,
+        spans,
+        ..
+    } = tok;
     if !envassign::is_env_assign(text) {
         return None;
     }

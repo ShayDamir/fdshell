@@ -12,7 +12,7 @@ fn words(line: &[u8]) -> Vec<(ShortCStr, Vec<MaskBit>)> {
     tokenize(line)
         .unwrap()
         .into_iter()
-        .map(|(t, _, _, _, mask, _spans)| (t, mask))
+        .map(|Token { word: t, mask, .. }| (t, mask))
         .collect()
 }
 
@@ -258,23 +258,23 @@ fn full(line: &[u8]) -> Vec<Token> {
 fn single_quoted_span_is_one_masked_word() {
     let w = full(b"echo 'x y'");
     assert_eq!(
-        w[1].0,
+        w[1].word,
         ShortCStr::from(c"x y"),
         "both quote bytes are stripped"
     );
-    assert_eq!(w[1].1, 5, "the span is the quoted word");
-    assert!(w[1].3, "the word starts quoted (fq)");
-    assert_eq!(w[1].4, runs(&[(true, 3)]), "every span byte is masked");
+    assert_eq!(w[1].start, 5, "the span is the quoted word");
+    assert!(w[1].fully_quoted, "the word starts quoted (fq)");
+    assert_eq!(w[1].mask, runs(&[(true, 3)]), "every span byte is masked");
 }
 
 // `'a'b'c'` is one word (`abc`): adjacent spans concatenate, as bash does.
 #[test]
 fn adjacent_single_quotes_make_one_word() {
     let w = full(b"echo 'a'b'c'");
-    assert_eq!(w[1].0, ShortCStr::from(c"abc"));
+    assert_eq!(w[1].word, ShortCStr::from(c"abc"));
     assert_eq!(w.len(), 2, "one word, no split");
     assert!(
-        !w[1].3,
+        !w[1].fully_quoted,
         "the bare `b` byte clears `fq`, exactly as in `\"a\"b`"
     );
 }
@@ -284,12 +284,12 @@ fn adjacent_single_quotes_make_one_word() {
 #[test]
 fn empty_single_quotes_are_one_empty_word() {
     let w = full(b"echo ''");
-    assert_eq!(w[1].0, ShortCStr::from(c""));
-    assert!(w[1].4.is_empty(), "no bytes, so no mask bits");
-    assert!(w[1].3, "fq");
-    assert_eq!(w[1].2 - w[1].1, 2, "the span is the two quote bytes");
+    assert_eq!(w[1].word, ShortCStr::from(c""));
+    assert!(w[1].mask.is_empty(), "no bytes, so no mask bits");
+    assert!(w[1].fully_quoted, "fq");
+    assert_eq!(w[1].end - w[1].start, 2, "the span is the two quote bytes");
     assert!(
-        w[1].0.is_shorter_than_span(w[1].1, w[1].2),
+        w[1].word.is_shorter_than_span(w[1].start, w[1].end),
         "the span is longer than the word: a word that counts"
     );
 }
@@ -309,8 +309,12 @@ fn single_quotes_inside_double_quotes_are_literal() {
 #[test]
 fn single_quoted_backslash_is_encoded_as_an_escape_pair() {
     let w = full(b"echo 'a\\bc'");
-    assert_eq!(w[1].0, ShortCStr::from(c"a\\\\bc"));
-    assert_eq!(w[1].4, runs(&[(true, 5)]), "every encoded byte is masked");
+    assert_eq!(w[1].word, ShortCStr::from(c"a\\\\bc"));
+    assert_eq!(
+        w[1].mask,
+        runs(&[(true, 5)]),
+        "every encoded byte is masked"
+    );
 }
 
 // The `$` of a single-quoted span goes in as `\$` so the substitution pass
@@ -318,10 +322,10 @@ fn single_quoted_backslash_is_encoded_as_an_escape_pair() {
 #[test]
 fn single_quoted_dollar_is_encoded_as_an_escaped_dollar() {
     let w = full(b"echo 'a$b'");
-    assert_eq!(w[1].0, ShortCStr::from(c"a\\$b"));
-    assert_eq!(w[1].4, runs(&[(true, 4)]));
+    assert_eq!(w[1].word, ShortCStr::from(c"a\\$b"));
+    assert_eq!(w[1].mask, runs(&[(true, 4)]));
     assert_eq!(
-        super::super::super::bytes::fold::fold_mask(w[1].0.as_bytes().unwrap(), &w[1].4).0,
+        super::super::super::bytes::fold::fold_mask(w[1].word.as_bytes().unwrap(), &w[1].mask).0,
         b"a$b".to_vec(),
         "the quoted fold yields bash's literal text"
     );
@@ -332,9 +336,9 @@ fn single_quoted_dollar_is_encoded_as_an_escaped_dollar() {
 #[test]
 fn dollar_single_quote_is_the_posix_sh_reading() {
     let w = full(b"echo $'x'");
-    assert_eq!(w[1].0, ShortCStr::from(c"\\$x"));
-    assert_eq!(w[1].4, runs(&[(false, 2), (true, 1)]));
-    assert!(!w[1].3, "the word starts unquoted");
+    assert_eq!(w[1].word, ShortCStr::from(c"\\$x"));
+    assert_eq!(w[1].mask, runs(&[(false, 2), (true, 1)]));
+    assert!(!w[1].fully_quoted, "the word starts unquoted");
 }
 
 // No separator, operator or redirection byte inside a span is special.
@@ -362,11 +366,11 @@ fn span_bytes_are_never_separators() {
 fn double_quote_inside_span_does_not_toggle() {
     let w = full(b"echo 'a\"b'");
     assert_eq!(
-        w[1].0,
+        w[1].word,
         ShortCStr::from(c"a\"b"),
         "the span is one literal word: the inner quote is a data byte, not a toggle"
     );
-    assert_eq!(w[1].4, runs(&[(true, 3)]));
+    assert_eq!(w[1].mask, runs(&[(true, 3)]));
 }
 
 // An unbalanced `'` is an `UnbalancedQuote` reported at the opening byte: the
@@ -414,7 +418,7 @@ fn spans(line: &[u8]) -> Vec<Vec<usize>> {
     tokenize(line)
         .unwrap()
         .into_iter()
-        .map(|(_t, _s, _e, _fq, _mask, spans)| spans)
+        .map(|Token { spans, .. }| spans)
         .collect()
 }
 
@@ -468,7 +472,7 @@ fn statement_text(line: &[u8]) -> Vec<ShortCStr> {
     super::statement::tokenize_statement(line)
         .unwrap()
         .into_iter()
-        .map(|(t, _, _, _, _, _)| t)
+        .map(|Token { word: t, .. }| t)
         .collect()
 }
 

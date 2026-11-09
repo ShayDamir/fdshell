@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::for_block::/)'
+
 //! The `do … done` **tail** of the arithmetic `for`: the token-level half,
 //! joined to the byte-level region scan at the region's end offset. Extracted
 //! from `parse/for_block/arith.rs` for the line budget (task #456); the
@@ -27,7 +29,7 @@ pub(super) fn tail_body(
 ) -> Result<(ScriptText, Vec<RedirectDef>), Report<ParseError>> {
     let tail: Vec<Token> = raw
         .iter()
-        .skip_while(|(_, start, _, _, _, _)| *start < region_end)
+        .skip_while(|Token { start, .. }| *start < region_end)
         .cloned()
         .collect();
     // Between the region and the body keyword (the `do`, or the `{` of a group
@@ -105,7 +107,7 @@ fn gap_len(tail: &[Token], line: &[u8]) -> usize {
 /// test `semi/preceded.rs::amp_semi` reads for the same pair. The [`span_word`]
 /// gate keeps a quoted `";"` word (and an escaped `\;`) out of the run.
 fn separator_byte(tail: &[Token], line: &[u8], idx: usize, byte: u8) -> bool {
-    let Some(tok @ (_t, start, _, _, _, _)) = tail.get(idx) else {
+    let Some(tok @ Token { start, .. }) = tail.get(idx) else {
         return false;
     };
     span_word(tok, b";") && line.get(*start) == Some(&byte)

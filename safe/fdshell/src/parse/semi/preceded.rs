@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C semi_semi -- -E 'test(/^parse::semi::/) | binary(semi_semi)'
+
 //! The clause-keyword search of `parse/semi.rs`: **what may precede** a block
 //! clause keyword. POSIX #2.9.1 reads a compound-list terminator before
 //! `then`/`elif`/`else` and the `while`/`until` `do`, and the plain `&` is one
@@ -81,7 +83,7 @@ pub(crate) fn ensure_before_closer(
 /// [`span_word`], so a quoted `";"` is word data and never the byte (task #336).
 /// Read by [`amp_semi`] and by the clause-list guard `parse/case_block.rs`.
 pub(crate) fn semi_byte(tok: &Token, line: &[u8]) -> bool {
-    let (_t, start, _, _, _, _) = tok;
+    let Token { start, .. } = tok;
     span_word(tok, b";") && line.get(*start) == Some(&b';')
 }
 

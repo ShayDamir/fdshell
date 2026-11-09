@@ -8,6 +8,7 @@
 #![allow(clippy::unwrap_used)]
 use super::redirect_op;
 use crate::mask::MaskBit;
+use crate::parse::Token;
 use crate::parse::token::tokenize_statement;
 use crate::redirect::RedirectDirection;
 use alloc::vec::Vec;
@@ -18,7 +19,7 @@ use sys::ShortCStr;
 /// hands to `redirect_op`.
 fn tail(line: &[u8]) -> (ShortCStr, Vec<MaskBit>) {
     let tokens = tokenize_statement(line).unwrap();
-    let (t, _start, _end, _fq, mask, _spans) = tokens.get(1).unwrap();
+    let Token { word: t, mask, .. } = tokens.get(1).unwrap();
     (t.get(1..).unwrap(), mask.get(1..).unwrap_or(&[]).to_vec())
 }
 

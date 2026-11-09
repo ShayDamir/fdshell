@@ -27,7 +27,7 @@ fn tokens_of(line: &str) -> Vec<Token> {
 fn region(line: &str, i: usize) -> Option<String> {
     let tokens = tokens_of(line);
     let off = operand_offset(&tokens, i)?;
-    let (_t, start, end, _fq, _mask, _spans) = tokens.get(i).unwrap();
+    let Token { start, end, .. } = tokens.get(i).unwrap();
     let bytes = line
         .as_bytes()
         .get(*start..*end)

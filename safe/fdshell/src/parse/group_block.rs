@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C group -- -E 'test(/^parse::group_block::/) | binary(group)'
+
 use super::Token;
 use super::cond_bodies::claimed_regions;
 use super::part_text::part_text;
@@ -32,7 +34,7 @@ pub(crate) fn tokens_to_group(
 ) -> Result<GroupBlock, Report<ParseError>> {
     let opens_with_brace = tokens
         .first()
-        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"{"));
+        .is_some_and(|Token { word: t, .. }| t.eq_bytes(b"{"));
     ensure!(opens_with_brace, ParseError::MalformedGroupBlock);
     let line = text.as_bytes().change_context(ParseError::Never)?;
     let close = closing_keyword_index(tokens, line).ok_or(ParseError::GroupMissingCloseBrace)?;
@@ -82,7 +84,15 @@ pub(crate) fn tokens_to_group(
 /// mask), so a glued redirect parses as the group's redirection.
 fn split_close(tokens: &[Token], close: usize) -> Vec<Token> {
     let tail = tokens.get(close + 1..).unwrap_or(&[]).to_vec();
-    let Some((t, start, end, fq, mask, spans)) = tokens.get(close).cloned() else {
+    let Some(Token {
+        word: t,
+        start,
+        end,
+        fully_quoted: fq,
+        mask,
+        spans,
+    }) = tokens.get(close).cloned()
+    else {
         return tail;
     };
     if t.eq_bytes(b"}") {
@@ -91,14 +101,14 @@ fn split_close(tokens: &[Token], close: usize) -> Vec<Token> {
     let Some(rest) = t.get(1..) else {
         return tail;
     };
-    let mut out = vec![(
-        rest,
-        start + 1,
+    let mut out = vec![Token {
+        word: rest,
+        start: start + 1,
         end,
-        fq,
-        mask.get(1..).unwrap_or(&[]).to_vec(),
-        value_spans(&spans, 0),
-    )];
+        fully_quoted: fq,
+        mask: mask.get(1..).unwrap_or(&[]).to_vec(),
+        spans: value_spans(&spans, 0),
+    }];
     out.extend_from_slice(&tail);
     out
 }

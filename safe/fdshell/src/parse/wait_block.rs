@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C wait -- -E 'test(/^parse::wait_block::/) | binary(wait)'
+
 mod arm;
 mod fdref;
 mod gate;
@@ -57,7 +59,7 @@ pub(crate) fn tokens_to_wait(
     ensure!(
         tokens
             .first()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"wait")),
+            .is_some_and(|Token { word: t, .. }| t.eq_bytes(b"wait")),
         ParseError::MalformedWaitBlock
     );
     // The closer is the block's last `done` keyword, not its last token: a

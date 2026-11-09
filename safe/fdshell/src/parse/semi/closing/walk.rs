@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C semi_semi -- -E 'test(/^parse::semi::/) | binary(semi_semi)'
+
 //! The **walk** shared by the closing-keyword search of [`super`] and the `case`
 //! clause's `;;` window search (task #418): one loop over the token list, the
 //! same command-position/pairing state machine the other scorers read (LESSONS
@@ -49,7 +51,9 @@ pub(crate) fn walk_until(
     // reason (task #266).
     let structure = structure_flags(line, tokens);
     for (i, tok) in tokens.iter().enumerate().skip(start) {
-        let (t, _start, end, _fq, mask, _spans) = tok;
+        let Token {
+            word: t, end, mask, ..
+        } = tok;
         // Defensive: the tokens were built from `line`, so their bytes are
         // always valid; an error token means a future tokenizer that hands
         // this scan a token it cannot read, and the scan skips it.

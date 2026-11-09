@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::for_block::/)'
+
 //! The **head** of a `for` block (task #439): the `for` keyword, its variable
 //! name, and the `in` that opens the word list. POSIX #2.9.1 makes that `in`
 //! **optional** (task #416): a clause without it is `for name`, and its list is
@@ -29,13 +31,13 @@ pub(super) fn head(
     ensure!(
         tokens
             .first()
-            .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(b"for")),
+            .is_some_and(|Token { word: t, .. }| t.eq_bytes(b"for")),
         ParseError::ExpectedFor
     );
     let var = tokens
         .get(1)
         .ok_or(ParseError::ExpectedVariableName)?
-        .0
+        .word
         .clone();
     let Some(in_pos) = tokens
         .iter()

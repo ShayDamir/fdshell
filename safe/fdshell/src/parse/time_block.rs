@@ -32,9 +32,9 @@ pub(super) fn detect(
     tokens: &[Token],
     text: &ScriptText,
 ) -> Result<Option<ParsedLine>, Report<ParseError>> {
-    let is_prefix = tokens
-        .first()
-        .is_some_and(|(w, s, e, _, _, _)| w.eq_bytes(b"time") && !w.is_shorter_than_span(*s, *e));
+    let is_prefix = tokens.first().is_some_and(|tok| {
+        tok.word.eq_bytes(b"time") && !tok.word.is_shorter_than_span(tok.start, tok.end)
+    });
     if !is_prefix {
         return Ok(None);
     }
@@ -49,14 +49,14 @@ pub(super) fn detect(
     // and so is a quoted `-p` (`time "-p" ls`), so the flag is taken only from an
     // unquoted `-p` right behind a `time`.
     let mut taken = 0usize;
-    while let Some((w, s, e, _, _, _)) = tokens.get(taken) {
-        if !w.eq_bytes(b"time") || w.is_shorter_than_span(*s, *e) {
+    while let Some(tok) = tokens.get(taken) {
+        if !tok.word.eq_bytes(b"time") || tok.word.is_shorter_than_span(tok.start, tok.end) {
             break;
         }
         taken += 1;
-        if let Some((w, s, e, _, _, _)) = tokens.get(taken)
-            && w.eq_bytes(b"-p")
-            && !w.is_shorter_than_span(*s, *e)
+        if let Some(p) = tokens.get(taken)
+            && p.word.eq_bytes(b"-p")
+            && !p.word.is_shorter_than_span(p.start, p.end)
         {
             posix = true;
             taken += 1;
@@ -90,7 +90,7 @@ fn inner_text(
     tokens: &[Token],
     text: &ScriptText,
 ) -> Result<Option<ScriptText>, Report<ParseError>> {
-    let Some((word, start, end, _, _, _)) = tokens.first() else {
+    let Some(tok) = tokens.first() else {
         return Ok(None);
     };
     let line = text.as_bytes().change_context(ParseError::Never)?;
@@ -100,15 +100,15 @@ fn inner_text(
     // the scorer would make such a comparison live again;
     // `keywords/tests.rs::keyword_delta_wait_block_vs_builtin` is the row that
     // notices the change.
-    if !word.is_shorter_than_span(*start, *end)
+    if !tok.word.is_shorter_than_span(tok.start, tok.end)
         && keyword_delta(
-            word.as_bytes().change_context(ParseError::Never)?,
+            tok.word.as_bytes().change_context(ParseError::Never)?,
             line,
-            *end,
+            tok.end,
         )
         .is_some_and(i32::is_positive)
     {
-        return Ok(text.subslice(*start, text.data.len().saturating_sub(*start)));
+        return Ok(text.subslice(tok.start, text.data.len().saturating_sub(tok.start)));
     }
     Ok(Some(verbatim(text, tokens)?))
 }

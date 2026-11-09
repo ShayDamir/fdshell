@@ -39,7 +39,7 @@ fn posix_def(tokens: &[Token], line: &[u8]) -> bool {
     parens
         && tokens
             .first()
-            .is_some_and(|tok| tok.0.ends_with(b"(") && is_definer(tok, line))
+            .is_some_and(|tok| tok.word.ends_with(b"(") && is_definer(tok, line))
 }
 
 /// bash/ksh `function name [()] {`: token 0 is the unquoted `function`
@@ -56,15 +56,15 @@ fn keyword_def(tokens: &[Token], line: &[u8]) -> bool {
 /// carries its trailing `(` (`foo'('`), and `quoted_word` breaks its scan at
 /// that `(`, never reaching the quote bytes before it).
 fn is_definer(tok: &Token, line: &[u8]) -> bool {
-    def_len(&tok.0).is_some() && gated_word(tok, line)
+    def_len(&tok.word).is_some() && gated_word(tok, line)
 }
 
 /// The definer word: the name token after `function` in the keyword form, the
 /// first token (`name(`) in the POSIX form.
 fn definer(tokens: &[Token]) -> Option<&ShortCStr> {
-    let first = tokens.first().map(|(t, _, _, _, _, _)| t);
+    let first = tokens.first().map(|Token { word: t, .. }| t);
     if first.is_some_and(|t| t.eq_bytes(b"function")) {
-        return tokens.get(1).map(|(t, _, _, _, _, _)| t);
+        return tokens.get(1).map(|Token { word: t, .. }| t);
     }
     first
 }

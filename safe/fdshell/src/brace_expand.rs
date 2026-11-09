@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C brace_expand -- -E 'test(/^brace_expand::/) | binary(brace_expand)'
+
 //! Brace expansion (`{a,b}`, `{1..5}`): a pre-parse rewrite that replaces
 //! every brace group with its expanded words, matching bash. The expansion
 //! runs on raw token spans (quotes included); the output is re-tokenized by
@@ -41,7 +43,7 @@ fn rebuild(line: &[u8], tokens: &[Token]) -> Result<ShortCStr, Report<CmdError>>
     let protected = protect::protected(line, tokens);
     let mut out: Vec<u8> = Vec::with_capacity(line.len());
     let mut pos = 0usize;
-    for (i, (_t, start, end, _fq, _mask, _spans)) in tokens.iter().enumerate() {
+    for (i, Token { start, end, .. }) in tokens.iter().enumerate() {
         let Some(span) = line.get(*start..*end) else {
             return Err(Report::new(CmdError::Never));
         };

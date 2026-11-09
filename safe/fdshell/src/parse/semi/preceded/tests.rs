@@ -97,7 +97,7 @@ fn amp_semi_is_the_real_semi_byte_behind_the_amp() {
         let tokens = tokenize(line).unwrap();
         let idx = tokens
             .iter()
-            .rposition(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
+            .rposition(|Token { word: t, .. }| t.eq_bytes(b";"))
             .unwrap();
         amp_semi(&tokens, line, idx)
     };
@@ -263,7 +263,7 @@ fn a_quoted_terminator_word_terminates_no_list() {
         let tokens = tokenize(line).unwrap();
         let idx = tokens
             .iter()
-            .rposition(|(t, _, _, _, _, _)| t.eq_bytes(b";"))
+            .rposition(|Token { word: t, .. }| t.eq_bytes(b";"))
             .unwrap();
         amp_semi(&tokens, line, idx)
     };

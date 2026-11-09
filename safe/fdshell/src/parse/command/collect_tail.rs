@@ -29,7 +29,7 @@ pub(crate) fn collect(
     mut word0_slot: bool,
 ) -> Result<(), Report<ParseError>> {
     let mut spec_at = 0usize;
-    while let Some(tok @ (t, _ts, _te, _fq, _mask, _spans)) = tokens.get(i) {
+    while let Some(tok @ Token { word: t, .. }) = tokens.get(i) {
         // A quoted `";"` is word data (POSIX 2.9.1, task #336): the statement
         // ends at the tokenizer's separator token, whose span is the one byte
         // it stands for, and never at a word whose *text* is `;`.
@@ -85,7 +85,14 @@ pub(crate) fn collect(
 /// `>f g` — its mask, spans and quoted flag are word 0's, as `finish_command`
 /// builds them), into `args` otherwise.
 fn word(cmd: &mut CommandLine, tok: &Token, slot: &mut bool) {
-    let (t, ts, te, _fq, mask, spans) = tok;
+    let Token {
+        word: t,
+        start: ts,
+        end: te,
+        mask,
+        spans,
+        ..
+    } = tok;
     let quoted = t.is_shorter_than_span(*ts, *te);
     if *slot {
         cmd.command = t.clone();

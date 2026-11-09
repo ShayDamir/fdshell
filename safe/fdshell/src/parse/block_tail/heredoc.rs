@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C block_bodies -C --test -C block_closers -C --test -C block_conditions -C --test -C block_redirect -- -E 'test(/^parse::block_tail::/) | binary(block_bodies) | binary(block_closers) | binary(block_conditions) | binary(block_redirect)'
+
 //! The **here-doc** arm of the keyword block's tail walk (task #408): a `<<`,
 //! `<<-` or `N<<` operator written after the closing keyword belongs to the whole
 //! block, so its body region is claimed at **slice** granularity — the operators
@@ -34,7 +36,7 @@ pub(crate) fn def_at(
     i: usize,
 ) -> Result<Option<(RedirectDef, usize)>, Report<ParseError>> {
     let line = text.as_bytes().change_context(ParseError::Never)?;
-    let (_t, start, end, _fq, _mask, _spans) = tail.get(i).ok_or(ParseError::Never)?;
+    let Token { start, end, .. } = tail.get(i).ok_or(ParseError::Never)?;
     let Some((site, _prefix)) = span_operator(line, *start, *end) else {
         return Ok(None);
     };

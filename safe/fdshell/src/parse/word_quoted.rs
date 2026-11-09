@@ -24,7 +24,7 @@ use crate::keywords::{quoted_word, separator_shape};
 /// mask (`""if` has no bit) and not `fq` (`i"f"` is not fully quoted): bash
 /// runs both as command words.
 pub(crate) fn keyword_word(tok: &Token, line: &[u8], kw: &[u8]) -> bool {
-    let (t, _start, end, _fq, _mask, _spans) = tok;
+    let Token { word: t, end, .. } = tok;
     t.eq_bytes(kw) && !quoted_word(line, *end)
 }
 
@@ -34,7 +34,12 @@ pub(crate) fn keyword_word(tok: &Token, line: &[u8], kw: &[u8]) -> bool {
 /// the POSIX `(` (`foo'('`) and the scan alone never reaches the quote bytes
 /// behind it.
 pub(crate) fn gated_word(tok: &Token, line: &[u8]) -> bool {
-    let (t, start, end, _fq, _mask, _spans) = tok;
+    let Token {
+        word: t,
+        start,
+        end,
+        ..
+    } = tok;
     !t.is_shorter_than_span(*start, *end) && !quoted_word(line, *end)
 }
 
@@ -58,7 +63,12 @@ pub(crate) fn gated_word(tok: &Token, line: &[u8]) -> bool {
 /// separator's word text is `";"` / `"|"` and no separator row can fire —
 /// `parse::redirect::clobber::pipe::pipe_token_span` is this rule for the `|`.
 pub(crate) fn span_word(tok: &Token, w: &[u8]) -> bool {
-    let (t, start, end, _fq, _mask, _spans) = tok;
+    let Token {
+        word: t,
+        start,
+        end,
+        ..
+    } = tok;
     t.eq_bytes(w) && !t.is_shorter_than_span(*start, *end)
 }
 
@@ -95,7 +105,12 @@ const THE_SET: [&[u8]; 8] = [b"", b";", b"&&", b"||", b"&", b"(", b")", b"|"];
 /// ([`separator_shape`], or [`pipe_token_span`] for the `|`), then [`span_word`]'s
 /// gate.
 fn is_the_word(tok: &Token, line: &[u8], w: &[u8]) -> bool {
-    let (t, start, end, _fq, _mask, _spans) = tok;
+    let Token {
+        word: t,
+        start,
+        end,
+        ..
+    } = tok;
     let in_the_set = if w == b"|" {
         pipe_token_span(line, *start, *end)
     } else {

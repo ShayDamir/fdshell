@@ -69,19 +69,26 @@ pub(super) fn collect_words(
     );
     let words: Vec<ShortCStr> = word_tokens
         .iter()
-        .map(|(t, _, _, _, _, _)| t.clone())
+        .map(|Token { word: t, .. }| t.clone())
         .collect();
     let words_mask: Vec<Vec<MaskBit>> = word_tokens
         .iter()
-        .map(|(_, _, _, _, m, _)| m.clone())
+        .map(|Token { mask: m, .. }| m.clone())
         .collect();
     let words_span: Vec<Vec<usize>> = word_tokens
         .iter()
-        .map(|(_, _, _, _, _, s)| s.clone())
+        .map(|Token { spans: s, .. }| s.clone())
         .collect();
     let words_quoted: Vec<bool> = word_tokens
         .iter()
-        .map(|(t, s, e, _, _, _)| t.is_shorter_than_span(*s, *e))
+        .map(
+            |Token {
+                 word: t,
+                 start: s,
+                 end: e,
+                 ..
+             }| t.is_shorter_than_span(*s, *e),
+        )
         .collect();
     Ok(ForWords {
         words,

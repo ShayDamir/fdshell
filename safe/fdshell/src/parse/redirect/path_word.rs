@@ -16,7 +16,14 @@ use error_stack::{Report, bail};
 /// *is* the target word, so text, mask and spans are taken as they come from
 /// the tokenizer.
 pub(crate) fn full(token: &Token) -> RedirectSource {
-    let (t, start, end, _fq, mask, spans) = token;
+    let Token {
+        word: t,
+        start,
+        end,
+        mask,
+        spans,
+        ..
+    } = token;
     RedirectSource::path_word(
         t.clone(),
         mask.clone(),
@@ -34,7 +41,14 @@ pub(crate) fn full(token: &Token) -> RedirectSource {
 /// representable, and over-true is safe — the flag only keeps one empty word
 /// when the expansion is empty.
 pub(crate) fn suffix(token: &Token, offset: usize) -> Result<RedirectSource, Report<ParseError>> {
-    let (t, start, end, _fq, mask, spans) = token;
+    let Token {
+        word: t,
+        start,
+        end,
+        mask,
+        spans,
+        ..
+    } = token;
     let Some(path) = t.get(offset..) else {
         bail!(ParseError::Never);
     };

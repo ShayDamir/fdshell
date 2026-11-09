@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C loops -- -E 'test(/^parse::/) | binary(loops)'
+
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::keywords::Closer;
@@ -37,7 +39,7 @@ pub(crate) fn tokens_to_loop(
 ) -> Result<LoopBlock, Report<ParseError>> {
     if !tokens
         .first()
-        .is_some_and(|(t, _, _, _, _, _)| t.eq_bytes(keyword))
+        .is_some_and(|Token { word: t, .. }| t.eq_bytes(keyword))
     {
         return Err(ParseError::Never.into());
     }

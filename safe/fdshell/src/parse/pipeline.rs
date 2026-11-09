@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C pipeline -- -E 'test(/^parse::/) | binary(pipeline)'
+
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::heredoc::HeredocBody;
@@ -19,7 +21,13 @@ pub fn parse_pipeline(
     let mut stages = Vec::new();
     let mut start = 0;
     let mut spec_at = 0;
-    for (i, (_t, ts, te, _fq, _mask, _spans)) in raw.iter().enumerate() {
+    for (
+        i,
+        Token {
+            start: ts, end: te, ..
+        },
+    ) in raw.iter().enumerate()
+    {
         if pipe_token_span(line, *ts, *te) {
             ensure!(i != start, ParseError::UnexpectedPipe);
             stages.push(stage::parse_stage(

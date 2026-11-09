@@ -29,33 +29,35 @@ pub fn parse_here_string(
     tokens: &[Token],
     i: usize,
 ) -> Result<Option<(RedirectDef, usize)>, Report<ParseError>> {
-    let Some((t, start, end, _fq, mask, spans)) = tokens.get(i) else {
+    let Some(tok) = tokens.get(i) else {
         return Ok(None);
     };
-    let Some((op, prefix)) = string_span(line, *start, *end) else {
+    let Some((op, prefix)) = string_span(line, tok.start, tok.end) else {
         return Ok(None);
     };
     // `<<<""` is one word whose quoted part contributes no bytes: its word is
     // the empty quoted region, not the next token. A bare `<<<` takes the next
     // token as its word; at end of input the word is empty.
     let off = prefix + 3;
-    let (word, mask, spans, extra) = if has_attached_word(t.len(), prefix) {
+    let (word, mask, spans, extra) = if has_attached_word(tok.word.len(), prefix) {
         (
-            t.get(off..).ok_or(ParseError::Never)?.clone(),
-            word_mask(mask, off),
-            word_spans(spans, off),
+            tok.word.get(off..).ok_or(ParseError::Never)?.clone(),
+            word_mask(&tok.mask, off),
+            word_spans(&tok.spans, off),
             0,
         )
-    } else if t.is_shorter_than_span(*start, *end) {
+    } else if tok.word.is_shorter_than_span(tok.start, tok.end) {
         (ShortCStr::new(), Vec::new(), Vec::new(), 0)
     } else {
         match tokens.get(i + 1) {
-            Some(next) if operator_word(&next.0, &next.4) => bail!(ParseError::InvalidRedirect),
-            Some(next) => (next.0.clone(), next.4.clone(), next.5.clone(), 1),
+            Some(next) if operator_word(&next.word, &next.mask) => {
+                bail!(ParseError::InvalidRedirect)
+            }
+            Some(next) => (next.word.clone(), next.mask.clone(), next.spans.clone(), 1),
             None => (ShortCStr::new(), Vec::new(), Vec::new(), 0),
         }
     };
-    let digits = line.get(*start..op).ok_or(ParseError::Never)?;
+    let digits = line.get(tok.start..op).ok_or(ParseError::Never)?;
     let Some(export_to) = io_fd(digits) else {
         let prefix = ShortCStr::from_vec(digits.to_vec()).change_context(ParseError::Never)?;
         bail!(ParseError::InvalidRedirFdWord { prefix });
@@ -105,11 +107,13 @@ fn has_attached_word(len: usize, prefix: usize) -> bool {
 /// the bare `<<<` form.
 pub(crate) fn word_indices(line: &[u8], tokens: &[Token]) -> Vec<usize> {
     let mut out: Vec<usize> = Vec::new();
-    for (i, (t, start, end, _fq, _mask, _spans)) in tokens.iter().enumerate() {
-        let Some((_op, prefix)) = string_span(line, *start, *end) else {
+    for (i, tok) in tokens.iter().enumerate() {
+        let Some((_op, prefix)) = string_span(line, tok.start, tok.end) else {
             continue;
         };
-        if has_attached_word(t.len(), prefix) || t.is_shorter_than_span(*start, *end) {
+        if has_attached_word(tok.word.len(), prefix)
+            || tok.word.is_shorter_than_span(tok.start, tok.end)
+        {
             out.push(i);
         } else if tokens.get(i + 1).is_some() {
             out.push(i + 1);

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C block_bodies -C --test -C block_closers -C --test -C block_conditions -C --test -C block_redirect -- -E 'test(/^parse::block_tail::/) | binary(block_bodies) | binary(block_closers) | binary(block_conditions) | binary(block_redirect)'
+
 //! The **glue-split pair** of the keyword block's tail (task #409): the closer
 //! keyword can be glued to a redirection operator (`done>f`, `done&>f`), and the
 //! tail walk reads operators only as whole tokens, so the glued word is split off
@@ -16,7 +18,15 @@ use alloc::vec::Vec;
 /// `group_block::split_close` applies to the group's `}`.
 pub(crate) fn split_close(kw: &[u8], at_closer: &[Token]) -> Vec<Token> {
     let rest_tokens = at_closer.get(1..).unwrap_or(&[]).to_vec();
-    let Some((t, start, end, fq, mask, spans)) = at_closer.first().cloned() else {
+    let Some(Token {
+        word: t,
+        start,
+        end,
+        fully_quoted: fq,
+        mask,
+        spans,
+    }) = at_closer.first().cloned()
+    else {
         return rest_tokens;
     };
     let Some(rest) = t
@@ -26,14 +36,14 @@ pub(crate) fn split_close(kw: &[u8], at_closer: &[Token]) -> Vec<Token> {
         return rest_tokens;
     };
     let off = kw.len();
-    let mut tail = vec![(
-        rest,
-        start + off,
+    let mut tail = vec![Token {
+        word: rest,
+        start: start + off,
         end,
-        fq,
-        mask.get(off..).unwrap_or(&[]).to_vec(),
-        shift_spans(&spans, off),
-    )];
+        fully_quoted: fq,
+        mask: mask.get(off..).unwrap_or(&[]).to_vec(),
+        spans: shift_spans(&spans, off),
+    }];
     tail.extend_from_slice(&rest_tokens);
     tail
 }

@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::case_block::/)'
+
 //! The brace-expansion-protected token indices of a `case` line: the `case`
 //! word and every clause's pattern region. Lives beside `tokens_to_case`
 //! because it mirrors that traversal.
@@ -34,7 +36,7 @@ pub(crate) fn literal_indices(tokens: &[Token], line: &[u8]) -> Vec<usize> {
     // accepts a line whose word list closes on an `esac`-shaped token, so the
     // last token's shape says nothing the guard has to repeat (its `||` had a
     // family no test could see). The guard states the one rule left.
-    if !first.0.eq_bytes(b"case") {
+    if !first.word.eq_bytes(b"case") {
         return Vec::new();
     }
     let Some(in_idx) = (1..tokens.len()).find(|&i| word_at(tokens, i, b"in")) else {

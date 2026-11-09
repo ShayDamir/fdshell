@@ -22,7 +22,7 @@ use sys::ShortCStr;
 /// (`redirect::fd_var_operand`): a quoted `%` is an ordinary file-name word
 /// (task #329).
 pub(super) fn attached(t: &Token) -> Result<Option<RedirectDef>, Report<ParseError>> {
-    let (s, _start, _end, _fq, mask, _spans) = t;
+    let Token { word: s, mask, .. } = t;
     let bytes = s.as_bytes().change_context(ParseError::Never)?;
     let op_pos = match bytes.iter().position(|&b| b == b'>' || b == b'<') {
         Some(p) => p,

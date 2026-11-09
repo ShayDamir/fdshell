@@ -24,10 +24,13 @@ fn stray(line: &[u8]) -> Option<usize> {
 /// (the body slice a builder passes), tokenized as the parse layer sees it.
 fn stray_between(line: &[u8], open: &[u8], close: &[u8]) -> Option<usize> {
     let tokens = tokenize(line).unwrap();
-    let o = tokens.iter().position(|(t, ..)| t.eq_bytes(open)).unwrap();
+    let o = tokens
+        .iter()
+        .position(|Token { word: t, .. }| t.eq_bytes(open))
+        .unwrap();
     let c = tokens
         .iter()
-        .rposition(|(t, ..)| t.eq_bytes(close))
+        .rposition(|Token { word: t, .. }| t.eq_bytes(close))
         .unwrap();
     first_stray(tokens.get(o + 1..c).unwrap_or(&[]), line)
 }

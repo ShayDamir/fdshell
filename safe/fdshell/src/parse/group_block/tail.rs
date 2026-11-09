@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C group -- -E 'test(/^parse::group_block::/) | binary(group)'
+
 //! The group's **tail**: the redirections written after the closing brace —
 //! the path family and, since task #409, the `&>` family (`{ …; } &> f`,
 //! `{ …; }&>>f`), taken by the same parsers the keyword block's tail and the
@@ -34,7 +36,7 @@ pub(super) fn command_tail(tail: &[Token], regions: &[(usize, usize)], append: b
     // The appended newline is the byte just before the region's first body line.
     let cut = first.saturating_sub(1);
     tail.iter()
-        .filter(|(_, start, _, _, _, _)| *start < cut)
+        .filter(|Token { start, .. }| *start < cut)
         .cloned()
         .collect()
 }
@@ -56,7 +58,12 @@ pub(super) fn redirects(
     let mut redirects = Vec::new();
     let mut i = 0;
     while i < tail.len() {
-        let (t, start, end, _fq, _mask, _spans) = tail.get(i).ok_or(ParseError::Never)?;
+        let Token {
+            word: t,
+            start,
+            end,
+            ..
+        } = tail.get(i).ok_or(ParseError::Never)?;
         if t.starts_with(b"<<") || span_operator(line, *start, *end).is_some() {
             bail!(ParseError::GroupHereDocNotSupported);
         }

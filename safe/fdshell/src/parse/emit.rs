@@ -1,3 +1,6 @@
+// mutants: -C --lib -C --test -C block_redirect -C --test -C loops -- -E 'test(/^parse::/) | binary(block_redirect) | binary(loops)'
+
+use super::Token;
 use super::token::State;
 
 impl State {
@@ -9,14 +12,14 @@ impl State {
     /// `end` is the exclusive byte position after the token's raw (quoted) text.
     pub(super) fn emit(&mut self, end: usize) {
         if !self.cur.is_empty() || self.word_quoted {
-            self.tokens.push((
-                core::mem::take(&mut self.cur),
-                self.start,
+            self.tokens.push(Token {
+                word: core::mem::take(&mut self.cur),
+                start: self.start,
                 end,
-                self.fq,
-                core::mem::take(&mut self.mask),
-                core::mem::take(&mut self.spans),
-            ));
+                fully_quoted: self.fq,
+                mask: core::mem::take(&mut self.mask),
+                spans: core::mem::take(&mut self.spans),
+            });
         }
     }
 }

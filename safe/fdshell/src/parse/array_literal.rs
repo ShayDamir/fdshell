@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::array_literal::/)'
+
 //! The array-assignment word `name=(w1 w2 …)` (task #422): the region assembly
 //! at the **token** level, and the two types the runtime reads.
 //!
@@ -51,7 +53,14 @@ pub(crate) struct ArrayAssign {
 pub(crate) fn detect(tokens: &[Token]) -> Result<Option<Vec<ArrayAssign>>, Report<ParseError>> {
     let mut assigns: Vec<ArrayAssign> = Vec::new();
     let mut open: Option<ArrayAssign> = None;
-    for tok @ (text, _, _, fq, mask, spans) in tokens {
+    for tok @ Token {
+        word: text,
+        fully_quoted: fq,
+        mask,
+        spans,
+        ..
+    } in tokens
+    {
         if span_word(tok, b";") {
             break;
         }

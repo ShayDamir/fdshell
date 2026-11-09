@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C semi_semi -- -E 'test(/^parse::semi::/) | binary(semi_semi)'
+
 //! The **word** rules the closing-keyword walk reads: how a token's word scores
 //! as a block keyword ([`scores_at`], with the `case`/`for` word-list rule
 //! [`List`]), and what a token's neighbours say about it ([`glue_at`],
@@ -62,7 +64,7 @@ pub(super) fn structure_flags(line: &[u8], tokens: &[Token]) -> Vec<bool> {
     tokens
         .iter()
         .enumerate()
-        .map(|(i, (_, start, _, _, _, _))| delimiters.contains(&i) || covered(&terminators, *start))
+        .map(|(i, Token { start, .. })| delimiters.contains(&i) || covered(&terminators, *start))
         .collect()
 }
 
@@ -101,7 +103,7 @@ pub(crate) fn glue_at(tokens: &[Token], i: usize, word: &[u8]) -> Glue {
 pub(crate) fn next_word(tokens: &[Token], i: usize) -> Option<&[u8]> {
     tokens
         .get(i + 1)
-        .and_then(|(t, _, _, _, _, _)| t.as_bytes().ok())
+        .and_then(|Token { word: t, .. }| t.as_bytes().ok())
 }
 
 /// A cond/pipeline operator token.

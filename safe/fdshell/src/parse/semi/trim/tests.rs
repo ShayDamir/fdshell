@@ -14,11 +14,11 @@ fn body(line: &[u8], open: &[u8], closer: &[u8]) -> String {
     let tokens = tokenize(line).unwrap();
     let o = tokens
         .iter()
-        .position(|(t, _, _, _, _, _)| t.eq_bytes(open))
+        .position(|Token { word: t, .. }| t.eq_bytes(open))
         .unwrap();
     let c = tokens
         .iter()
-        .rposition(|(t, _, _, _, _, _)| t.eq_bytes(closer))
+        .rposition(|Token { word: t, .. }| t.eq_bytes(closer))
         .unwrap();
     let (s, e) = token_range(trim_body(tokens.get(o + 1..c).unwrap_or(&[]), line));
     String::from_utf8_lossy(line.get(s..e).unwrap_or(b""))
@@ -71,7 +71,7 @@ fn body_end_keeps_the_glued_semi_too() {
         let tokens = tokenize(line).unwrap();
         let idx = tokens
             .iter()
-            .rposition(|(t, _, _, _, _, _)| t.eq_bytes(closer))
+            .rposition(|Token { word: t, .. }| t.eq_bytes(closer))
             .unwrap();
         body_end(&tokens, line, idx)
     };
@@ -217,7 +217,7 @@ fn a_quoted_semicolon_word_trims_out_of_no_slice() {
         let tokens = tokenize(line).unwrap();
         let idx = tokens
             .iter()
-            .rposition(|(t, _, _, _, _, _)| t.eq_bytes(closer))
+            .rposition(|Token { word: t, .. }| t.eq_bytes(closer))
             .unwrap();
         body_end(&tokens, line, idx)
     };

@@ -1,8 +1,9 @@
+// mutants: -C --lib -- -E 'test(/^parse::/)'
+
 mod arith_cmd;
 mod array_literal;
 pub(crate) mod array_ref;
 mod backtick;
-use alloc::vec::Vec;
 mod bg_redirect;
 pub(crate) mod block_tail;
 mod builtin;
@@ -40,6 +41,7 @@ pub(crate) mod time_block;
 pub(crate) mod token;
 mod token_pipe;
 mod token_subst;
+mod token_word;
 pub(crate) mod wait_block;
 pub(crate) mod while_block;
 pub(crate) mod word_quoted;
@@ -57,23 +59,11 @@ pub(crate) use redirect::parse_fd;
 pub(crate) use redirect::{clobber_word, pipe_token_span, pipeline_pipe};
 pub(crate) use semi::pair_at_byte;
 pub(crate) use time_block::TimeBlock;
+pub(crate) use token_word::Token;
 
 use crate::error::parse::ParseError;
-use crate::mask::MaskBit;
 use error_stack::{Report, ResultExt};
 use sys::ScriptText;
-use sys::ShortCStr;
-
-/// A token: its unquoted word (empty for a quoted empty word such as `""`),
-/// the byte range `(start, end)` of its raw text, whether it was fully
-/// quoted, the per-byte quote mask (parallel to the word; `true` marks
-/// bytes that were inside quotes (double **or** single) and are protected from
-/// IFS word splitting), and the word-text indices at which a quote span closed
-/// **without contributing any byte** (task #321: the mask cannot see a `""` /
-/// `''` pair — zero bytes, zero bits — so the tilde rule consults this list;
-/// `~""/x` → text `~/x`, mask all-`false`, spans `[1]`). Parallel plumbing:
-/// every surface that carries a mask carries this list at the same offset.
-pub(crate) type Token = (ShortCStr, usize, usize, bool, Vec<MaskBit>, Vec<usize>);
 
 pub(crate) fn parse(text: &ScriptText) -> Result<ParsedLine, Report<ParseError>> {
     let line = text.as_bytes().change_context(ParseError::Never)?;

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C redirect -- -E 'test(/^parse::/) | binary(redirect)'
+
 mod bare;
 
 use crate::error::parse::ParseError;
@@ -30,7 +32,7 @@ pub fn parse_bg_redirect(
     let Some(token) = tokens.get(i) else {
         return Ok(None);
     };
-    let (t, _start, _end, _fq, mask, _spans) = token;
+    let Token { word: t, mask, .. } = token;
     let Some(rest) = t.strip_prefix(b"&>") else {
         return Ok(None);
     };

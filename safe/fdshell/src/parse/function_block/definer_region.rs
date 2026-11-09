@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C function_keyword -- -E 'test(/^parse::function_block::/) | binary(function_keyword)'
+
 //! The definer shape the parse dispatch rejects (task #368): the production
 //! matches the statement, the word sitting in its name slot carries a `$( … )`
 //! region, and such a word is never a name. The shape is the accepted
@@ -14,8 +16,8 @@ use sys::ShortCStr;
 /// rejects is word data (task #247), so it is reported nowhere.
 pub(crate) fn definer_with_region<'a>(tokens: &'a [Token], line: &[u8]) -> Option<&'a ShortCStr> {
     let slot = name_slot(tokens, line)?;
-    let region = carries_region(slot.0.as_bytes().ok()?);
-    (gated_word(slot, line) && region).then_some(&slot.0)
+    let region = carries_region(slot.word.as_bytes().ok()?);
+    (gated_word(slot, line) && region).then_some(&slot.word)
 }
 
 /// The word sitting in the production's name slot: word 1 of the
@@ -28,5 +30,5 @@ fn name_slot<'a>(tokens: &'a [Token], line: &[u8]) -> Option<&'a Token> {
     if keyword_word(first, line, b"function") {
         return brace.then_some(second);
     }
-    (brace && first.0.ends_with(b"(") && span_word(second, b")")).then_some(first)
+    (brace && first.word.ends_with(b"(") && span_word(second, b")")).then_some(first)
 }

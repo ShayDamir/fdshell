@@ -30,7 +30,13 @@ use sys::ShortCStr;
 /// tokenizer's separators plus the pipeline `|` (the ONE rule
 /// `parse::redirect::pipeline_pipe`).
 pub(crate) fn is_operator(line: &[u8], tokens: &[Token], i: usize) -> bool {
-    let Some((_t, start, end, fq, _mask, _spans)) = tokens.get(i) else {
+    let Some(Token {
+        start,
+        end,
+        fully_quoted: fq,
+        ..
+    }) = tokens.get(i)
+    else {
         return false;
     };
     !*fq && span_operator(line, *start, *end).is_some()
@@ -57,7 +63,7 @@ pub(crate) fn delimiter_token_indices(line: &[u8], tokens: &[Token]) -> Vec<usiz
     operator_indices(line, tokens)
         .into_iter()
         .filter_map(|i| {
-            let (_t, start, end, _fq, _mask, _spans) = tokens.get(i)?;
+            let Token { start, end, .. } = tokens.get(i)?;
             let (op, _prefix) = span_operator(line, *start, *end)?;
             if attached(line, op, *end) {
                 Some(i)
@@ -88,7 +94,7 @@ pub(super) fn operator_at(
     tokens: &[Token],
     i: usize,
 ) -> Result<(Operator, usize), Report<ParseError>> {
-    let Some((_t, start, end, _fq, _mask, _spans)) = tokens.get(i) else {
+    let Some(Token { start, end, .. }) = tokens.get(i) else {
         bail!(ParseError::Never);
     };
     let (op, _prefix) = span_operator(line, *start, *end).ok_or(ParseError::Never)?;
@@ -110,7 +116,13 @@ pub(super) fn operator_at(
     let Some(next) = tokens.get(i + 1) else {
         bail!(ParseError::InvalidRedirect);
     };
-    let (word, start, end, _fq, mask, _spans) = next;
+    let Token {
+        word,
+        start,
+        end,
+        mask,
+        ..
+    } = next;
     if invalid_delimiter(word, mask, word.is_shorter_than_span(*start, *end)) {
         bail!(ParseError::InvalidRedirect);
     }

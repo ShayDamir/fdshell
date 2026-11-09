@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C env_assign -- -E 'test(/^parse::envassign::/) | binary(env_assign)'
+
 //! Leading `NAME=value` words on a command (POSIX 2.9.1 scoped assignments).
 
 mod value;
@@ -26,7 +28,7 @@ pub(crate) fn has_command_word(tokens: &[Token]) -> bool {
     tokens
         .iter()
         .take_while(|tok| !span_word(tok, b";"))
-        .any(|(t, _, _, _, _, _)| !is_env_assign(t))
+        .any(|Token { word: t, .. }| !is_env_assign(t))
 }
 
 /// The number of leading `NAME=value` words before the command word.
@@ -54,7 +56,12 @@ pub(crate) fn prefix_len(tokens: &[Token]) -> usize {
 /// is no assignment. The caller's statement bound is what keeps a `;` and the
 /// statement's last word out of the prefix.
 fn assign_word(tokens: &[Token], i: usize) -> Option<Assign> {
-    let (t, _, _, _, mask, spans) = tokens.get(i)?;
+    let Token {
+        word: t,
+        mask,
+        spans,
+        ..
+    } = tokens.get(i)?;
     assign_of(t, mask, spans)
 }
 
@@ -83,7 +90,14 @@ pub(crate) fn collect_range(tokens: &[Token], end: usize) -> Vec<Assign> {
         .get(..end)
         .unwrap_or(tokens)
         .iter()
-        .filter_map(|(t, _, _, _, mask, spans)| assign_of(t, mask, spans))
+        .filter_map(
+            |Token {
+                 word: t,
+                 mask,
+                 spans,
+                 ..
+             }| assign_of(t, mask, spans),
+        )
         .collect()
 }
 
@@ -91,7 +105,13 @@ pub(crate) fn collect_range(tokens: &[Token], end: usize) -> Vec<Assign> {
 /// `;`), or `None` when a non-assignment word is present.
 pub(crate) fn collect_all(tokens: &[Token]) -> Option<Vec<Assign>> {
     let mut out = Vec::new();
-    for tok @ (t, _, _, _, mask, spans) in tokens {
+    for tok @ Token {
+        word: t,
+        mask,
+        spans,
+        ..
+    } in tokens
+    {
         if span_word(tok, b";") {
             break;
         }

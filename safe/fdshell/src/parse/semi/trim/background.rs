@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C semi_semi -- -E 'test(/^parse::semi::/) | binary(semi_semi)'
+
 //! The `&`-terminator **flag** of a condition slice (task #356): the cut `&` is
 //! the job's fact, and this predicate is its single owner — kept apart from the
 //! slicing rules in `trim.rs`.
@@ -31,5 +33,5 @@ pub(crate) fn condition_background(tokens: &[Token], line: &[u8]) -> bool {
 /// quoted `";"` word's byte is `"`, so the byte arm alone read **word data as a
 /// newline** and let the flag walk over it (task #336).
 fn is_newline_semi(tok: Option<&Token>, line: &[u8]) -> bool {
-    tok.is_some_and(|t| span_word(t, b";") && line.get(t.1) != Some(&b';'))
+    tok.is_some_and(|t| span_word(t, b";") && line.get(t.start) != Some(&b';'))
 }
