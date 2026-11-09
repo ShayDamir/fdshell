@@ -1,3 +1,4 @@
+// mutants: -C --lib -- -E 'test(/^parse::/)'
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::parse::array_literal;
