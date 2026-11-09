@@ -155,3 +155,18 @@ fn a_quoted_separator_is_pattern_text_in_the_arm_walk() {
         "`wait`: missing ')' after arm pattern"
     );
 }
+
+/// Each arm of the gate's guard decides once on its own (rule 8): crossed-only,
+/// keyword-only, and neither rows, plus the `;`-skip loop running over a real
+/// `;` token (a `wait` on its own line) — the rows above never feed the loop one.
+#[test]
+fn each_gate_operand_decides_once_on_its_own() {
+    let gate = |script: &[u8]| {
+        let text = stext(script);
+        let tokens = tokenize_statement(text.as_bytes().unwrap()).unwrap();
+        gate::is_block(&tokens, &text)
+    };
+    assert!(gate(b"wait\n readable"), "crossed only");
+    assert!(gate(b"wait readable x"), "keyword only, same line");
+    assert!(!gate(b"wait xyz"), "neither stays the builtin");
+}

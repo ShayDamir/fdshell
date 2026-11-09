@@ -1,3 +1,4 @@
+// mutants: -C --lib -- -E 'test(/^parse::for_block::/)'
 //! The arithmetic `for ((init;cond;step)) ; do … ; done` — bash's `FOR_ACTION`,
 //! recognized on the **raw bytes**: the tokenizer emits `)` as a separator token
 //! and reads `|` as a pipe, so the three clauses are unrecoverable at the token
@@ -6,6 +7,8 @@
 
 mod region;
 mod tail;
+#[cfg(test)]
+mod tests;
 
 use crate::error::parse::ParseError;
 use crate::parse::Token;

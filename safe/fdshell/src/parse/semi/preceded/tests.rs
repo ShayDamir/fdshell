@@ -283,3 +283,15 @@ fn a_quoted_terminator_word_terminates_no_list() {
     assert!(!before_closer(b"if true; then echo a ';' fi"));
     assert!(!before_closer(b"if true; then echo a \"&\" fi"));
 }
+
+/// A needle at token 0 has no predecessor: the `i > 0` guard answers the row
+/// without reading back, and every row above starts its search past zero, so
+/// this is the probe that measures the guard.
+#[test]
+fn a_needle_at_token_zero_has_no_predecessor() {
+    let line = b"then x";
+    assert_eq!(
+        find_preceded_by(&tokenize(line).unwrap(), 0, b"then", line, Term::Semi),
+        None
+    );
+}

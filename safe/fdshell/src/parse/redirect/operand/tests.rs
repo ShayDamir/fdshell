@@ -121,6 +121,12 @@ fn operand_offset_is_the_operand_region_of_the_token() {
         ("cat 2>\"\"{a,b}", 1, Some("{a,b}")),
         ("cat >a\"\"{b,c}", 1, Some("a\"\"{b,c}")),
         ("cat > \"\"{a,b}", 2, Some("\"\"{a,b}")),
+        ("cat 2>&'{a,b}'", 1, Some("'{a,b}'")),
+        ("cat 2>x{a,b}", 1, Some("x{a,b}")),
+        ("cat 2>'&'{a,b}", 1, Some("'&'{a,b}")),
+        ("cat 2>'q'{a,b}", 1, Some("'q'{a,b}")),
+        ("cat 2\">\" {a,b}", 2, None),
+        ("echo x &>x{a,b}", 2, Some("x{a,b}")),
     ] {
         assert_eq!(region(line, i).as_deref(), want, "{line:?} token {i}");
     }

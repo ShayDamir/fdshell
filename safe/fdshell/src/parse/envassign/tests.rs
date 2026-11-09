@@ -102,3 +102,26 @@ fn collect_all_stops_only_at_the_real_semicolon() {
     assert_eq!(all_names(b"X=1 \";\""), None);
     assert_eq!(all_names(b"X=1 ';' Y=2"), None);
 }
+
+/// Each name guard answers alone on some word (rule 8's truth table): an empty
+/// lhs, a `%` prefix and a backslash in the name — one row each, so neither
+/// `&&` is ever the redundant operand.
+#[test]
+fn each_name_guard_carries_its_own_answer() {
+    let word = |w: &[u8]| ShortCStr::from_vec(w.to_vec()).unwrap();
+    assert!(!is_env_assign(&word(b"=x")));
+    assert!(!is_env_assign(&word(b"%x=1")));
+    assert!(!is_env_assign(&word(b"a\\=1")));
+    assert!(is_env_assign(&word(b"a=1")), "the plain shape stays");
+}
+
+/// The guard inside `assign_of` answers through its own door: the helper takes
+/// the words the gate rejects, one row per operand (rule 19), so neither `||`
+/// is ever the redundant operand.
+#[test]
+fn the_name_guard_answers_through_assign_of() {
+    let word = |w: &[u8]| ShortCStr::from_vec(w.to_vec()).unwrap();
+    assert!(assign_of(&word(b"=x"), &[], &[]).is_none());
+    assert!(assign_of(&word(b"%x=1"), &[], &[]).is_none());
+    assert!(assign_of(&word(b"a\\b=1"), &[], &[]).is_none());
+}

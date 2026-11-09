@@ -826,3 +826,14 @@ fn gobbler_escape_pair_never_swallows_a_span_close() {
         "the member's span survives the backslash"
     );
 }
+
+/// The `> 1` gate that consults the `worddef` guard is load-bearing at the
+/// one-word boundary: `{,}` expands to one (empty) word and the guard is **not**
+/// asked (bash's worddef accepts exactly one word — its `ambiguous redirect`
+/// starts counting at the guard's own non-empty count, pinned end to end by
+/// `tests/redirect.rs::brace_expanded_redirect_operand_is_ambiguous`). A `>=`
+/// pulls the one-word shape into the guard and its count answers zero.
+#[test]
+fn the_worddef_guard_starts_at_two_words() {
+    assert!(expand(&text("cat >{,}")).is_err());
+}

@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use super::{operator_word, span_word};
+use super::{is_the_word, operator_word, span_word};
 use crate::parse::Token;
 use crate::parse::token::tokenize;
 use alloc::vec::Vec;
@@ -237,4 +237,16 @@ fn operator_word_reads_the_gate_and_the_owners_set() {
     );
     let owns_pipe2 = |w: &[u8]| w == b"||";
     assert_eq!(operator_word(&tok, b"a || b", &owns_pipe2), None);
+}
+
+/// The `&&` of [`is_the_word`]'s verdict is load-bearing: the set test and the
+/// span test are asked **together**, so a plain word that equals `w` but is no
+/// separator shape answers `false` — the set half alone would say true.
+#[test]
+fn an_equal_word_that_is_no_separator_shape_is_not_the_word() {
+    let line = b"echo x";
+    let tokens = tokenize(line).unwrap();
+    let tok_x = tokens.get(1).unwrap();
+    assert!(span_word(tok_x, b"x"), "the span half says true");
+    assert!(!is_the_word(tok_x, line, b"x"), "the set half says false");
 }

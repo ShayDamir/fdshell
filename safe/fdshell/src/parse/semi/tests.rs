@@ -1,12 +1,12 @@
 #![allow(clippy::unwrap_used)]
-use super::try_join_masked;
+use super::{try_join_masked, verbatim};
 use crate::mask::MaskBit;
 use crate::mask::MaskBit::Unquoted;
 use crate::parse::Token;
 use crate::parse::token::tokenize;
 use alloc::vec;
 use alloc::vec::Vec;
-use sys::ShortCStr;
+use sys::{Origin, Position, ScriptText, ShortCStr};
 
 /// `try_join_masked` of every token of `line`: the joined text, its mask and its
 /// zero-byte span list. Task #321: the spans shift by the join offset, and a
@@ -87,4 +87,19 @@ fn body_end_keeps_the_amp_and_drops_the_semi() {
     // Nothing written before the closer (`then` itself, or an empty body).
     assert_eq!(end(b"if true; then fi", b"fi"), 4);
     assert_eq!(end(b"if true; then; fi", b"fi"), 4);
+}
+
+/// `verbatim` measures the range as `end - off`; rows starting at byte 0 answer
+/// with the subtraction as identity, so the pin starts past it: `a b` is
+/// `text.subslice(5, 8 - 5)`, and a `+` asks for 13 bytes of an 8-byte text.
+#[test]
+fn verbatim_slices_the_range_between_two_tokens() {
+    let text = ScriptText::new(
+        ShortCStr::from_vec(b"echo a b".to_vec()).unwrap(),
+        Position::new(1, 1),
+        Origin::Shell,
+    );
+    let tokens = tokenize(b"echo a b").unwrap();
+    let got = verbatim(&text, tokens.get(1..).unwrap()).unwrap();
+    assert_eq!(got.as_bytes().unwrap(), b"a b");
 }

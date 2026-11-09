@@ -7,10 +7,12 @@
 #![allow(clippy::unwrap_used)]
 
 use super::closing_keyword_index;
-use super::word::{glue_at, is_op};
+use super::walk::walk_until;
+use super::word::{List, glue_at, is_op, structure_flags};
 use crate::keywords::{Closer, Glue};
 use crate::parse::Token;
 use crate::parse::token::tokenize_statement;
+use alloc::vec;
 use alloc::vec::Vec;
 
 /// The tokens of `line`, as the parse layer hands them to the scan.
@@ -357,4 +359,33 @@ fn a_quoted_operator_word_is_no_pair_half() {
     let t = toks(b"echo \"|\" \"|\"");
     assert_eq!(glue_at(&t, nth(&t, b"|", 0), b"|"), Glue::None);
     assert_eq!(glue_at(&t, nth(&t, b"|", 1), b"|"), Glue::None);
+}
+
+/// An operator word at index **0** gets no glue: the `i == 0` guard is what
+/// keeps [`glue_at`]'s `tokens[i - 1]` from reading back off the list, and every
+/// walk above is seeded past zero — so a walk started at 0 measures the guard.
+#[test]
+fn an_operator_word_at_index_zero_gets_no_glue() {
+    let line = b"| x";
+    let t = toks(line);
+    assert_eq!(
+        walk_until(&t, line, None, List::Plain, 0, &|i, _, _| i == 0),
+        Some(0)
+    );
+}
+
+/// The covered side of [`structure_flags`], pinned as the exact list on both
+/// sides of the boundary: the terminator line's own word sits **inside** its
+/// span, and the word that starts exactly at the span's end sits out — that
+/// equality case is the `<` of `covered`.
+#[test]
+fn a_word_at_the_span_end_is_not_covered() {
+    let line = b"cat <<E\nE\ncat x";
+    let tk = toks(line);
+    let got = structure_flags(line, &tk);
+    assert_eq!(
+        got,
+        vec![false, true, false, true, false, false, false],
+        "tokens {tk:?}"
+    );
 }

@@ -139,3 +139,21 @@ fn a_newline_separator_body_stays_silent() {
     assert_eq!(stray(b"echo a | f() { echo b; }; f"), None);
     assert_eq!(stray(b"while false; do echo a || ;\ndone"), None);
 }
+
+/// Each guard operand blanks a real pair **on its own** (rule 8). The rows above
+/// settle `state` through the walk; a direct probe per operand measures each `||`
+/// and the `> 0` — with only one operand set, the guard must still blank the
+/// `;;` at byte 1 of `a;;b`.
+#[test]
+fn each_guard_operand_alone_blanks_the_pair() {
+    let mut s = ScanState::new();
+    s.in_single = true;
+    assert_eq!(byte_pair(b"a;;b", &s), vec![]);
+    let mut s = ScanState::new();
+    s.in_backtick = true;
+    assert_eq!(byte_pair(b"a;;b", &s), vec![]);
+    let mut s = ScanState::new();
+    s.paren_depth = 1;
+    assert_eq!(byte_pair(b"a;;b", &s), vec![]);
+    assert_eq!(byte_pair(b"a;;b", &ScanState::new()), vec![1]);
+}

@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+use super::comment_in_gap;
 use alloc::string::ToString;
 use sys::{Origin, Position, ScriptText, ShortCStr};
 
@@ -91,4 +92,13 @@ fn a_comment_line_keeps_the_closers_redirect() {
 fn a_compound_closer_and_a_comment_line_agree() {
     let g = group(b"{ if :; then :; fi # c\n}");
     assert!(g.body.data.eq_bytes(b"if :; then :; fi"));
+}
+
+/// A `#` sitting **at** the gap end is outside the gap: the walk bound carries
+/// the rule, so a direct probe of the helper measures it (group-level rows
+/// never hand it a gap whose end byte is a `#`).
+#[test]
+fn a_hash_at_the_gap_end_is_not_in_the_gap() {
+    assert!(!comment_in_gap(b"a #c", 0, 2));
+    assert!(comment_in_gap(b"a #c", 0, 3), "one byte into the gap it is");
 }

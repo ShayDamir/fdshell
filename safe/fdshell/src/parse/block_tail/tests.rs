@@ -469,3 +469,45 @@ fn is_closer_reads_the_bare_and_glued_keyword() {
         vec![true, true, true, true, false, false, false, false]
     );
 }
+
+/// Direct pins for [`close::split_close`]'s own filter: glue on **either**
+/// operator byte splits, so the `||` is measured, not bypassed — the end-to-end
+/// glued rows above are satisfied by tokenizer-split spellings and cannot see it.
+#[test]
+fn a_truly_glued_word_splits_on_either_operator_byte() {
+    let glued = Token {
+        word: ShortCStr::from_vec(b"done>f".to_vec()).unwrap(),
+        start: 10,
+        end: 16,
+        fully_quoted: false,
+        mask: vec![MaskBit::Unquoted; 6],
+        spans: Vec::new(),
+    };
+    let split = |word: &[u8]| Token {
+        word: ShortCStr::from_vec(word.to_vec()).unwrap(),
+        start: 14,
+        end: 16,
+        fully_quoted: false,
+        mask: vec![MaskBit::Unquoted; 2],
+        spans: Vec::new(),
+    };
+    assert_eq!(
+        close::split_close(b"done", core::slice::from_ref(&glued)),
+        vec![split(b">f")]
+    );
+    let glued_lt = Token {
+        word: ShortCStr::from_vec(b"done<f".to_vec()).unwrap(),
+        ..glued
+    };
+    assert_eq!(close::split_close(b"done", &[glued_lt]), vec![split(b"<f")]);
+}
+
+/// Direct pins for [`close::shift_spans`]: a span **below** the offset drops and
+/// a span **at** it shifts to exactly `0`, so the filter and the shift are both
+/// measured. The end-to-end span pins above answer through the tokenizer's own
+/// record and never call this function with a non-empty list.
+#[test]
+fn shift_spans_moves_every_span_at_or_past_the_offset() {
+    assert_eq!(close::shift_spans(&[2, 5], 4), vec![1]);
+    assert_eq!(close::shift_spans(&[1, 6], 3), vec![3]);
+}
