@@ -7184,3 +7184,20 @@ binary is the only scope the gate gives a sys file, so the rows have to live the
 one per mutation of `end - start > self.len()`: equal span and text, a longer span,
 a non-zero `start` so `-` → `+` changes the answer, and a quotient short enough
 that `-` → `/` changes it too.
+
+## A probe only counts if the mutation landed and the filter is the map's filter
+
+Hand-fed mutation probes during task #549's gate lied twice. A `sed` whose
+pattern doesn't exist rewrites nothing, and the "green under the mutant" reading
+that proves equivalence (CATCHING_MUTANTS rule 1) then just reports the clean
+tree; and a probe run with a narrower filter than the file's `// mutants:` map
+answers a different question — the map's binaries are where several kills live.
+Both checks are cheap: `diff` the file against the pre-mutation backup before
+trusting a probe, and run the probe with the map's own `-E` filter, binaries
+included. The tool's verdict is the only authoritative one; when a hand probe
+disagrees with a gate run, the probe is wrong.
+
+Pins: this is process, not behavior — the first probe written for
+`parse/wait_block/gate.rs` (rule 19's one-row-per-operand test
+`each_gate_operand_decides_once_on_its_own`) survives every mutant it should
+kill in the hand loop yet kills them all under the tool.
