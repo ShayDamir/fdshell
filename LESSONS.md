@@ -548,6 +548,16 @@ In `unsafe/sys/src/net/cmsg.rs` the two sizes were arithmetic: `cred_space()` wa
 ## Slice the word vector, its quote mask, and its quoted-flag vector with the same offset
 `CommandLine` keeps `args`, `args_mask` and `args_quoted` as parallel, equal-length vectors: `args[i]` is described by `args_mask[i]` (per-byte quote mask) and `args_quoted[i]` (the word's raw span contained quotes). Any dispatcher that drops leading words — the binary in `exec`/`become`, the `builtin` keyword, the `set`/`--` flag, the `timeout` keyword — must slice **all three** by the same offset. `replacer/external.rs` passed `args.get(1..)` against the *full* `args_mask`, so every argument carried its predecessor's mask and `exec printf "[%s] " x "a b"` word-split both the quoted format and the quoted argument. The defect is silent for single-word commands, which is why it survived. A missed third slice is just as silent — it disables the quoted-empty-word fix (task #76) for one path with no error. Correct sites to copy from: `replacer.rs` (`.get(2..)` on all three), `intercept/set_positional.rs` (`.get(1..)` on all three), `intercept/timeout_cmd/parse.rs` (`.get(2..)` on all three). Rule for the regression test: pin the *offset*, not just the symptom — use words with **different** quoting (one fully quoted, one not), otherwise an off-by-one and an off-by-two slice are indistinguishable.
 
+The same rule at struct granularity (tasks #549/#550): the parallel carriers are
+now **named fields of one struct** — `word`, `mask`, `spans`, plus the raw
+`start`/`end` — so any method that shifts the word must shift every carrier in the
+same step. `Token::take_open_paren` moves byte 0, mask bit 0, every closed-span
+index (`saturating_sub(1)`) and `start` together — exactly the shape task #321's
+rule predicted. Pins:
+`parse/token_word/tests.rs::take_open_paren_answers_with_the_exact_shifted_tuple`,
+`parse/tests.rs::test_token_mask_is_parallel_to_the_word`,
+`parse/token/tests.rs::empty_quote_pairs_record_their_closing_index`.
+
 ## An empty quoted region contributes no bytes, so the per-byte mask cannot say "this word was quoted"
 The tokenizer stores a word as its unquoted bytes plus a per-byte quote mask parallel to them. A quoted region that expands to nothing — the `""` in `""$(true)` — contributes **no bytes** to either, so the mask of `""$(true)` is all-`false` over `$(true)`, indistinguishable in shape from an unquoted word. `fully_quoted` (an empty or all-`true` mask) therefore cannot serve: `""$(true)` is not fully quoted (the middle is unquoted), and the empty-mask case it does catch (`""` alone) is already one word via the fast path. The information has to come from the raw token span: `end - start > t.len()` ⇔ the word contained quotes *or escapes* (an escape like `"a\"b"` keeps both bytes, so the span is longer too — intended, since bash keeps such a word whole as well). That derivation lives once in `parse/word_quoted.rs` and is carried as a per-word `Vec<bool>` (`CommandLine.args_quoted`, `ForBlock.words_quoted`) alongside `args`/`args_mask`; `substitute_args` and `expand_for_words` use it to turn "zero fields after splitting" into one empty word (bash: `set -- ""$(true); echo $#` → 1), **except** for a fully quoted whole-word `$@`, whose mask is all-`true` and which *is* the positional words, so an empty deque yields none at all (task #219 — see "The quoted-empty rule must not fire on a fully quoted whole-word `$@`"). Do not "fix" the span test into a quote-only test — the escape bytes are load-bearing.
 
@@ -3157,7 +3167,7 @@ already removed the rc divergence of the two measurements above — today
 `{ true } "|" out` is rc 1 `expected ';' before '}'` vs bash rc 2 (message
 family; with the terminator, `{ true; } "|" out` reports the tail's own
 `group: unexpected word after '}'`). The migration is behavior-preserving by
-the token invariant: `span_word(tok, b"|")` ⇔ `pipe_token_span`, because a
+the token invariant: `tok.span_word(b"|")` ⇔ `pipe_token_span`, because a
 span-gated token has span ≤ text, so its span is one byte and that byte is the
 raw `|`, while a quoted `"|"` / `'|'` (span 3, text 1) and an escaped `\|`
 (the pair stays in the text, `parse/token/escape.rs`) fail both gates. Pinned
@@ -3172,10 +3182,11 @@ arm's input alone since task #530. For a word
 whose text is the **one-byte** separator that span test *is* the quote-mask
 decision the task asked for: span longer than text ⇔ the span carries a quote
 byte ⇔ `mask::quoted_at(mask, 0)`, and the span form is the canonical separator
-gate (`parse/word_quoted.rs::span_word`). Escape spellings reach **neither** arm:
-`\;` / `\|` keep the pair in the token text, so their text is never `;`/`|`. The
-four headline rows of the report — `cat <<"|"`, `<<'|'`, `<<"|x"`, `<<"|EOF"`
-(plus `<<";"`, `<< ";"`), each with its delimiter line, **empty body** — measure
+gate (`parse/token_word.rs::Token::span_word`). Escape spellings reach
+**neither** arm: `\;` / `\|` keep the pair in the token text, so their text is
+never `;`/`|`. The four headline rows of the report — `cat <<"|"`, `<<'|'`,
+`<<"|x"`, `<<"|EOF"` (plus `<<";"`, `<< ";"`), each with its delimiter line,
+**empty body** — measure
 rc 0 and silent, bash-equal: `tests/heredoc.rs::a_quoted_separator_delimiter_with_an_empty_body_is_parity`
 (the with-body shape is #336's `a_quoted_delimiter_may_be_a_separator_word`; the
 report's rc-1 numbers were measured on `60a2ebd`, before #336's gate). The
@@ -4705,9 +4716,10 @@ rule, five consequences:
    a side effect.
 5. **A clause may open with the optional `(` of POSIX 2.9.4.3's
    `( pattern-list )`, and bash strips exactly that byte** (#334):
-    `parse/case_clause/patterns.rs` asks `pattern::take_open_paren` about the
-    clause's **first** token, and the byte goes only when mask bit 0 is
-    `Unquoted` **and** `ShortCStr::strip_prefix(b"(")` matches — the two signals
+     `parse/case_clause/patterns.rs` asks the token's own
+     `parse/token_word.rs::Token::take_open_paren` about the clause's **first**
+     token, and the byte goes only when mask bit 0 is `Unquoted` **and**
+     `ShortCStr::strip_prefix(b"(")` matches — the two signals
    `stray::opens_groups` reads for a paren, and the mask (never `fully_quoted`)
    is the discriminator: `"("a*`, `'('a*` and the escape pair `\(a*` keep the
    byte as text (bash agrees), a `(` behind a `|` is never reached, `((a*))`
@@ -4723,7 +4735,7 @@ rule, five consequences:
 pattern expands to `/tmp/H/x` and prints `m`. Resolved by task #525: the
 accepted `start + 1` → `*start` (`+`→`*`; its `-` twin was already killed) is
 killed by the rule-19 helper-level pin
-`parse/case_clause/tests.rs::take_open_paren_answers_with_the_exact_shifted_tuple`
+`parse/token_word/tests.rs::take_open_paren_answers_with_the_exact_shifted_tuple`
 — the old "a pattern token reaches no raw-span reader" is a program-level claim
 that does not bind a unit call, so the pin feeds the helper a token with
 `start > 0` and a quote span behind the `(` and asserts the exact returned
@@ -6288,8 +6300,9 @@ POSIX §2.9.1 recognizes a metacharacter only **unquoted**, so bash reads `";"`,
 never restarts command position inside a block body. fdshell's tokenizer emits
 each of them as a **word token whose text is the separator**, so every whole-word
 separator test in the parse layer reads word data as a statement, pipeline or
-`case`-clause boundary. One gate owns the fix: `parse/word_quoted.rs::span_word`
-— text **and** `!word_quoted(text, start, end)` — called at every site. A
+`case`-clause boundary. One gate owns the fix: the token's own
+`parse/token_word.rs::Token::span_word` — text **and** the span test, now
+`ShortCStr::is_shorter_than_span` (task #545) — called at every site. A
 call-site copy of the `te - ts == t.len()` arithmetic is the byte-identical
 private duplicate that drifts (the entry above "An empty quoted region…").
 
@@ -6304,8 +6317,12 @@ The gate is the **raw span**, never the mask and never the scan-back:
   only where the word ends in a *letter*: it stays the **keyword** gate
   (`keyword_word`), and the separator gate cannot be it. The span form is also
   the only one computable at the sites that have the token and no `line` in
-  reach (`semi/trim.rs::is_semi`, `semi/preceded.rs::is_list_terminator`,
-  `pipeline/stage.rs::trim_at_semi`, `envassign.rs`'s statement bounds,
+  reach; two of them are where the rule was born (`semi/trim.rs`,
+  `semi/preceded.rs`), and because the gate's only data is the token's own
+  fields it sits on the type — `parse/token_word.rs::Token::is_semi` and
+  `parse/token_word.rs::Token::is_list_terminator` — with those files as its
+  callers. The rest reach it through the same method
+  (`pipeline/stage.rs::trim_at_semi`, `envassign.rs`'s statement bounds,
   `case_block/literal.rs::word_at`) — one gate for all of them, no `line`
   threaded through the parse layer.
 
@@ -6329,8 +6346,8 @@ is this rule for the `|`, and its doc is the template. A token-level rule that
 fires on word data is the divergence; a byte-level rule that sees the quote bytes
 is not.
 
-Pins: `parse/word_quoted/tests.rs::span_word_gates_every_separator_spelling`
-(the `";"` / `';'` / `"";` / `a";"b` / `\;` spellings — `"";` is the
+Pins: `parse/token_word/tests.rs::span_word_gates_every_separator_spelling` (the
+`";"` / `';'` / `"";` / `a";"b` / `\;` spellings — `"";` is the
 mask-blindness pin, `\;` the no-widening pin),
 `parse/semi/trim/tests.rs` + `parse/semi/preceded/tests.rs` (slice **text**,
 never the rc, per #355), `tests/quotes.rs::a_quoted_separator_word_is_word_data`,
@@ -6435,9 +6452,10 @@ Pins: `tests/redirect.rs::a_heredoc_only_statement_is_a_redirect_only_statement`
 `a_heredoc_operator_without_a_body_never_reaches_the_gate`.
 
 **Renaming a pin is a LESSONS.md edit.** `python3 tools/lessons_check.py --check`
-reports every `<file>.rs` citation whose `::ident` is gone
-(`Ident references … absent from the resolved file`) and `nix flake check` gates
-it; deleting a helper (`is_token_byte`, `token_before`, `seen_token` — all folded
+gates a dangling heading citation and an unresolved `<file>.rs` **path**; the
+`::ident` rows (`Ident references … absent from the resolved file`) are
+**report-only** — see LESSONS: "The doc pointer is a dependency the health tool cannot gate".
+Deleting a helper (`is_token_byte`, `token_before`, `seen_token` — all folded
 into `opens_word` by this task) breaks the citations of records that *reasoned*
 about it, so add "task #N rewrote this body / renamed from X" to each record
 instead of rewriting its measurement.
@@ -7009,7 +7027,7 @@ names, and the three copies that read text now call it:
 - **the glue row** — `parse/semi/closing/word.rs::glue_at` decided a split `||`/`&&`
   pair's head/tail from the neighbours' **texts**, so a quote-protected `"|"` word
   standing next to a real `|` read as a pair half; both comparisons go through
-  `parse::word_quoted::span_word` (text **and** span).
+  `parse::Token::span_word` (`parse/token_word.rs`, text **and** span).
 - **the payload rows** — `keywords::pair_payload` and `keywords/position/payload.rs`
   read the payload behind a glued pair or pipeline byte from quote-removed text, so
   `a"&&"if` scored a pair with payload `if` and `x"|"` took the pipeline-stage row.
@@ -7172,12 +7190,27 @@ gates that combine the test with a `Token`. The mirror case was already inside t
 type's own module family — `extend_from_slice_fallback(this, bytes)` named its
 first argument `this`, so it became a method beside the `push` family it serves.
 
-What cannot cross stays free, and that is the answer, not an oversight: a
-predicate that reads a safe-crate type (`Token`, `MaskBit`) beside the domain type
-cannot become a `sys` method — the orphan rule forbids an `impl ScriptText` or
-`impl ShortCStr` here — and `Token` is a tuple alias, so it carries no methods at
-all. Each rejected family says so in its own module doc: `parse/cond_bodies.rs`,
-`parse/redirect.rs`, `child/printf/spec_helper.rs`.
+What cannot cross stays free, and each family's reason is in its own module doc —
+four answers, because that is what the code does. **What reads only the domain
+type's own fields goes onto the type:** `parse/token_word.rs` carries the seven
+methods `span_word`, `is_semi`, `is_list_terminator`, `separator_data`,
+`is_operator`, `glued`, `take_open_paren`. **What reads the raw script text `line`
+— through `quoted_word`, `pipe_token_span` or the byte scanners — stays free:** the
+`parse/word_quoted.rs` family (`keyword_word`, `gated_word`, `operator_word`,
+`is_the_word`) and its neighbours `parse/block_tail/word.rs`,
+`parse/semi/preceded.rs::semi_byte` and `parse/function_block.rs::is_definer`.
+**What the orphan rule blocks stays free for that reason alone:** the
+`&ScriptText` family `parse/cond_bodies.rs` and the `&ShortCStr`/`&[MaskBit]`
+family `parse/redirect.rs` — no `impl ScriptText` or `impl ShortCStr` here may
+take a parse-layer type. **What answers about another module's own data** (a
+`Term`, a `CommandLine`, the operator parse's offset) **or serves exactly one
+caller** stays free for that reason: `parse/semi/preceded.rs`,
+`parse/block_tail.rs`, `parse/command/collect_tail.rs`,
+`child/printf/spec_helper.rs`. **And a method that returns another owner's type
+or calls that owner's private helper keeps its `impl Token` block in that owner's
+module** — `parse/redirect/path_word.rs`, `parse/redirect/attached.rs`,
+`parse/array_literal/words.rs` — the shape `ShortCStr` already uses inside its own
+family.
 
 Pins: `tests/shortcstr.rs::span_longer_than_the_string`. The sys crate's own test
 binary is the only scope the gate gives a sys file, so the rows have to live there,
@@ -7201,3 +7234,43 @@ Pins: this is process, not behavior — the first probe written for
 `parse/wait_block/gate.rs` (rule 19's one-row-per-operand test
 `each_gate_operand_decides_once_on_its_own`) survives every mutant it should
 kill in the hand loop yet kills them all under the tool.
+
+## A mass rename of a domain type is a gate task, not a diff
+
+The recipe that made an 84-file rename plus a 52-file method move mechanical:
+keep the re-export (`pub(crate) use token_word::Token;` in
+`safe/fdshell/src/parse.rs`) so every `use` site stays put; give the type a
+**new** sibling file (STYLE §2.9) and leave the old file's name alone when the
+docs' citations bind to it — `parse/token.rs` keeps the tokenizer precisely
+because entries cite
+`parse/token/tests.rs::empty_quote_pairs_record_their_closing_index`. Three
+mechanical shapes carry the whole rename: construction sites, whole-shape
+destructurings, and positional reads.
+
+The cost a plan under-assumes: a rename makes previously-ungated files
+**gateable**. The first changed-file gate run over the freshly-mapped files
+surfaced 35 missed mutants — 28 closed by one row per decision, 7 recorded as
+provably equivalent — so a mass rename must budget the mutation gate **inside**
+itself and expect test churn wherever its plan says "pure rename". Pins: the
+seven #549 records in `tools/mutants_allowlist.toml` (their proofs are this
+paragraph's evidence), and the re-export line above, which is the first
+paragraph's.
+
+## The doc pointer is a dependency the health tool cannot gate
+
+`python3 tools/lessons_check.py --check` exits 1 on exactly two things: a cited
+heading that matches no heading, and a `*.rs` **path** that resolves to no file in
+the tree. A `<file>.rs::ident` reference whose ident is gone is **report-only**. So
+`--check` stayed green through all of #549 and #550 while seven prose pointers in
+this file named functions that no longer lived in the files they named; only the
+two that also named a *test* surfaced as report rows, because a test name is
+unique enough to be noticed missing.
+
+Rule: a move/rename task lists the doc pointers it strands, or schedules the
+reconciliation as a sibling task — epic #547 did exactly that, and this entry's
+task is that schedule. "The gate is green" is not evidence the docs are. Pins: the
+two report rows this task closed,
+`parse/token_word/tests.rs::span_word_gates_every_separator_spelling` and
+`parse/token_word/tests.rs::take_open_paren_answers_with_the_exact_shifted_tuple`
+— both resolve to a real file **and** a real ident, which is the whole point: a
+pointer the checker cannot resolve is invisible to it.
