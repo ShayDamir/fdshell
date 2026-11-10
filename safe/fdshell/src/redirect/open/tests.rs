@@ -789,3 +789,43 @@ fn strict_noclobber_reports_the_errno_on_a_directory_via_symlink() {
         .unwrap();
     assert!(matches!(report.current_context(), OpenRedirectError::Open));
 }
+
+/// The exclusive-create arm, made deterministic by a **dangling symlink**: the
+/// stat fails (bash's "the file was not present" arm) and the kernel's own
+/// exclusivity check then hits the existing link (bash measures the same row —
+/// refusal, nothing created — bash 5.3.9, measured 2026-11-10). The `EEXIST`
+/// guard lives exactly here: the race the exclusive create exists for.
+#[test]
+fn noclobber_refuses_a_dangling_symlink() {
+    let (dir, _scratch) = scratch();
+    std::os::unix::fs::symlink("ghost", format!("{dir}/link")).unwrap();
+    let abs = format!("{dir}/link");
+    let report = open_redirect_files(&[write_def(&abs)], &noclobber_cell())
+        .err()
+        .unwrap();
+    assert!(matches!(
+        report.current_context(),
+        OpenRedirectError::Noclobber { .. }
+    ));
+    assert!(
+        !std::path::Path::new(&format!("{dir}/ghost")).exists(),
+        "the refusal happens before the create"
+    );
+}
+
+#[test]
+fn strict_noclobber_refuses_a_dangling_symlink() {
+    let (dir, _scratch) = scratch();
+    std::os::unix::fs::symlink("ghost", format!("{dir}/ldang")).unwrap();
+    let report = open_redirect_files(&[write_def("ldang")], &cell_with(&dir, STRICT | NOCLOBBER))
+        .err()
+        .unwrap();
+    assert!(matches!(
+        report.current_context(),
+        OpenRedirectError::Noclobber { .. }
+    ));
+    assert!(
+        !std::path::Path::new(&format!("{dir}/ghost")).exists(),
+        "the refusal happens before the create"
+    );
+}
