@@ -14,6 +14,9 @@ use crate::redirect::{RedirectDef, RedirectSource};
 use error_stack::Report;
 use sys::ShortCStr;
 
+/// The path redirect written inside one operator token. Stays free: its data
+/// is the operator parse's `op_pos`/`dir`/`prefix`, not the token's own state
+/// (task #550).
 pub(super) fn parse_path_redirect(
     t: &Token,
     op_pos: usize,

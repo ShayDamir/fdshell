@@ -32,7 +32,7 @@ kill it."""
 
 [[allow]]
 file = "safe/fdshell/src/parse/word_quoted.rs"
-line = 102
+line = 99
 column = 28
 mutant = "replace && with || in is_the_word"
 reason = """Task #545's gate term. Every row of `THE_SET` that reaches this `&&` is a

@@ -1,10 +1,11 @@
 // mutants: -C --lib -C --test -C redirect -- -E 'test(/^parse::/) | binary(redirect)'
 
 //! The parse layer's redirect-word gates. Task #545: the `&ShortCStr`
-//! predicates here stay free functions — three of them read this crate's
-//! `MaskBit`, and the orphan rule will not let a `sys` type take a
-//! parse-layer argument; `parse_fd` is the descriptor-number rule they feed, so
-//! it stays with them rather than splitting one family across two crates.
+//! predicates here stay free functions — their data is `ShortCStr` (a `sys` type,
+//! STYLE §6.4) or this crate's `&[MaskBit]` slices, so no type here can own
+//! them: the orphan rule will not let a `sys` type take a parse-layer argument;
+//! `parse_fd` is the descriptor-number rule they feed, so it stays with them
+//! rather than splitting one family across two crates (task #550 re-check).
 
 mod attached;
 mod bare;

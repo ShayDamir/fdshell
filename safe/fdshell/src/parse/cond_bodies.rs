@@ -8,9 +8,10 @@
 //! hands to the cond-list run) and by a token slice whose text is rebuilt from
 //! its body bytes (`part_text`, an arm body).
 //!
-//! Task #545: these `&ScriptText` functions stay free functions. `ScriptText`
-//! is a `sys` type and the second argument is this crate's `Token`, so the
-//! orphan rule freezes the split — no `impl ScriptText` here can take it.
+//! Task #545: these `&ScriptText` functions stay free functions. Their data is
+//! the `&ScriptText`, not `Token` state, and `ScriptText` is a `sys` type while
+//! the second argument is this crate's `Token`, so the orphan rule freezes the
+//! split — no `impl ScriptText` here can take it (task #550 re-check).
 
 use super::Token;
 use super::heredoc::operators;

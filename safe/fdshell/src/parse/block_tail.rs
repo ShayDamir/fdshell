@@ -40,6 +40,9 @@ const GLUE: &[u8] = b"<>";
 
 /// Whether `tok` is the block's closing keyword `kw`: the bare word, or the word
 /// glued to a redirection operator (the form [`redirects`] splits).
+///
+/// Stays free: it matches the word against this module's own `GLUE` set, not
+/// only against the token's state (task #550).
 pub(crate) fn is_closer(tok: &Token, kw: &[u8]) -> bool {
     let Token { word: t, .. } = tok;
     if t.eq_bytes(kw) {

@@ -24,6 +24,9 @@ use sys::ShortCStr;
 
 /// Judge the token the tail walk stopped at: `Ok(())` when it is a shape the walk
 /// stops at without judging (see [`stops`]), the report when it is a word.
+///
+/// Stays free: both it and [`stops`] read the raw script text `line`, so their
+/// data is not the token's own state (task #550).
 pub(crate) fn judge(kw: &[u8], tok: &Token, line: &[u8]) -> Result<(), Report<ParseError>> {
     if stops(tok, line) {
         return Ok(());

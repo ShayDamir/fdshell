@@ -34,6 +34,10 @@ impl Token {
 /// `quoted` is the whole token's flag: the suffix's own raw span is not
 /// representable, and over-true is safe — the flag only keeps one empty word
 /// when the expansion is empty.
+///
+/// Stays free: the `offset` is the operator parse's, and the mask/span slicers are
+/// this module's own (shared with the here-string word), so the data is not the
+/// token's alone (task #550).
 pub(crate) fn suffix(token: &Token, offset: usize) -> Result<RedirectSource, Report<ParseError>> {
     let Token {
         word: t,
