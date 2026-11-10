@@ -649,6 +649,31 @@ fn string_assign_multiple_vars() {
     );
 }
 
+/// One **statement** of two bare assignments (the `AssignStrs` arm, task #472's
+/// mutation gate): every assignment persists, and the statement leaves the exit
+/// status at the arm's `set_last_exit(0)`.
+#[test]
+fn one_statement_of_two_assignments_keeps_both() {
+    let cell = make_cell();
+    run_script(b"a=foo b=bar", &cell).unwrap();
+    let state = borrow_state(&cell);
+    assert_eq!(
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"a".into())
+            .map(|v| &v.value),
+        Some(&c"foo".into())
+    );
+    assert_eq!(
+        state
+            .strings
+            .get::<sys::ShortCStr>(&c"b".into())
+            .map(|v| &v.value),
+        Some(&c"bar".into())
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
 #[test]
 fn string_assign_dollar_brace() {
     let cell = make_cell();

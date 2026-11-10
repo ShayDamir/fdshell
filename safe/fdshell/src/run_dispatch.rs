@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C umask -C --test -C last_arg -C --test -C arrays -C --test -C unset -C --test -C loops -C --test -C function_keyword -- -E 'test(/^tests::run::/) | binary(umask) | binary(last_arg) | binary(arrays) | binary(unset) | binary(loops) | binary(function_keyword)'
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::state::{FdVar, ShellState};
@@ -45,11 +46,14 @@ pub(crate) fn run_simple(
             assign_array::run(assigns, text, cell)?;
         }
         crate::parse::ParsedLine::Unset(targets) => unset::run(targets, cell)?,
-        crate::parse::ParsedLine::Umask(mask) => {
+        crate::parse::ParsedLine::Umask { mask, dash_p } => {
             if let Some(m) = mask {
                 sys::umask::set(*m);
+            } else if *dash_p {
+                let s = alloc::format!("umask {:04o}\n", sys::umask::get());
+                sys::OUT.write_all(s.as_bytes()).ok();
             } else {
-                let s = alloc::format!("{:04o}", sys::umask::get());
+                let s = alloc::format!("{:04o}\n", sys::umask::get());
                 sys::OUT.write_all(s.as_bytes()).ok();
             }
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;

@@ -1,4 +1,4 @@
-// mutants: -C --lib -- -E 'test(/^parse::detect_keyword::/)'
+// mutants: -C --lib -C --test -C umask -- -E 'test(/^parse::detect_keyword::/) | binary(umask)'
 
 use super::Token;
 use crate::error::parse::ParseError;
@@ -6,20 +6,26 @@ use crate::parse::line::ParsedLine;
 use error_stack::{Report, ResultExt, bail, ensure};
 use sys::ShortCStr;
 
+/// `umask [-p] [mode]`: leading `-p` words (XBD: options precede operands, may
+/// repeat) set `dash_p`; the first non-option word is the mode operand. A second
+/// operand is reported where bash ignores it (POSIX defines one `mode` operand,
+/// so extras are undefined — decision pinned by task #472); `-p` after an
+/// operand is that second operand, not an option.
 pub(crate) fn detect_umask(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {
-    let mask = match tokens.get(1) {
-        Some(Token { word: arg, .. }) => {
-            let s = arg.as_bytes().change_context(ParseError::Never)?;
-            let s = core::str::from_utf8(s).change_context(ParseError::InvalidChar { ch: 0 })?;
-            let s = s.strip_prefix("0o").unwrap_or(s);
-            Some(u32::from_str_radix(s, 8).change_context(ParseError::InvalidOctal)?)
+    let mut dash_p = false;
+    let mut mask: Option<u32> = None;
+    for Token { word, .. } in tokens.iter().skip(1) {
+        if mask.is_none() && word.eq_bytes(b"-p") {
+            dash_p = true;
+            continue;
         }
-        None => None,
-    };
-    if tokens.get(2).is_some() {
-        bail!(ParseError::UmaskTakesAtMostOneArgument);
+        ensure!(mask.is_none(), ParseError::UmaskTakesAtMostOneArgument);
+        let s = word.as_bytes().change_context(ParseError::Never)?;
+        let s = core::str::from_utf8(s).change_context(ParseError::InvalidChar { ch: 0 })?;
+        let s = s.strip_prefix("0o").unwrap_or(s);
+        mask = Some(u32::from_str_radix(s, 8).change_context(ParseError::InvalidOctal)?);
     }
-    Ok(Some(ParsedLine::Umask(mask)))
+    Ok(Some(ParsedLine::Umask { mask, dash_p }))
 }
 
 pub(crate) fn detect_control(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<ParseError>> {

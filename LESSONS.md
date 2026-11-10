@@ -7342,3 +7342,20 @@ Pins:
 `tests/alias.rs::expand_aliases_gate_disables_expansion`,
 `tests/shopt.rs::expand_aliases_on_by_default`, plus the README "Aliases"
 paragraph.
+
+## POSIX `umask` has no `-p`: it mandates no output when a mode operand is given, so bash's `-p` prints only for the no-operand report
+
+POSIX `umask` (XCU 2.95) lists `-S` as its only option and says "If a mask
+operand is specified, there shall be no output written to standard output." The
+`-p` bash 5.3.9 implements (measured) is the historical/BSD option, and it
+prints the `umask MODE` form **only for the no-operand report**; with a mode it
+applies silently. fdshell matches the measured bash column (task #472): `-p` is
+accepted before the operand and may repeat (XBD Utility Syntax Guidelines), and
+a `-p` after an operand **is** that second operand. The single-operand rejection
+is kept as the keyword's own documented decision (bash ignores extras at rc 0;
+POSIX defines one `mode` operand, so extras are undefined; the report catches the
+typo `umask 022 077`), and the `0o` octal prefix stays an fdshell extension (bash
+answers `octal number out of range`). The report's trailing newline is
+script-visible and pinned in exact bytes: `safe/fdshell/tests/umask.rs` and the
+quotes-family rows `safe/fdshell/tests/quotes.rs::a_quoted_umask_applies_the_mask`.
+Symbolic modes and `-S` are a gap, not design (task #554).

@@ -2057,7 +2057,7 @@ fn test_pipe_builtin_not_pipeline() {
 
 #[test]
 fn test_umask_no_args() {
-    let ParsedLine::Umask(mask) = parse(b"umask").unwrap() else {
+    let ParsedLine::Umask { mask, .. } = parse(b"umask").unwrap() else {
         panic!("expected Umask")
     };
     assert_eq!(mask, None);
@@ -2065,7 +2065,7 @@ fn test_umask_no_args() {
 
 #[test]
 fn test_umask_zero_o() {
-    let ParsedLine::Umask(mask) = parse(b"umask 0o077").unwrap() else {
+    let ParsedLine::Umask { mask, .. } = parse(b"umask 0o077").unwrap() else {
         panic!("expected Umask")
     };
     assert_eq!(mask, Some(0o077));
@@ -2073,7 +2073,7 @@ fn test_umask_zero_o() {
 
 #[test]
 fn test_umask_numeric() {
-    let ParsedLine::Umask(mask) = parse(b"umask 077").unwrap() else {
+    let ParsedLine::Umask { mask, .. } = parse(b"umask 077").unwrap() else {
         panic!("expected Umask")
     };
     assert_eq!(mask, Some(0o077));
@@ -2088,7 +2088,7 @@ fn test_umask_numeric() {
 #[test]
 fn test_umask_quoted_keyword_word_is_transparent() {
     for line in [&b"'umask' 022"[..], b"u\"mask\" 022", b"umask 022"] {
-        let ParsedLine::Umask(mask) = parse(line).unwrap() else {
+        let ParsedLine::Umask { mask, .. } = parse(line).unwrap() else {
             panic!("expected Umask for {line:?}")
         };
         assert_eq!(mask, Some(0o022));
@@ -2097,7 +2097,7 @@ fn test_umask_quoted_keyword_word_is_transparent() {
 
 #[test]
 fn test_umask_zero() {
-    let ParsedLine::Umask(mask) = parse(b"umask 0o000").unwrap() else {
+    let ParsedLine::Umask { mask, .. } = parse(b"umask 0o000").unwrap() else {
         panic!("expected Umask")
     };
     assert_eq!(mask, Some(0o000));
@@ -2105,7 +2105,7 @@ fn test_umask_zero() {
 
 #[test]
 fn test_umask_max() {
-    let ParsedLine::Umask(mask) = parse(b"umask 0o777").unwrap() else {
+    let ParsedLine::Umask { mask, .. } = parse(b"umask 0o777").unwrap() else {
         panic!("expected Umask")
     };
     assert_eq!(mask, Some(0o777));

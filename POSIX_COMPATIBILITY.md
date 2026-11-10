@@ -553,9 +553,12 @@ The cost of the decision is accepted and pinned
 `command`/`builtin` prefix cannot reach a parse-level shell command, so
 `command umask` is `"umask" not found` and `builtin break` is `"break" is not a
 shell builtin`, rc 1, where bash runs its builtin at rc 0 (owning task **#473**);
-`umask -p` and a second operand are parse errors here where bash accepts them,
-and the bare `umask` prints its four digits with no trailing newline (**#472**,
-quote-independent); `echo a | 'break'` is rc 1 where bash warns at rc 0 (**#381**,
+a second operand to `umask` is reported here where bash accepts it silently —
+task **#472** kept that single-operand rejection by design (POSIX defines one
+`mode` operand, so extras are undefined) after `-p` and the report's trailing
+newline became parity, both pinned byte-exact in `safe/fdshell/tests/umask.rs`,
+and left the `0o` octal prefix as an fdshell extension (bash 5.3.9 answers
+`octal number out of range`); `echo a | 'break'` is rc 1 where bash warns at rc 0 (**#381**,
 which now runs the whole intercepted table in a stage's own fork — these five names
 have no builtins, so the row stays).
 

@@ -443,7 +443,9 @@ fn quoted_block_openers_are_command_words() {
 // keywords are command words, quoted control keywords are not".
 //
 // Every row of the table was measured 2026-10-27 with `bash` 5.3.9 and
-// `target/debug/fdshell -c` built from this branch (base `cf566dbc`):
+// `target/debug/fdshell -c` built from this branch (base `cf566dbc`); the three
+// `umask` rows were re-measured 2026-11-10 (base `fba6b99d`) when task **#472**
+// closed the `-p` and newline divergences:
 //
 // ```text
 // 'break' 1, "break" 1, b"reak" 1, ''break 1  bash warns rc 0 | fdshell `'break' is not inside a loop` rc 1
@@ -452,9 +454,9 @@ fn quoted_block_openers_are_command_words() {
 // 'return' 3                                  bash rc 2       | fdshell `'return' is not inside a function` rc 1
 // f() { 'return' 3; echo x; }; f; echo rc=$?  rc=3, rc 0 in both
 // for i in 1 2; do 'break'; echo after; done  no output, rc 0 in both
-// umask 000; 'umask' 022; umask               `0022`, rc 0 in both (fdshell prints no trailing newline, #472)
-// umask 000; 'umask'                          `0000` in both, rc 0
-// umask 000; 'umask' -p, 'umask' 022 extra    bash rc 0 (`umask 0000` / extras ignored) | fdshell rc 1 parse error, #472
+// umask 000; 'umask' 022; umask               `0022\n`, rc 0 in both (newline pinned in bytes, #472)
+// umask 000; 'umask'                          `0000\n` in both, rc 0
+// umask 000; 'umask' -p, umask '-p'           `umask 0000\n` rc 0 in both (#472 parity) | 'umask' 022 extra: bash rc 0 ignores extras | fdshell rc 1 reports (D3, #472)
 // zz=1; 'unset' zz; echo "[${zz:-set}]"       `[set]`, rc 0 in both
 // builtin openat2 … %>%f; 'unset' %f          fdshell rc 1 on the next use: the fd is closed
 // 'builtin' echo hi, 'command' echo hi        `hi`, rc 0 in both
@@ -559,34 +561,36 @@ fn a_quoted_return_returns_from_the_function() {
 
 /// The quoted word **is** the command: the mask is applied and read back, exactly
 /// as the unquoted row does. The leading `umask 000` pins the harness's own mask
-/// away from the assertion, so the rows do not depend on the environment.
+/// away from the assertion, so the rows do not depend on the environment. The
+/// report's trailing newline is script-visible, so the bytes are asserted exactly
+/// (task **#472** closed the no-newline divergence; `tests/umask.rs` pins the
+/// unquoted twins).
 #[test]
 fn a_quoted_umask_applies_the_mask() {
-    // Accepted divergence, owner **task #472** (quote-independent, and the
-    // unquoted twin prints the same): fdshell writes the four octal digits with
-    // **no trailing newline** (`run_dispatch.rs` formats `{:04o}` and writes it
-    // bare), where bash writes `0022\n`. The digits are the point of these rows —
-    // that the quoted word applied and printed the mask at rc 0, as bash does.
     for (script, want) in [
-        ("umask 000; 'umask' 022; umask", "0022"),
-        ("umask 000; u\"mask\" 022; umask", "0022"),
-        ("umask 000; 'umask'", "0000"),
-        ("umask 000; umask 022; umask", "0022"),
+        ("umask 000; 'umask' 022; umask", "0022\n"),
+        ("umask 000; u\"mask\" 022; umask", "0022\n"),
+        ("umask 000; 'umask'", "0000\n"),
+        ("umask 000; umask 022; umask", "0022\n"),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
     }
-    // Accepted divergence, owner **task #472** (the `umask` operand surface —
-    // quote-independent, the unquoted twin answers the same): bash prints
-    // `umask 0000` for `-p` and ignores a second operand, fdshell rejects both.
-    for script in [
-        "umask 000; 'umask' -p",
-        "umask 000; umask -p",
-        "umask 000; 'umask' 022 extra",
-    ] {
-        let (out, _err, code) = run(script);
-        assert_eq!((out.as_str(), code), ("", 1), "{script}");
+    // `-p` in either quoted spelling is the option — parity with bash, which
+    // prints the `umask MODE` form for the no-operand report (task **#472**).
+    for script in ["umask 000; 'umask' -p", "umask 000; umask '-p'"] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("umask 0000\n", 0),
+            "{script}: stderr={err:?}"
+        );
     }
+    // The remaining accepted divergence, owner **task #472** (decision D3,
+    // quote-independent, the unquoted twin answers the same): bash ignores a
+    // second operand at rc 0, fdshell reports it.
+    let (out, _err, code) = run("umask 000; 'umask' 022 extra");
+    assert_eq!((out.as_str(), code), ("", 1));
 }
 
 /// bash: `[set]`, rc 0 — `zz` is gone, so the `:-` default word prints (the

@@ -249,7 +249,12 @@ not reach them (`builtin umask` → `"umask" is not a shell builtin`,
 `command umask` → `"umask" not found`, rc 1), and a quoted spelling is
 transparent — `'umask' 022`, `'unset' %f`, `'break'` behave exactly like the
 unquoted words. See `POSIX_COMPATIBILITY.md`, "Quoted keywords are command words,
-quoted control keywords are not".
+quoted control keywords are not". `umask` takes `[-p] [mode]`: the bare report
+ends with a newline, and `-p` gives that report its reusable `umask MODE` form —
+only for the no-operand report, since applying a mode prints nothing (bash's
+rule, POSIX's too). A mode is octal; the `0o` prefix is accepted as an fdshell
+extension (bash answers `octal number out of range`), and a second operand is
+reported (`umask takes at most one argument`) where bash ignores it.
 
 | Command | Description |
 |---|---|

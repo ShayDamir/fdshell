@@ -43,7 +43,14 @@ pub enum ParsedLine {
     AssignArray(Vec<ArrayAssign>),
     /// `unset name…`: every operand word, in the order it was written.
     Unset(Vec<UnsetTarget>),
-    Umask(Option<u32>),
+    /// `umask [-p] [mode]`: `mask` is the mode operand (`None` = report the current
+    /// mask), `dash_p` selects the reusable `umask MODE` form of the report. The
+    /// report runs only when `mask` is `None`; with a mode the mask is applied
+    /// silently (bash, and POSIX XCU 2.95 mandates no output for a mode operand).
+    Umask {
+        mask: Option<u32>,
+        dash_p: bool,
+    },
     /// The `{ …; }` group command: the body text and the redirections written
     /// after the closing brace.
     Group(GroupBlock),
