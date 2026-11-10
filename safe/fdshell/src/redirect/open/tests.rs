@@ -142,7 +142,7 @@ fn combined_def_opens_the_path_once() {
         "one operator, one open: fd 2 is a clone, not a second open"
     );
     assert!(
-        fds.first().unwrap().as_raw() >= 3,
+        fds.first().unwrap().fd.as_raw() >= 3,
         "the open sits above the def's highest target (fd 2)",
     );
 }
@@ -277,6 +277,25 @@ fn noclobber_rejects_existing_target() {
         report.current_context(),
         OpenRedirectError::Noclobber { .. }
     ));
+}
+
+/// The process-CWD twin of `strict_noclobber_propagates_non_eexist_open_failure`:
+/// an exclusive create that fails with an errno **other than** `EEXIST` (here
+/// `ENOENT`: `sub/` is absent from the scratch dir) propagates the open failure,
+/// so the guard on `EEXIST` stays exact (task #479's gate run).
+#[test]
+fn noclobber_propagates_non_eexist_open_failure() {
+    let (dir, _scratch) = scratch();
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.options |= NOCLOBBER;
+    }
+    let abs = format!("{dir}/sub/ghost");
+    let report = open_redirect_files(&[write_def(&abs)], &cell)
+        .err()
+        .unwrap();
+    assert!(matches!(report.current_context(), OpenRedirectError::Open));
 }
 
 /// `noclobber` under strict creates a *fresh* target through the base fd: the
@@ -538,4 +557,92 @@ fn opens_run_in_source_order_and_stop_at_the_first_failure() {
         "keep\n",
         "the later target is never opened, so it keeps its bytes"
     );
+}
+
+// --- the magic decision on the final expanded name (task #479) --------------
+
+/// The decision runs once, on the final expanded name: a word whose expansion
+/// produces the magic form flags the entry, and the fd is the **real pre-open**
+/// (the pass owns it; its success is still judged against the pre-command fds —
+/// divergence #482 keeps that rule).
+#[test]
+fn an_expanded_magic_word_flags_the_entry() {
+    let cell = ForkCell::new(ShellState::new());
+    set_var(&cell, "p", "/dev/fd/1");
+    let entries = open_redirect_files(&[word_def("$p", false)], &cell).unwrap();
+    let entry = entries.first().unwrap();
+    assert_eq!(entry.magic, Some(("/dev/fd/", 1)));
+    entry.fd.verify().unwrap();
+}
+
+/// The other arm of the decision: an ordinary word leaves the flag `None`,
+/// even though its open runs through the very same pipeline.
+#[test]
+fn an_ordinary_word_leaves_the_flag_none() {
+    let (dir, _scratch) = scratch();
+    let cell = ForkCell::new(ShellState::new());
+    let abs = format!("{dir}/a1");
+    let entries = open_redirect_files(&[write_def(&abs)], &cell).unwrap();
+    let entry = entries.first().unwrap();
+    assert_eq!(entry.magic, None);
+    entry.fd.verify().unwrap();
+}
+
+/// The parser stores the word **without its quotes**, so the quoted spelling
+/// flags exactly like the plain canonical one (the row bash already matched).
+#[test]
+fn a_quoted_magic_word_flags_the_entry() {
+    let cell = ForkCell::new(ShellState::new());
+    let entries = open_redirect_files(&[word_def("/dev/fd/1", true)], &cell).unwrap();
+    assert_eq!(entries.first().unwrap().magic, Some(("/dev/fd/", 1)));
+}
+
+/// Escape pairs fold before the decision (POSIX 2.2.1: bash's tokenizer folds
+/// them at tokenization), so the folded name is magic too.
+#[test]
+fn an_escape_folded_magic_word_flags_the_entry() {
+    let cell = ForkCell::new(ShellState::new());
+    let entries = open_redirect_files(&[write_def("/dev/fd/\\1")], &cell).unwrap();
+    assert_eq!(entries.first().unwrap().magic, Some(("/dev/fd/", 1)));
+}
+
+/// Strict mode's absolute ban runs **before** the decision, on the word (fast
+/// path) or every expanded field (substitution path), so no magic name can
+/// exist under strict: the expanded magic word is the ban, and the relative
+/// word's entry keeps the flag `None`.
+#[test]
+fn strict_bans_the_expanded_magic_word_before_the_flag() {
+    let (dir, _scratch) = scratch();
+    let cell = cell_with(&dir, STRICT);
+    set_var(&cell, "m", "/dev/fd/1");
+    let report = open_redirect_files(&[word_def("$m", false)], &cell)
+        .err()
+        .unwrap();
+    assert!(matches!(
+        report.current_context(),
+        OpenRedirectError::StrictAbsoluteTarget { .. }
+    ));
+    let entries = open_redirect_files(&[write_def("a1")], &cell_with(&dir, STRICT)).unwrap();
+    assert_eq!(entries.first().unwrap().magic, None);
+}
+
+/// `set -C` on an **expanded** magic word: the pass's own pre-open judges the
+/// exclusive create against the pre-command fds and refuses — the open-decides-
+/// success boundary, so the magic reading does not move this refusal
+/// (fdshell policy; pipe-backed parity is #480's row, untouched here).
+#[test]
+fn noclobber_refuses_an_expanded_magic_word() {
+    let cell = ForkCell::new(ShellState::new());
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.options |= NOCLOBBER;
+    }
+    set_var(&cell, "p", "/dev/fd/1");
+    let report = open_redirect_files(&[word_def("$p", false)], &cell)
+        .err()
+        .unwrap();
+    assert!(matches!(
+        report.current_context(),
+        OpenRedirectError::Noclobber { .. }
+    ));
 }

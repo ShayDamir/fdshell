@@ -410,10 +410,11 @@ and never suppresses a substitution region: only `'` does.
 
 The fd target forms are decided at parse time — the attached `>%var` and the
 `>&N` duplicate word — so a `%` byte inside a target word is file-name data:
-`> a%b` creates `a%b`. A `/dev/fd/N` target is an ordinary word at parse time
-and only becomes a magic path at open time (task #337), which is why a target
-that merely *expands* to the magic form keeps the pre-command descriptor (the
-accepted divergence, task #479). The `>&N` duplicate word is decided on the
+`> a%b` creates `a%b`. A `/dev/fd/N` target is an ordinary word at parse time;
+the magic reading runs at open time on the **final expanded name** (task #337,
+task #479) — a word that merely *expands* to the magic form (`2> $p`,
+`2> /dev/fd/$((1))`, escape-folded or globbed) is opened as the magic path
+exactly like the literal one. The `>&N` duplicate word is decided on the
 **literal** word, so an operand that needs an expansion is decided before it:
 `>&$(echo 1)` files `1` where bash dups fd 1 (task #370), and a digit word has
 nothing to expand. In strict mode the ban on

@@ -2,33 +2,26 @@
 //! what they were before strict mode existed (redirect/open/strict.rs is the
 //! capability route).
 
+// mutants: -C --lib -C --test -C strict -- -E 'test(/^redirect::open::/) | binary(strict)'
+
 use crate::error::redirect::OpenRedirectError;
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
-use crate::state::ShellState;
+use crate::redirect::{RedirectDef, RedirectDirection};
 use error_stack::{Report, ResultExt};
-use hashbrown::HashMap;
 use sys::ExportedCStr;
-use sys::ExportedFd;
 use sys::LocalFd;
 use sys::ShortCStr;
-use sys::fork_cell::ForkCell;
 
-use super::target;
-
-/// Open a redirect target from the process CWD: resolve the word (expand, fold,
-/// glob), then `open()` it with the direction's flags — `noclobber` turns that
-/// into an exclusive create.
+/// Open the **resolved** target name (the caller's `target::resolve` pass —
+/// expand, fold, glob) from the process CWD with the direction's flags —
+/// `noclobber` turns that into an exclusive create.
 pub(super) fn open(
     def: &RedirectDef,
-    source: &RedirectSource,
-    cache: &mut HashMap<ShortCStr, ExportedFd>,
+    path: &ShortCStr,
     noclobber: bool,
-    cell: &ForkCell<ShellState>,
 ) -> Result<LocalFd, Report<OpenRedirectError>> {
-    let target = target::resolve(source, cache, None, cell)?;
-    let name = target.export();
+    let name = path.export();
     if noclobber {
-        return noclobber_open(&name, &target);
+        return noclobber_open(&name, path);
     }
     sys::openat2::open(&name, def.direction.open_flags()).change_context(OpenRedirectError::Open)
 }

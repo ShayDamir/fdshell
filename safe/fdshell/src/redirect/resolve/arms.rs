@@ -1,6 +1,8 @@
+// mutants: -C --lib -C --test -C redirect -- -E 'test(/^redirect::resolve::/) | binary(redirect)'
+
 use super::{fd_path, table};
 use crate::error::redirect::OpenRedirectError;
-use crate::redirect::{Redirect, RedirectDef};
+use crate::redirect::{OpenedTarget, Redirect, RedirectDef};
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use sys::fork_cell::ForkCell;
@@ -45,33 +47,29 @@ pub(super) fn resolve_var(
     Ok((Redirect::new(export_to, local), pair))
 }
 
-/// Path source: take the next pre-opened fd and clone it above the targets —
-/// except for a `/dev/fd/<n>` (`/proc/self/fd/<n>`) word, whose open belongs to
-/// the fd state the preceding defs leave (`redirect/resolve/fd_path.rs`): the
-/// consumer's pre-open ran against the **pre-command** descriptor, so its fd is
-/// left to the consumer and never reaches the command.
+/// Path source: take the open pass's entry and clone its fd above the targets —
+/// except when the entry is flagged magic: the open pass decided that on the
+/// final expanded name (`redirect/open/target.rs`), and such a def's open
+/// belongs to the fd state the preceding defs leave
+/// (`redirect/resolve/fd_path.rs`). The entry's fd is then left to its owner:
+/// it is CLOEXEC and above every target, so the command never sees it, and its
+/// open ran against the descriptor the shell had **before** the command's
+/// redirections (task #337).
 pub(super) fn resolve_path(
     def: &RedirectDef,
-    path: &ShortCStr,
+    entry: &OpenedTarget,
     min_fd: i32,
-    opened_iter: &mut core::slice::Iter<'_, LocalFd>,
     built: &[Redirect],
     seed: &[Redirect],
 ) -> Result<(Redirect, Option<Redirect>), Report<OpenRedirectError>> {
-    let src = opened_iter.next().ok_or(OpenRedirectError::Open)?;
-    if let Some((prefix, n)) = fd_path::magic(path) {
-        // `src` is not this def's source and is left to its owner: it is CLOEXEC
-        // and above every target, so the command never sees it, and its open ran
-        // against the descriptor the shell had **before** the command's
-        // redirections (task #337). That pre-open also decides the magic open's
-        // *success*, so a word naming an fd an earlier def of the same command
-        // opens fails here where bash succeeds — the divergence #482 owns.
+    if let Some((prefix, n)) = entry.magic {
         return fd_path::resolve(def, prefix, n, min_fd, built, seed);
     }
-    let local = src
+    let local = entry
+        .fd
         .try_clone_above(min_fd)
         .change_context(OpenRedirectError::Open)?;
-    let pair = pair_of(src, def.extra_to, min_fd)?;
+    let pair = pair_of(&entry.fd, def.extra_to, min_fd)?;
     Ok((Redirect::new(def.export_to, local), pair))
 }
 

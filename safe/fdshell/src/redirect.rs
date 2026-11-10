@@ -1,8 +1,11 @@
+// mutants: -C --lib -C --test -C redirect -- -E 'test(/^redirect::/) | binary(redirect)'
+
 mod def;
 mod direction;
 mod heredoc;
 mod herestring;
 mod open;
+mod opened;
 mod resolve;
 mod scope;
 mod source;
@@ -10,6 +13,7 @@ mod source;
 pub use def::*;
 pub use direction::*;
 pub use open::*;
+pub use opened::*;
 pub use resolve::*;
 pub use scope::*;
 pub use source::*;

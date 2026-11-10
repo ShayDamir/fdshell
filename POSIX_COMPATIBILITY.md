@@ -448,20 +448,19 @@ The `<<<` form's remaining differences from bash:
 with the operator's flags, **as the redirection runs** — so it sees the fd state
 the command's earlier redirections left, a pipeline stage's pipe ends included,
 and the open is a fresh one: `>` truncates, `<` starts at byte 0. The **success**
-of that open is the exception, third bullet below. bash behaves the same way and
+of that open is the exception, second bullet below. bash behaves the same way and
 fdshell matches it byte-for-byte on the direct spellings
 (`tests/redirect.rs::dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at`
-and its neighbours, task #337). Three measured divergences remain (all
+and its neighbours, task #337) and on words that reach the magic form only
+through an **expansion** — variable, arithmetic, quoted, escape-folded or
+globbed — because the magic reading runs on the final expanded name (task #479,
+`tests/redirect.rs::dev_fd_target_expands_to_the_magic_form`):
+`f(){ echo hi; echo e >&2; }; p=/dev/fd/1; f > z 2> $p` leaves `z` = `e\n\n`
+and prints nothing, in both shells. Two measured divergences remain (all
 2026-10-28 against bash 5.3.9 with stdout and stderr piped; the #459 rows
-below are not a fourth — they are this section's own rules made observable by
+below are not a third — they are this section's own rules made observable by
 the backing, where bash's pipe hides them):
 
-- A target that only **expands** to the magic form keeps the consumer's
-  pre-command open, because the magic reading is on the word as the parser wrote
-  it: `f(){ echo hi; echo e >&2; }; p=/dev/fd/1; f > z 2> $p` leaves `z` =
-  `hi\n` and prints `e` on stdout, where bash leaves `z` = `e\n\n` and prints
-  nothing. The quoted, unexpanded `2> "/dev/fd/1"` matches bash. Owning task:
-  **#479**.
 - A target naming an fd that an **earlier def of the same command** opens fails
   here, because the consumer's pre-open pass opens every path word **before** any
   redirection is applied; bash applies them one by one, so its open finds the fd

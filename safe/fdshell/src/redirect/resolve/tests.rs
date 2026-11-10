@@ -1,13 +1,14 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 use crate::mask::MaskBit::{Quoted, Unquoted};
-use crate::redirect::{RedirectDirection, RedirectSource};
+use crate::redirect::{OpenedTarget, RedirectDirection, RedirectSource};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use sys::LocalFd;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -448,6 +449,13 @@ fn open_file(path: &str) -> LocalFd {
     .unwrap()
 }
 
+/// One plain entry of the open pass's outcome (the words these tests write are
+/// ordinary paths, so no entry carries the magic flag; the dev_fd rows below
+/// construct their entries with the flag, exactly as the open pass would).
+fn opened_target(path: &str) -> OpenedTarget {
+    OpenedTarget::new(open_file(path), None)
+}
+
 fn pair_of(resolved: &[Redirect], first: i32, second: i32) -> (LocalFd, LocalFd) {
     assert_eq!(resolved.len(), 2, "one def, two targets");
     let (a, b) = (resolved.first().unwrap(), resolved.get(1).unwrap());
@@ -473,7 +481,7 @@ fn pair_of(resolved: &[Redirect], first: i32, second: i32) -> (LocalFd, LocalFd)
 fn combined_path_def_resolves_to_a_pair_from_one_open() {
     let c = cell();
     let (path, _scratch) = temp_path("combined_pair");
-    let src = vec![open_file(&path)];
+    let src = vec![opened_target(&path)];
     let redirects = vec![RedirectDef::combined(
         RedirectDirection::Write,
         RedirectSource::path(cstr(&path), Vec::new()),
@@ -532,7 +540,7 @@ fn combined_var_def_resolves_to_a_pair_from_one_table_fd() {
 fn two_path_defs_keep_two_independent_opens() {
     let c = cell();
     let (path, _scratch) = temp_path("two_opens");
-    let src = vec![open_file(&path), open_file(&path)];
+    let src = vec![opened_target(&path), opened_target(&path)];
     let redirects = vec![
         RedirectDef::write_path(1, cstr(&path)),
         RedirectDef::write_path(2, cstr(&path)),
@@ -562,7 +570,7 @@ fn two_path_defs_keep_two_independent_opens() {
 fn dup_after_a_path_def_shares_the_preceding_def_s_description() {
     let c = cell();
     let (path, _scratch) = temp_path("dup_after_path");
-    let src = vec![open_file(&path)];
+    let src = vec![opened_target(&path)];
     let redirects = vec![
         RedirectDef::write_path(1, cstr(&path)),
         RedirectDef::dup(2, 1),
@@ -593,7 +601,7 @@ fn dup_shares_the_last_def_s_description_when_two_defs_target_one_fd() {
     let (b, _sb) = temp_path("dup_last_of_two_b");
     // The consumer's pre-open pass runs in the same source order, so the fd
     // sequence is `a` first, then `b`.
-    let src = vec![open_file(&a), open_file(&b)];
+    let src = vec![opened_target(&a), opened_target(&b)];
     let redirects = vec![
         RedirectDef::write_path(1, cstr(&a)),
         RedirectDef::write_path(1, cstr(&b)),
@@ -673,7 +681,7 @@ fn dup_clone_of_a_process_fd_sits_above_every_target() {
     let c = cell();
     let (path, _scratch) = temp_path("dup_clone_min_fd");
     let _ = sys::dup::close(2);
-    let src = vec![open_file(&path)];
+    let src = vec![opened_target(&path)];
     let redirects = vec![
         RedirectDef::write_path(1, cstr(&path)),
         RedirectDef::dup(2, 1),
@@ -725,7 +733,7 @@ fn seed_entries_are_older_than_every_def() {
     let (path, _scratch) = temp_path("seed_order");
     let (_read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     let seed = vec![Redirect::new(1, write_end.try_clone().unwrap())];
-    let src = vec![open_file(&path)];
+    let src = vec![opened_target(&path)];
     let redirects = vec![
         RedirectDef::write_path(1, cstr(&path)),
         RedirectDef::dup(2, 1),
@@ -757,9 +765,10 @@ fn dev_fd_target_is_a_fresh_open_of_the_named_fd_s_file() {
     let seed_fd = open_file(&path);
     seed_fd.write_all(b"abcdef").unwrap();
     let seed = vec![Redirect::new(1, seed_fd.try_clone().unwrap())];
-    // The consumer pre-opened the word as an ordinary path. The magic arm
-    // resolves its own open, so this fd is the one the command never sees.
-    let opened = vec![open_file(&path)];
+    // The open pass pre-opened the final name and flagged it magic (this test's
+    // word is already canonical). The magic arm resolves its own open, so this
+    // fd is the one the command never sees.
+    let opened = vec![OpenedTarget::new(open_file(&path), Some(("/dev/fd/", 1)))];
     let redirects = vec![RedirectDef::write_path(2, cstr("/dev/fd/1"))];
     let resolved = resolve_redirects(&redirects, &opened, &seed, &c).unwrap();
     let fd2 = dup_of(resolved.first().unwrap());
@@ -777,7 +786,10 @@ fn dev_fd_target_is_a_fresh_open_of_the_named_fd_s_file() {
 #[test]
 fn dev_fd_target_after_a_close_def_fails_the_open() {
     let c = cell();
-    let opened = vec![open_file("/dev/null")];
+    let opened = vec![OpenedTarget::new(
+        open_file("/dev/null"),
+        Some(("/dev/fd/", 1)),
+    )];
     let redirects = vec![
         RedirectDef::close(1),
         RedirectDef::write_path(2, cstr("/dev/fd/1")),

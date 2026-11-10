@@ -1182,6 +1182,63 @@ fn dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// The magic reading runs on the **final expanded name**, so a target that only
+/// reaches the magic form through an expansion is opened at resolve time
+/// against the fd state the preceding defs leave, exactly like the literal rows
+/// above (task #479). The variable row is the task's report (bash 5.3.9 measured
+/// 2026-10-28); the arithmetic row is its same-shape twin, the quoted row was
+/// already parity (the parser strips quotes), and the escape-fold and glob rows
+/// were measured against bash 5.3.9 and this tree's build on 2026-11-10 in this
+/// harness (stdout and stderr piped): bash folds the escape pair at
+/// tokenization and globs the expansion at apply time, so all five words arrive
+/// at bash's redirection step as `/dev/fd/1` — every row rc 0, stdout empty, `z`
+/// = `e\n\n`, stderr empty in both shells.
+#[test]
+fn dev_fd_target_expands_to_the_magic_form() {
+    let (path, _spath) = temp_path("devfd_expanded");
+    for (setup, word) in [
+        ("p=/dev/fd/1;", "$p"),
+        ("", "/dev/fd/$((1))"),
+        ("", "\"/dev/fd/1\""),
+        ("", "/dev/fd/\\1"),
+        ("p='/dev/fd/[1]';", "$p"),
+    ] {
+        let _ = std::fs::write(&path, "stale");
+        let script = format!("f(){{ echo hi; echo e >&2; }}; {setup} f > {path} 2> {word}");
+        let (out, err, code) = run(&script);
+        let body = std::fs::read(&path).unwrap();
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: stderr={err:?}");
+        assert!(err.is_empty(), "{script}: stderr={err:?}");
+        assert_eq!(body, b"e\n\n", "{script}: the magic open ran at apply time");
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The boundary the task does **not** move: the pre-open pass still judges the
+/// magic open's success against the pre-command fds, so `set -o noclobber`
+/// refuses the command on an expanded magic word. bash's refusal here is the
+/// regular-file case (the magic name lands on `z`, the earlier def's target —
+/// both shells refuse, rc 1, and the earlier `> z` leaves `z` created empty —
+/// LESSONS: "POSIX redirect order is observable" (task #337)); the pipe-backed
+/// parity divergence of `set -C` on the magic form stays #480's row. Measured
+/// 2026-11-10 against bash 5.3.9 in this harness; the error wording is fdshell's.
+#[test]
+fn set_c_on_an_expanded_magic_target_keeps_the_refusal() {
+    let (path, _spath) = temp_path("devfd_noclobber");
+    let script = format!(
+        "set -o noclobber; f(){{ echo hi; echo e >&2; }}; p=/dev/fd/1; f > {path} 2> $p; echo rc=$?"
+    );
+    let (out, err, code) = run(&script);
+    assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
+    assert!(err.contains("noclobber"), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        b"",
+        "the earlier def's create survives, the command never ran"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
 #[test]
 fn dev_fd_read_target_starts_at_byte_zero() {
     // The read direction is the same open, not a dup: bash starts at byte 0 of

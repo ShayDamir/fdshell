@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C redirect -- -E 'test(/^redirect::resolve::/) | binary(redirect)'
+
 mod arms;
 mod fd_path;
 mod here;
@@ -5,25 +7,27 @@ mod table;
 
 use super::{Redirect, RedirectDef};
 use crate::error::redirect::OpenRedirectError;
+use crate::redirect::OpenedTarget;
 use crate::state::ShellState;
 use alloc::vec::Vec;
 use error_stack::Report;
 use hashbrown::HashMap;
 use sys::ExportedFd;
-use sys::LocalFd;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 /// Turn a command's defs into the `Redirect`s a consumer exports, in the order
-/// the redirections were written. `seed` is the fd state the caller has already
+/// the redirections were written. `opened` is the open pass's per-def outcome
+/// (`redirect/opened.rs`): the pre-open fd plus the magic reading of the final
+/// **expanded** name (task #479). `seed` is the fd state the caller has already
 /// installed: a pipeline child passes the pipe ends it cloned for the stage,
 /// because bash has those fds in place when it applies the stage's `2>&1`, and
-/// every other caller passes `&[]`. A `Dup` source and a `/dev/fd/N` target
-/// resolve against the state the **preceding** defs leave, not against the
+/// every other caller passes `&[]`. A `Dup` source and a flagged `/dev/fd/N`
+/// def resolve against the state the **preceding** defs leave, not against the
 /// process's fds (`redirect/resolve/table.rs`).
 pub fn resolve_redirects(
     redirects: &[RedirectDef],
-    opened: &[LocalFd],
+    opened: &[OpenedTarget],
     seed: &[Redirect],
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<Redirect>, Report<OpenRedirectError>> {
@@ -60,7 +64,7 @@ pub fn resolve_redirects(
 /// the two targets keep the order the operator implies.
 fn resolve_one(
     r: &RedirectDef,
-    opened_iter: &mut core::slice::Iter<'_, LocalFd>,
+    opened_iter: &mut core::slice::Iter<'_, OpenedTarget>,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
     min_fd: i32,
@@ -71,8 +75,9 @@ fn resolve_one(
         super::RedirectSource::Var(var) => {
             arms::resolve_var(var, r.export_to, r.extra_to, min_fd, cell)
         }
-        super::RedirectSource::Path { path, .. } => {
-            arms::resolve_path(r, path, min_fd, opened_iter, built, seed)
+        super::RedirectSource::Path { .. } => {
+            let entry = opened_iter.next().ok_or(OpenRedirectError::Open)?;
+            arms::resolve_path(r, entry, min_fd, built, seed)
         }
         super::RedirectSource::HereString { word, mask, spans } => {
             here::resolve_string(r, word, mask, spans, min_fd, cache, cell)

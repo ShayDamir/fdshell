@@ -8,11 +8,12 @@ fn number(word: &'static CStr) -> ShortCStr {
 }
 
 /// The recognized form is exact, and the two prefixes are the two Linux
-/// installs. The rejected rows are plain paths to the kernel, and bash 5.3.9
-/// fails each of them on the open (rc 1, `No such file or directory`):
-/// `/dev/fd/01` is not fd 1 (the entry's name is `1`), `/dev/fd/1x` and
-/// `/dev/fd/+1` carry junk, `/dev/fd/` is the directory, and a value outside the
-/// `i32` fd-number range is no fd at all. Integration twin:
+/// installs. The predicate runs on the **final expanded name** the target
+/// pipeline resolves (task #479). The rejected rows are plain paths to the
+/// kernel, and bash 5.3.9 fails each of them on the open (rc 1, `No such file
+/// or directory`): `/dev/fd/01` is not fd 1 (the entry's name is `1`),
+/// `/dev/fd/1x` and `/dev/fd/+1` carry junk, `/dev/fd/` is the directory, and a
+/// value outside the `i32` fd-number range is no fd at all. Integration twin:
 /// `tests/redirect.rs::dev_fd_target_is_canonical_digits_only`.
 #[test]
 fn dev_fd_word_is_recognized_only_in_the_exact_form() {
