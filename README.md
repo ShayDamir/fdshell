@@ -385,7 +385,7 @@ too, where bash would create the file `%var`
 The target of a `>`-family operator is a **word**: `$( … )`, `` ` … ` ``,
 `$(( … ))`, `$name`, `${name…}`, `$@`/`$*` and a leading `~` expand in it, the
 result is split on `IFS`, and each field is expanded against the filesystem,
-relative to the last `builtin cd`.
+relative to the last `cd`.
 
 ```shell
 echo hi > $(echo f)      # writes the file `f`
