@@ -7,7 +7,7 @@ pub(crate) use literal::literal_indices;
 use super::Token;
 use super::case_clause;
 use super::semi::{List, list_closing_keyword_index, semi_byte, trim_semi, try_join_masked};
-use super::word_quoted::keyword_word;
+use super::word_quoted::{keyword_word, slot_rejects};
 use crate::error::parse::ParseError;
 use crate::keywords::Closer;
 use crate::mask::MaskBit;
@@ -77,6 +77,22 @@ pub(crate) fn tokens_to_case(
     let word_tokens = trim_semi(closed.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?);
     ensure!(!word_tokens.is_empty(), ParseError::CaseEmptyWord);
 
+    // POSIX 2.9.4.3 spells `case WORD in` and POSIX 2.9.1 puts control operators
+    // at this position, so bash 5.3.9 rejects a word-opening `(` and a bare `)`
+    // here (task #470); the gate is the shared [`slot_rejects`], asked of every
+    // token of the trimmed slot **before** the join and the clause walk, because
+    // bash reports the earliest offending token (the `for` site documents the same
+    // order). The slot's owned set is only the `;` that [`trim_semi`] owns — the
+    // separator this position owns as its own (pinned: `case x; in esac` parses);
+    // every other row of the ONE set is rejected with it (tasks #495/#496's rule:
+    // each site that listed only the words it happened to notice is one bug).
+    if word_tokens
+        .iter()
+        .any(|tok| slot_rejects(tok, line, &owns_semi))
+    {
+        bail!(ParseError::CaseWordOperator);
+    }
+
     let (word, word_mask, word_span) = try_join_masked(word_tokens);
 
     let clauses = case_clause::parse_clauses(closed, in_idx + 1, esac_idx, text)?;
@@ -105,6 +121,14 @@ pub(crate) fn tokens_to_case(
         clauses,
         redirects,
     })
+}
+
+/// What the `case` word slot owns as its own separator: the `;` (and the newline
+/// that tokenizes as one) [`trim_semi`] trims — task **#470**'s decision, and the
+/// ONE predicate's per-site data. Every other row of the ONE set, and a word
+/// opening with `(`, is the control operator bash rejects at this position.
+fn owns_semi(w: &[u8]) -> bool {
+    w == b";"
 }
 
 /// The `case` block's tokens up to and including its closing `esac`: the word

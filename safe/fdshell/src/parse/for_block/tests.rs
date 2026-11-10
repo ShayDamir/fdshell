@@ -360,7 +360,11 @@ fn a_plain_ampersand_in_the_word_list_is_a_parse_error() {
 /// The span gate is the whole quoting rule: `"&"`, `'&'` and a glued `x&` are
 /// word **data**, and an escaped `\&` reaches the list as the pair — the
 /// tokenizer keeps the backslash in the word text (measured, and bash prints
-/// `&` for the quoted and escaped forms).
+/// `&` for the quoted and escaped forms). The paren twins are task **#470**'s
+/// parity rows: a quoted `"(a)"` keeps its mask bit and an escaped `\(` keeps
+/// the backslash as the leading byte, so neither fires the word-opening reading
+/// (bash rc 0 for both, measured — a bare closing `)` on the escaped row would
+/// be its own separator token and join the rejects instead).
 /// LESSONS: "A separator-shaped word needs the span gate"
 #[test]
 fn a_quoted_ampersand_in_the_word_list_stays_a_word() {
@@ -385,6 +389,14 @@ fn a_quoted_ampersand_in_the_word_list_stays_a_word() {
             b"for i in 1 \"&\" 2 ; do echo x; done".as_slice(),
             vec![c"1".into(), c"&".into(), c"2".into()],
         ),
+        (
+            b"for i in \"(a)\" ; do echo x; done".as_slice(),
+            vec![c"(a)".into()],
+        ),
+        (
+            b"for i in \\(a ; do echo x; done".as_slice(),
+            vec![c"\\(a".into()],
+        ),
     ] {
         let ParsedLine::For(fb) = crate::parse::parse(&stext(line)).unwrap() else {
             panic!("expected For {line:?}")
@@ -399,9 +411,11 @@ fn a_quoted_ampersand_in_the_word_list_stays_a_word() {
 /// list's own terminator before the `do` all end the list, and the builder answers
 /// with the `do` expectation where bash stops at rc 2.
 ///
-/// The owners' half of the rule is the parens: they are task **#470**'s to decide,
-/// so this position owns them and `(a` stays a word — the row that keeps the owned
-/// set from being decorative.
+/// Task **#470** decided the parens: the word-opening `(` (the tokenizer's word
+/// byte) and the bare `)` (the tokenizer's own separator token) join the rejects,
+/// and the position owns nothing now — the `(a` row below is the move that took
+/// this test's words' assertion. The owners' half of the rule stays load-bearing
+/// through the `case` word slot's `;` (`word_quoted/tests.rs` pins the parameter).
 #[test]
 fn an_operator_word_in_the_word_list_is_a_parse_error() {
     for line in [
@@ -410,15 +424,10 @@ fn an_operator_word_in_the_word_list_is_a_parse_error() {
         b"for i in 1 || 2; do echo x; done".as_slice(),
         b"for i in 1 ; 2; do echo x; done".as_slice(),
         b"for i in ; 1; do echo x; done".as_slice(),
+        b"for i in (a); do echo x; done".as_slice(),
     ] {
         assert_eq!(parse_err(line), "expected 'do'", "{line:?}: bash rc 2");
     }
-    let ParsedLine::For(fb) =
-        crate::parse::parse(&stext(b"for i in (a); do echo x; done")).unwrap()
-    else {
-        panic!("expected For")
-    };
-    assert_eq!(fb.words, vec![c"(a".into(), c")".into()]);
 }
 
 /// bash's `for_action` ends with a compound list, so a group opener written behind

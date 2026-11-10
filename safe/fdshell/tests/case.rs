@@ -1739,7 +1739,12 @@ fn case_pattern_leading_paren_stays_text_when_quoted_or_escaped() {
 /// measured**, with the task that owns the shape named. Do not "fix" them here.
 /// The closer-glued-behind-`)` row of this family is bash parity now (task
 /// **#421**), pinned in
-/// [`a_closer_glued_behind_a_pattern_paren_closes_the_block`].
+/// [`a_closer_glued_behind_a_pattern_paren_closes_the_block`]. This test owns
+/// the **pattern** side of the `(` (task #334): the empty-pattern verdicts, the
+/// one-byte/first-pattern-only shapes, the join and the strip-composition rows.
+/// The two `case` **word**-slot rows that used to sit here — the word-opening
+/// `(` and the glued `case(a)` keyword break (R1) — are task **#470**'s decision
+/// now, pinned with the gate in [`a_paren_in_the_case_word_slot_is_rejected`].
 #[test]
 fn case_pattern_leading_paren_shapes_bash_rejects_are_accepted() {
     // The `(` is the whole token, so taking it off leaves the clause with no
@@ -1770,15 +1775,6 @@ fn case_pattern_leading_paren_shapes_bash_rejects_are_accepted() {
         (r#"case abc in ""(a*) echo m;; *) echo n;; esac"#, "m\n"),
         // The leading-`;` leniency (task #300) and the strip compose.
         (r"case abc in ; (a*) echo m;; *) echo n;; esac", "m\n"),
-        // A `(` in the `case` **word** is that word's own shape — task **#470**:
-        // the word stays `(abc)`, so the stripped pattern `a*` misses it.
-        (r"case (abc) in (a*) echo m;; *) echo n;; esac", "n\n"),
-        // A `(` glued right behind the `case` keyword ends the keyword word
-        // (task **#396**): the subject is the word `(a)`, no pattern matches it,
-        // so the line prints nothing at rc 0 while bash rejects it with rc 2
-        // (the general word break behind a non-keyword-shaped position is
-        // task **#316**'s family).
-        (r"case(a) in a) echo hi;; esac", ""),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
@@ -1795,6 +1791,58 @@ fn case_pattern_leading_paren_shapes_bash_rejects_are_accepted() {
     // is this row; bash 5.3.9 prints `m` rc 0, measured, and so does the tree).
     let (out, err, code) = run(r"case abc in(a*) echo m;; esac");
     assert_eq!((out.as_str(), code), ("m\n", 0), "stderr={err}");
+}
+
+/// Task **#470**: POSIX 2.9.4.3 spells `case WORD in`, and POSIX 2.9.1 makes
+/// `(` and `)` control operators at that position, so bash 5.3.9 rejects every
+/// unquoted spelling of a word-opening `(` and a bare `)` with rc 2 (measured);
+/// fdshell answers its own message at its house rc 1 (the documented rc
+/// asymmetry — README "Conditionals and loops"). The gate is the ONE predicate's
+/// word-slot rule (task #524's architecture, each site supplying its owned set),
+/// and this position owns only the `;` its own `trim_semi` trims — so the
+/// `&`/`|`/`&&`/`||` rows bash rejects land in the same verdict (R2, #495/#496's
+/// rule: each site that listed only the words it happened to notice is one bug).
+/// The quoted and escaped spellings stay word data where bash is parity; the
+/// mid-word `(` stays an accepted divergence — the tokenizer keeps `(` a word
+/// byte (R7) and the span gate is the whole quoting rule (LESSONS: "A
+/// separator-shaped word needs the span gate"). The unit pins sit with the gate
+/// in `parse/case_block/tests.rs`.
+#[test]
+fn a_paren_in_the_case_word_slot_is_rejected() {
+    for script in [
+        r"case (abc) in (a*) echo m;; *) echo n;; esac",
+        r"case (abc) in a*) echo m;; *) echo n;; esac",
+        r"case (abc) in esac",
+        r"case ( in a*) echo m;; *) echo n;; esac",
+        r"case (a) in (x) echo m;; *) echo n;; esac",
+        r"case(a) in a) echo hi;; esac",
+        r"case a ) b in x) echo m;; *) echo n;; esac",
+        r"case a & b in x) echo m;; *) echo n;; esac",
+        r"case a | b in x) echo m;; *) echo n;; esac",
+        r"case a && b in x) echo m;; *) echo n;; esac",
+        r"case a || b in x) echo m;; *) echo n;; esac",
+        r"case a(b) in x) echo m;; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: bash rc 2");
+        assert!(
+            err.contains("case: '(' and ')' are control operators here"),
+            "{script}: {err}"
+        );
+    }
+    // bash rc 0: a quoted and an escaped `(` are word data — the parity rows.
+    for script in [
+        r#"case "(" in x) echo m;; *) echo n;; esac"#,
+        r"case \( in x) echo m;; *) echo n;; esac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("n\n", 0), "{script}: {err}");
+    }
+    // Accepted divergence (bash rc 2, measured): a `(` **inside** a word stays
+    // word data — the tokenizer's design (R7), pinned with the multi-token join
+    // family (`multi_token_case_pattern_is_accepted`).
+    let (out, err, code) = run(r"case a(b in x) echo m;; *) echo n;; esac");
+    assert_eq!((out.as_str(), code), ("n\n", 0), "{err}");
 }
 
 /// The zero-byte quote spans of task #321 ride **on** the stripped byte: the

@@ -7006,7 +7006,8 @@ Pins: `parse/word_quoted/tests.rs::operator_word_reads_the_gate_and_the_owners_s
 `parse/for_block/tests.rs::an_operator_word_in_the_word_list_is_a_parse_error,
 `parse/case_clause/tests.rs::an_operator_word_in_a_pattern_slot_reports_the_empty_pattern`,
 `tests/loops.rs::a_standalone_operator_word_in_a_for_word_list_is_a_parse_error`,
-`tests/loops.rs::the_parens_of_a_for_word_list_stay_words`,
+`tests/loops.rs::the_parens_of_a_for_word_list_are_rejected` (renamed and flipped
+by task #470, which decided the parens it used to leave),
 `tests/case.rs::an_operator_word_in_the_pattern_list_is_a_parse_error`; the flipped
 fences `tests/cond_blocks.rs::for_list_with_and_is_a_parse_error`,
 `tests/block_redirect.rs::closer_shaped_words_stay_word_data` (`done|cat`: the `|`
@@ -7274,3 +7275,30 @@ two report rows this task closed,
 `parse/token_word/tests.rs::take_open_paren_answers_with_the_exact_shifted_tuple`
 — both resolve to a real file **and** a real ident, which is the whole point: a
 pointer the checker cannot resolve is invisible to it.
+
+## A word-slot operator rule sees the tokenizer's word granularity, not the bytes
+
+At a **word slot** (POSIX 2.9.4.3's `case WORD in`, POSIX 2.9.1's `for` word
+list) the reject rule runs on the tokenizer's granularity, and that is exactly
+enough: a `(` at a word **start** is the word's first byte (word-opening
+`(`abc`), a bare `)` arrives as its own separator token, and both land inside
+the rule. The two signals of the word-opening reading are the same ones
+`take_open_paren`/`opens_groups` read — the mask bit of byte 0 plus the leading
+byte — and the predicate's only data is the token's own state, so it is a
+method (see LESSONS: "A predicate whose only data is the domain type's state is a method; the orphan rule marks the border").
+A `(` **inside** a word stays word data where bash rejects it (accepted
+divergence, pinned as measured); escape spellings never fire because the pair
+keeps the backslash as the leading byte, so a per-byte "word contains an
+unquoted `(`" scan is the wrong shape — it would over-reject the escaped `\(`
+the span-gate family keeps out of text tests (see LESSONS: "A separator-shaped
+word needs the span gate, because the scan-back breaks on the separator byte itself").
+Each side of the rule's `||` must carry the verdict on its own (CATCHING_MUTANTS
+rule 8): the word-opening row `(abc` never reaches the ONE set, the predicate-
+only row `a ) b` never opens with `(`.
+
+Pins: `parse/token_word/tests.rs::opens_with_open_paren_reads_the_two_signals`,
+`parse/word_quoted/tests.rs::slot_rejects_pins_both_sides_of_the_or`,
+`parse/case_block/tests.rs::the_word_slot_rejects_the_operators_bash_rejects`,
+`parse/for_block/tests.rs::a_quoted_ampersand_in_the_word_list_stays_a_word`,
+`tests/case.rs::a_paren_in_the_case_word_slot_is_rejected`,
+`tests/loops.rs::the_parens_of_a_for_word_list_are_rejected`.

@@ -1379,14 +1379,55 @@ fn a_standalone_operator_word_in_a_for_word_list_is_a_parse_error() {
     }
 }
 
-/// The parens are the `for` list's own: they are task **#470**'s to decide, so
-/// the ONE predicate's owned set keeps them and `for i in (a); do` runs at rc 0
-/// where bash stops at rc 2 (measured) — the one row of the operator set that
-/// task #524 leaves to its owner.
+/// Task **#470** decided the parens: POSIX 2.9.1's `for` production takes a word
+/// list and `(`/`)` are control operators at that position, so the word-opening
+/// `(` (the tokenizer's word byte) and the bare `)` (the tokenizer's own
+/// separator token) join the rejects this gate already landed for `&`/`&&`/`|`/
+/// `||` (#360/#496/#524). bash 5.3.9 rejects every unquoted spelling with rc 2
+/// (measured) and fdshell answers the `do` expectation at its house rc 1. The
+/// quoted and escaped spellings stay words — bash parity rc 0 — and a `(`
+/// **inside** a word stays word data (the tokenizer's design, R7; LESSONS: "A
+/// separator-shaped word needs the span gate"; the unit twins are pinned in
+/// `parse/for_block/tests.rs`). The closer-shaped rows are task **#310**'s
+/// family: the word-list gate runs **before** the closer/body validators (bash
+/// reports the earliest offending token), so `done (a)` rejects and the R3 row
+/// `for i in (a) done; do` takes the gate's message — pinned **as measured**
+/// (rc 1 both before and after the decision). `for i in done; do` is the parity
+/// control: a closer-shaped word alone is a word and the loop runs.
 #[test]
-fn the_parens_of_a_for_word_list_stay_words() {
-    let (out, err, rc) = run(r#"for i in (a); do echo x; break; done"#);
-    assert_eq!((out.as_str(), rc), ("x\n", 0), "bash rc 2, #470: {err}");
+fn the_parens_of_a_for_word_list_are_rejected() {
+    for script in [
+        "for x in (a); do echo y; break; done",
+        "for x in ) ; do echo y; break; done",
+        "for x in ( ; do echo y; break; done",
+        "for x in (a ; do echo y; break; done",
+        "for x in (a b) ; do echo y; break; done",
+        "for i in done (a); do echo y; break; done",
+        "for i in (a) done; do echo y; break; done",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2: {err}");
+        assert!(err.contains("expected 'do'"), "{script}: {err}");
+    }
+    // bash rc 0 parity: quoted and escaped spellings are word data, and the
+    // closer-shaped word without a paren is a word — the loop runs.
+    for script in [
+        r#"for x in "(a)" ; do echo y; break; done"#,
+        r"for x in \(a ; do echo y; break; done",
+        r"for x in a\(b ; do echo y; break; done",
+        "for i in done; do echo y; break; done",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("y\n", 0), "{script}: {err}");
+    }
+    // Accepted divergence (bash rc 2, measured): a `(` **inside** a word stays
+    // word data — the tokenizer keeps `(` a word byte (R7).
+    let (out, err, rc) = run("for x in a(b ; do echo y; break; done");
+    assert_eq!(
+        (out.as_str(), rc),
+        ("y\n", 0),
+        "bash rc 2, accepted divergence: {err}"
+    );
 }
 
 /// A brace-expanded list row that carries `&` is a plain `&` **token** by the

@@ -169,14 +169,17 @@ f(){ echo hi & }                   # the function body keeps its `&`
 
 `for`'s word list stays strict: a **standalone** operator word anywhere in it is
 the operator, not a word — the `&` (task #360), `&&`, `||`, the pipeline `|` and a
-`;` that is not the list's own terminator before `do` (task #524) — so
+`;` that is not the list's own terminator before `do` (task #524), and a
+word-opening `(` or the bare `)` (task #470, the tokenizer keeps `(` a word
+byte, so a word that *opens* with it is that operator) — so
 `for i in 1 & do :; done`, `for i in 1 & ; do :; done`, `for i in 1 && ; do :;
 done`, `for i in 1 | ; do :; done` (`&;`, `;&` and `; & ;` spell the same list)
 and the newline spelling
 (`for i in 1 &` newline `do :; done`) are parse errors — bash stops at rc 2,
-fdshell at rc 1 with `expected 'do'`. A quoted `"&"` / `'&'` / `"&&"`, an escaped
-`\&` and a glued `x&` stay word data, and the parens stay words for now (task
-#470 owns them). A `&` behind a `&`, or a `;;` behind a `&`
+fdshell at rc 1 with `expected 'do'`. A quoted `"&"` / `'&'` / `"&&"` / `"(a)"`,
+an escaped `\&` / `\(` and a glued `x&` stay word data (bash parity), while a
+`(` **inside** a word stays word data where bash stops at rc 2 (accepted
+divergence, task #470). A `&` behind a `&`, or a `;;` behind a `&`
 outside a block (`echo a & ;;
 echo b`), is the parse error that runs nothing. A `&`-terminated **condition**
 is a background job too, one per condition run, so a loop records one per
@@ -1197,7 +1200,13 @@ a condition but has its own rule: POSIX #2.9.1 requires a `word` between `case`
 and `in`, so `case; in esac`, `case ; in esac`, `case in esac`, `case` + newline
 `in esac` and a comment-only word are parse errors (bash rc 2, here rc 1 with
 `case: empty word`) — while a quoted empty pair and a quoted `";"` **are** words,
-and those spellings run at rc 0 as bash does.
+and those spellings run at rc 0 as bash does. Task **#470** decides the operators
+of this position too: a word-opening `(`, a bare `)` and the rest of the operator
+set bash rejects at `case WORD in` (`case (abc) in (a*) echo m;; esac`,
+`case a ) b in …`, `case a & b in …` — bash rc 2) are parse errors here at rc 1
+with `case: '(' and ')' are control operators here (quote them)`; the slot's own
+owned `;` (`case x; in esac`) and the quoted, escaped and mid-word spellings stay
+words.
 
 A `for` **word list** is read as **words**: no keyword scores inside it, so
 `for i in done`, `for i in esac`, `for i in { 1 2` and `for i in }` are ordinary
@@ -1216,8 +1225,11 @@ fails the `do` expectation there, so `for i in 1 & ; do :; done`,
 `for i in 1 && ; do :; done`, `for i in 1 | ; do :; done` and
 `for i in ; 1; do :; done` are parse errors (rc 1 here, rc 2 in bash), while
 `"&"`, `'&'`, `"&&"` and `\&` stay words; the glued family above is the surviving
-divergence (owner #496), and the parens stay words for
-task #470. A missing `in` stays fdshell's own rc 1:
+divergence (owner #496). Task **#470** decided the parens at both word slots: a
+word-opening `(` and the bare `)` join the rejects (`for x in (a); do` and
+`case (abc) in …` are parse errors, bash rc 2), while a quoted `"(a)"`, an
+escaped `\(` and a `(` **inside** a word stay words — the first two are bash
+parity, the last the surviving divergence (pinned as measured). A missing `in` stays fdshell's own rc 1:
 `for i 1 2` is `expected 'in'`, bash rc 2.
 
 The `in word-list` of a `for` clause is **optional** (POSIX #2.9.1), and a clause

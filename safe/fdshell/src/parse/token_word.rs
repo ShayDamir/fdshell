@@ -158,6 +158,20 @@ impl Token {
         };
         Some(vec![opened])
     }
+
+    /// The word-level twin of [`Token::take_open_paren`] (task **#470**): the
+    /// word's first byte is `(` **and** that byte's mask bit is unquoted — the
+    /// same two signals `take_open_paren` and `stray::opens_groups` read. The
+    /// tokenizer keeps `(` an ordinary word byte, so a word that **opens** with
+    /// it is the control operator POSIX 2.9.4.3 spells `case WORD in` (and the
+    /// word list of POSIX 2.9.1's `for`): the word-opening `(` reaches the
+    /// word-slot rule this way. A quoted `"(b` keeps its bit and an escaped
+    /// `\(` keeps the backslash as the first byte, so neither fires; a `(`
+    /// behind the first byte is word data — the span-gate family (LESSONS:
+    /// "A separator-shaped word needs the span gate").
+    pub(crate) fn opens_with_open_paren(&self) -> bool {
+        !quoted_at(&self.mask, 0) && self.word.as_bytes().is_ok_and(|w| w.first() == Some(&b'('))
+    }
 }
 
 #[cfg(test)]

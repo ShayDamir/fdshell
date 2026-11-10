@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use super::{is_the_word, operator_word};
+use super::{is_the_word, operator_word, slot_rejects};
 use crate::parse::Token;
 use crate::parse::token::tokenize;
 use alloc::vec::Vec;
@@ -203,4 +203,49 @@ fn an_equal_word_that_is_no_separator_shape_is_not_the_word() {
     let tok_x = tokens.get(1).unwrap();
     assert!(tok_x.span_word(b"x"), "the span half says true");
     assert!(!is_the_word(tok_x, line, b"x"), "the set half says false");
+}
+
+/// [`slot_rejects`] is the word-slot rule task **#470** added (the `case` word
+/// and the `for` word list call it): [`operator_word`]'s verdict **plus** the
+/// tokenizer's `(`-word reading, because the tokenizer keeps `(` a word byte.
+/// Each half must carry the verdict on its own (CATCHING_MUTANTS rule 8): the
+/// word-opening row `(bc` is no row of the ONE set, so only the method decides
+/// it; the bare `)` opens with no `(`, so only the predicate decides it; and the
+/// quoted, escaped and mid-word spellings answer `false` through **both** halves
+/// (the span gate's family — LESSONS: "A separator-shaped word needs the span
+/// gate"). The owners'-half rows are the `owned` parameter's own pins, the same
+/// rule [`operator_word`]'s test above pins for the `&&`/`|` rows.
+#[test]
+fn slot_rejects_pins_both_sides_of_the_or() {
+    let at = |line: &[u8], i: usize| tokenize(line).unwrap().get(i).cloned().unwrap();
+    let owns_nothing = |_w: &[u8]| false;
+    for (line, i, want) in [
+        // Word-opening only: `(bc` is no row of the ONE set — the method decides.
+        (b"a (bc d".as_slice(), 1usize, true),
+        // Predicate-only: the bare `)` — the predicate decides.
+        (b"a ) b".as_slice(), 1, true),
+        // The exact `(` row of the set: both halves answer true.
+        (b"a ( b".as_slice(), 1, true),
+        // Mid-word, quoted, escaped, plain: word data through both halves.
+        (b"a a(b b".as_slice(), 1, false),
+        (b"a \"(b\" b".as_slice(), 1, false),
+        (b"a \\(b b".as_slice(), 1, false),
+        (b"a x b".as_slice(), 1, false),
+    ] {
+        assert_eq!(
+            slot_rejects(&at(line, i), line, &owns_nothing),
+            want,
+            "{line:?} (token {i})"
+        );
+    }
+    // The owners' half flips the answer for the predicate-only row: a `)` the
+    // position owns is word data; the same token is the operator for a position
+    // that does not own it.
+    let owns_paren = |w: &[u8]| w == b")";
+    assert!(!slot_rejects(&at(b"a ) b", 1), b"a ) b", &owns_paren));
+    assert!(slot_rejects(&at(b"a ) b", 1), b"a ) b", &owns_nothing));
+    // A word-opening word is never the exact-`(` row, so no owned set can reach
+    // it: the method decides alone even when the owner says the whole text.
+    let owns_the_word = |w: &[u8]| w == b"(bc";
+    assert!(slot_rejects(&at(b"a (bc d", 1), b"a (bc d", &owns_the_word));
 }

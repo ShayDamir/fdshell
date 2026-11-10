@@ -220,3 +220,40 @@ fn a_clause_closed_by_esac_is_a_clause_with_an_empty_body() {
 
     assert_eq!(block(b"case x in esac").clauses.len(), 0);
 }
+
+/// Task **#470**: a word-opening `(` and the bare `)` are the control operators
+/// POSIX 2.9.4.3 puts in front of the `case WORD` (bash 5.3.9 rejects every
+/// unquoted spelling at rc 2, measured), and the gate is the shared
+/// `word_quoted::slot_rejects`, asked of every token of the **trimmed** slot,
+/// after the empty-word guard and before the join and the clause walk (bash
+/// reports the earliest offending token, the order the `for` site documents). The
+/// slot's owned set is only the `;` `trim_semi` owns — every other row of the ONE
+/// set rejects with it (the `&`/`|`/`&&`/`||` rows, R2). The quoted, escaped and
+/// mid-word spellings stay accepted: the mask bit, the backslash and the
+/// mid-word position are the span gate's family (LESSONS: "A separator-shaped
+/// word needs the span gate"), and the mid-slot `;` is the owned set's own row —
+/// the row that keeps the closure's comparison from being decorative.
+#[test]
+fn the_word_slot_rejects_the_operators_bash_rejects() {
+    let msg = "case: '(' and ')' are control operators here (quote them)";
+    for line in [
+        b"case (abc) in x) echo m;; esac".as_slice(),
+        b"case ( ) in x) echo m;; esac".as_slice(),
+        b"case a ) b in x) echo m;; esac".as_slice(),
+        b"case a & b in x) echo m;; esac".as_slice(),
+        b"case a | b in x) echo m;; esac".as_slice(),
+        b"case a && b in x) echo m;; esac".as_slice(),
+        b"case a || b in x) echo m;; esac".as_slice(),
+    ] {
+        assert_eq!(err_message(line), msg, "{line:?}: bash rc 2");
+    }
+    for line in [
+        b"case x ; in esac".as_slice(),
+        b"case x ; y in esac".as_slice(),
+        b"case \"a(b\" in esac".as_slice(),
+        b"case \\(b in esac".as_slice(),
+        b"case a(b in esac".as_slice(),
+    ] {
+        assert_eq!(err_message(line), "", "{line:?}");
+    }
+}

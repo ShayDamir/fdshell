@@ -95,3 +95,21 @@ fn take_open_paren_answers_with_the_exact_shifted_tuple() {
     };
     assert_eq!(token.take_open_paren(), Some(vec![]));
 }
+
+/// [`Token::opens_with_open_paren`] is the word-level twin of
+/// [`Token::take_open_paren`] (task **#470**): the two signals are the mask bit
+/// and the leading byte, read on the tokenizer's **own** tokens. A word that
+/// opens with an unquoted `(` is the control operator; the quoted `"(b` keeps
+/// its bit, an escaped `\(` keeps the backslash as the leading byte, and a `(`
+/// behind the first byte is word data — the rows that kill the method's identity
+/// mutants on both signals (CATCHING_MUTANTS rule 8).
+#[test]
+fn opens_with_open_paren_reads_the_two_signals() {
+    let at = |line: &[u8], i: usize| tokenize(line).unwrap().get(i).cloned().unwrap();
+    assert!(at(b"a (bc d", 1).opens_with_open_paren());
+    assert!(at(b"a ( b", 1).opens_with_open_paren());
+    assert!(!at(b"a a(b b", 1).opens_with_open_paren());
+    assert!(!at(b"a \"(b\" b", 1).opens_with_open_paren());
+    assert!(!at(b"a \\(b b", 1).opens_with_open_paren());
+    assert!(!at(b"a x b", 1).opens_with_open_paren());
+}

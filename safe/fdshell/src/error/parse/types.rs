@@ -25,6 +25,8 @@ pub(crate) enum ParseError {
     CaseEmptyWord,
     /// case: ';' before an empty clause list
     CaseEmptyClauseList,
+    /// case: '(' and ')' are control operators here (quote them)
+    CaseWordOperator,
     /// case arm: unexpected ')' — a command list cannot take a paren
     CaseArmUnexpectedCloseParen,
     /// stray ';;' — it only separates 'case' clauses

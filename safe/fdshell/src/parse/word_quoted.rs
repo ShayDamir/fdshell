@@ -74,6 +74,19 @@ pub(crate) fn operator_word(
         .find(|w| is_the_word(tok, line, w) && !owned(w))
 }
 
+/// The word-slot rule (task **#470**): [`operator_word`]'s verdict **plus** the
+/// tokenizer's `(`-word reading — the tokenizer keeps `(` a word byte, so a word
+/// that *opens* with it is that control operator (the two signals
+/// [`Token::take_open_paren`]/`stray::opens_groups` already read). Each half
+/// carries the verdict on its own: a word-opening `(abc` never reaches the set,
+/// and a bare `)` never opens with `(`; the quoted, escaped and mid-word
+/// spellings answer `false` through both (the pins name each row). The word
+/// slots that call this are the `case` word and the `for` word list; each brings
+/// only its own owned set.
+pub(crate) fn slot_rejects(tok: &Token, line: &[u8], owned: &dyn Fn(&[u8]) -> bool) -> bool {
+    tok.opens_with_open_paren() || operator_word(tok, line, owned).is_some()
+}
+
 /// The ONE set: [`separator_shape`]'s words (task #396's one set, reached through
 /// [`crate::keywords`]) plus the pipeline `|`, which stays [`pipe_token_span`]'s byte
 /// (task #261's ONE predicate). The list spells the set out so the predicate can
