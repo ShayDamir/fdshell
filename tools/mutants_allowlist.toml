@@ -10,6 +10,15 @@
 # `intercept/timeout_cmd/tests.rs::a_held_shared_borrow_answers_the_never_arm`,
 # which feeds the helper the held shared borrow the *script* path cannot (rule 19).
 
+# Task #551's gate run disproved the `parse/word_quoted.rs:99:28`
+# `replace && with || in is_the_word` record: the mutant is now CAUGHT, so the
+# entry is gone. Its proof was a program-path claim ("no token reaching
+# `is_the_word` through `operator_word` separates them") — CATCHING_MUTANTS rule
+# 19's shape — and `word_quoted/tests.rs::an_equal_word_that_is_no_separator_shape_is_not_the_word`
+# (task #549's pin) feeds the helper a `b"x"` word that is no row of `THE_SET`,
+# where the two spellings part. Measured in the run: the mutation landed and that
+# row failed. The eight records below were re-verified by the same run.
+
 [[allow]]
 file = "safe/fdshell/src/segment/line.rs"
 line = 40
@@ -29,22 +38,6 @@ pinned rows at those shapes (`echo a # note` + a line-opening `&` in
 tests/heredoc.rs, the deferral table in segment/bg/tests.rs) keep their values
 under the mutant, so no test inside the map's `test(/^segment::/)` filter can
 kill it."""
-
-[[allow]]
-file = "safe/fdshell/src/parse/word_quoted.rs"
-line = 99
-column = 28
-mutant = "replace && with || in is_the_word"
-reason = """Task #545's gate term. Every row of `THE_SET` that reaches this `&&` is a
-`separator_shape` word (the set IS `keywords::position::separators::separator_shape`
-s list, the `|` row is the only one taking the `if` branch), so the two spellings
-agree whenever `eq_bytes(w)` holds; when it does not, `span_word` s own
-`eq_bytes(w)` half is false too, and the outer conjunction answers false both
-ways. No token reaching `is_the_word` through `operator_word` separates them, so
-no test in the map`s filter can kill it; the pinned rows in
-`parse/word_quoted/tests.rs` (every row of the set, quoted, escaped, glued and
-synthesized spellings) keep their values under the mutant."""
-
 
 [[allow]]
 file = "safe/fdshell/src/parse/for_block/arith/region.rs"
