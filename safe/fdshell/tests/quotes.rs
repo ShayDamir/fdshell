@@ -653,7 +653,10 @@ fn the_prefix_words_stay_ungated() {
 /// prints the mask); fdshell answers the command lookup — `command NAME` is
 /// `"NAME" not found`, `builtin NAME` is `"NAME" is not a shell builtin`, rc 1.
 /// Owner: **task #473** (the fix must reach the keyword's parse path, not an
-/// argv-taking builtin — see the `unset %f` row above).
+/// argv-taking builtin — see the `unset %f` row above). The prefix rows have
+/// their own home in `tests/command.rs::prefix_reaches_name_lookups_not_parse_keywords`;
+/// this pin owns the quoting side and the pipeline-stage rows, and each file
+/// stands on its own.
 #[test]
 fn the_five_names_have_no_builtins_pinned() {
     for (script, needle) in [
