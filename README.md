@@ -432,7 +432,8 @@ with the digits not an argument: fdshell never splits a word at an operator
 byte ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#operators-are-recognized-at-word-starts)).
 
 `set -o noclobber` (`set -C`) refuses a `>` that would overwrite an existing
-file; `>|` is the explicit override. Several redirections may be written on
+regular file (every other existing target — a pipe, a character device —
+opens); `>|` is the explicit override. Several redirections may be written on
 one command; they are applied in order, so the last one on a given descriptor
 wins.
 

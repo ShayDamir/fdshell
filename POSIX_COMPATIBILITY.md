@@ -456,10 +456,11 @@ through an **expansion** — variable, arithmetic, quoted, escape-folded or
 globbed — because the magic reading runs on the final expanded name (task #479,
 `tests/redirect.rs::dev_fd_target_expands_to_the_magic_form`):
 `f(){ echo hi; echo e >&2; }; p=/dev/fd/1; f > z 2> $p` leaves `z` = `e\n\n`
-and prints nothing, in both shells. Two measured divergences remain (all
-2026-10-28 against bash 5.3.9 with stdout and stderr piped; the #459 rows
-below are not a third — they are this section's own rules made observable by
-the backing, where bash's pipe hides them):
+and prints nothing, in both shells. One measured divergence remains
+(2026-10-28 against bash 5.3.9 with stdout and stderr piped; the #459 rows
+below are not a second — they are this section's own rules made observable by
+the backing, where bash's pipe hides them), plus one row that reached parity
+with task #480:
 
 - A target naming an fd that an **earlier def of the same command** opens fails
   here, because the consumer's pre-open pass opens every path word **before** any
@@ -469,13 +470,29 @@ the backing, where bash's pipe hides them):
   three: `echo e 3>&1 2> /dev/fd/3` prints `e`; `echo e 3> z 2> /dev/fd/3` prints
   `e` and leaves `z` empty, because fd 2 is `z`; `f 3>&1 > z 2> /dev/fd/3`
   (`f(){ echo hi; echo e >&2; }`) leaves `z` = `hi\n` and prints `e`. Where the
-  fd **exists** the content rule above holds and both shells agree. Owning task:
-  **#482**.
-- `set -C` refuses a magic target whose descriptor is a **pipe**
-  (`set -C; echo e > /dev/fd/1` → rc 1, `noclobber is set`); bash's open
-  succeeds — Linux ignores `O_EXCL` for a non-regular file — and prints `e`. On
-  a regular-file target both shells refuse, which is the pinned shape. Owning
-  task: **#480**.
+  fd **exists** the content rule above holds and both shells agree. The rule now
+  reads through the `set -C` gate too (task #480): with noclobber on, the
+  pre-open pass judges the magic word against the **pre-command** fd 1 — a pipe,
+  so bash's stat gate opens it and the command runs (`z` = `e\n\n`, rc 0), while
+  bash applies `> z` first and its stat lands on the regular file — refusal, rc
+  1, `z` created empty (measured 2026-11-10;
+  `tests/redirect.rs::set_c_on_an_expanded_magic_target_loses_the_refusal_to_the_pipe`).
+  Owning task: **#482**.
+- `set -C` on a magic target whose descriptor is a **pipe** is parity since
+  task #480 (`set -C; echo e > /dev/fd/1` → both shells rc 0, stdout `e`,
+  measured 2026-11-10): bash's `noclobber_open` **stats** the target and refuses
+  only a **regular** file; the kernel is not lenient — it answers `EEXIST` to
+  `O_CREAT|O_EXCL` for a pipe, a character device, a FIFO, a socket and a
+  directory alike — so fdshell classifies the target itself
+  (`redirect/open/noclobber.rs`). On a regular-file target both shells refuse,
+  which is the pinned shape. Pins:
+  `tests/redirect.rs::set_c_on_a_pipe_backed_magic_target_writes_through`,
+  `set_c_on_a_character_device_target_opens_it`,
+  `set_c_on_a_directory_target_reports_the_errno` (rc 1 both shells, bash's
+  `Is a directory` echoed by fdshell's chain),
+  `set_c_on_a_symlink_to_a_regular_file_refuses` (the stat **follows** the
+  link); a **FIFO** row stays documented only — its open blocks without a
+  reader (measured with a background reader: bash delivers `e` at rc 0).
 
 On a descriptor a here-document/here-string opened, this section's rules are
 **decided** (#459): the fresh open truncates and `<` starts at byte 0 for both

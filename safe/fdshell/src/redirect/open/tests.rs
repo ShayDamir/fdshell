@@ -15,7 +15,8 @@ use crate::mask::MaskBit::Unquoted;
 use crate::options::{NOCLOBBER, STRICT};
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource, open_redirect_files};
 use crate::state::ShellState;
-use sys::fcntl::O_DIRECTORY;
+use sys::fcntl::{O_DIRECTORY, O_RDONLY};
+use sys::pipe::pipe2;
 
 static COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
@@ -626,23 +627,165 @@ fn strict_bans_the_expanded_magic_word_before_the_flag() {
     assert_eq!(entries.first().unwrap().magic, None);
 }
 
-/// `set -C` on an **expanded** magic word: the pass's own pre-open judges the
-/// exclusive create against the pre-command fds and refuses — the open-decides-
-/// success boundary, so the magic reading does not move this refusal
-/// (fdshell policy; pipe-backed parity is #480's row, untouched here).
+/// `set -C` on an **expanded** magic word whose fd is a **regular** file the
+/// test owns: the pass's own pre-open judges the exclusive create against the
+/// pre-command fds and refuses — the open-decides-success boundary, so the
+/// magic reading does not move this refusal (fdshell policy). The harness's
+/// fd 1 backs no unit test (LESSONS: "The noclobber refusal is bash's own stat
+/// gate, not kernel leniency"): a pipe-backed magic word now **opens** (bash
+/// parity — the rows below), so this one spells its word with an fd it owns.
 #[test]
 fn noclobber_refuses_an_expanded_magic_word() {
+    let (dir, _scratch) = scratch();
     let cell = ForkCell::new(ShellState::new());
     {
         let mut state = cell.borrow_mut().unwrap();
         state.options |= NOCLOBBER;
     }
-    set_var(&cell, "p", "/dev/fd/1");
+    let backed = sys::openat2::open(
+        CString::new(format!("{dir}/a1")).unwrap().as_c_str(),
+        O_RDONLY,
+    )
+    .unwrap();
+    let word = format!("/dev/fd/{}", backed.as_raw());
+    set_var(&cell, "p", &word);
     let report = open_redirect_files(&[word_def("$p", false)], &cell)
+        .err()
+        .unwrap();
+    let OpenRedirectError::Noclobber { name } = report.current_context() else {
+        panic!(
+            "expected a noclobber refusal, got {:?}",
+            report.current_context()
+        );
+    };
+    assert_eq!(name.as_bytes().unwrap(), word.as_bytes());
+}
+
+// --- noclobber's stat gate on non-regular targets (task #480) ---------------
+//
+// bash refuses only **regular** files; every other existing target opens with
+// the direction's own flags (rows measured 2026-11-10 against bash 5.3.9 —
+// the kernel answers `EEXIST` to `O_CREAT|O_EXCL` for **all** of these types,
+// so bash's own stat is the gate, not kernel leniency). A FIFO has no unit
+// row: its open blocks without a reader. Each non-strict row has a strict
+// twin through `cell_with(&dir, STRICT | NOCLOBBER)` with a relative word;
+// the twin reaches the same target **type** through a symlink in the scratch
+// dir (strict bans absolute words; the link bodies may be absolute — `statx`
+// follows and `openat2` runs with `resolve: 0`, one consistent pair). The
+// end-to-end rows live in `safe/fdshell/tests/redirect.rs`.
+
+/// A non-strict cell with `noclobber` set (the pattern of the rows above).
+fn noclobber_cell() -> ForkCell<ShellState> {
+    let cell = ForkCell::new(ShellState::new());
+    cell.borrow_mut().unwrap().options |= NOCLOBBER;
+    cell
+}
+
+/// The gate judges the symlink **through** the link (bash's `stat`, not
+/// `lstat`): the refusal, and the file keeps its bytes — an `lstat` would
+/// plain-open the link and truncate the existing file.
+#[test]
+fn noclobber_refuses_a_symlink_to_a_regular_file() {
+    let (dir, _scratch) = scratch();
+    std::fs::write(format!("{dir}/a1"), b"keep").unwrap();
+    std::os::unix::fs::symlink("a1", format!("{dir}/link")).unwrap();
+    let abs = format!("{dir}/link");
+    let report = open_redirect_files(&[write_def(&abs)], &noclobber_cell())
         .err()
         .unwrap();
     assert!(matches!(
         report.current_context(),
         OpenRedirectError::Noclobber { .. }
     ));
+    assert_eq!(
+        std::fs::read_to_string(format!("{dir}/a1")).unwrap(),
+        "keep"
+    );
+}
+
+#[test]
+fn strict_noclobber_refuses_a_symlink_to_a_regular_file() {
+    let (dir, _scratch) = scratch();
+    std::fs::write(format!("{dir}/a1"), b"keep").unwrap();
+    std::os::unix::fs::symlink("a1", format!("{dir}/link")).unwrap();
+    let report = open_redirect_files(&[write_def("link")], &cell_with(&dir, STRICT | NOCLOBBER))
+        .err()
+        .unwrap();
+    assert!(matches!(
+        report.current_context(),
+        OpenRedirectError::Noclobber { .. }
+    ));
+    assert_eq!(
+        std::fs::read_to_string(format!("{dir}/a1")).unwrap(),
+        "keep"
+    );
+}
+
+/// An existing **character device** opens, not refused (bash rc 0, measured):
+/// the refusal is bash's stat gate, and the kernel's `EEXIST` is not.
+#[test]
+fn noclobber_opens_an_existing_character_device() {
+    let (_dir, _scratch) = scratch();
+    let fds = open_redirect_files(&[write_def("/dev/null")], &noclobber_cell()).unwrap();
+    assert_eq!(fds.len(), 1, "the plain arm opens the character device");
+}
+
+#[test]
+fn strict_noclobber_opens_a_symlink_to_the_character_device() {
+    let (dir, _scratch) = scratch();
+    std::os::unix::fs::symlink("/dev/null", format!("{dir}/lnull")).unwrap();
+    let fds =
+        open_redirect_files(&[write_def("lnull")], &cell_with(&dir, STRICT | NOCLOBBER)).unwrap();
+    assert_eq!(fds.len(), 1, "the plain arm opens through the link");
+}
+
+/// A **pipe** reached through the magic form opens (the task's row: bash rc 0,
+/// prints `e`). The test owns the pipe (`pipe2`, the pattern the crate's tests
+/// use) — the harness's fd 1 is not a test's to assert on (LESSONS: "The
+/// noclobber refusal is bash's own stat gate, not kernel leniency").
+#[test]
+fn noclobber_opens_a_pipe_reached_through_the_magic_form() {
+    let (_dir, _scratch) = scratch();
+    let (_rd, wr) = pipe2(0).unwrap();
+    let word = format!("/dev/fd/{}", wr.as_raw());
+    let fds = open_redirect_files(&[write_def(&word)], &noclobber_cell()).unwrap();
+    assert_eq!(fds.len(), 1, "the plain arm opens the pipe");
+}
+
+#[test]
+fn strict_noclobber_opens_a_symlink_to_the_pipe() {
+    let (dir, _scratch) = scratch();
+    let (_rd, wr) = pipe2(0).unwrap();
+    std::os::unix::fs::symlink(
+        format!("/proc/self/fd/{}", wr.as_raw()),
+        format!("{dir}/lpipe"),
+    )
+    .unwrap();
+    let fds =
+        open_redirect_files(&[write_def("lpipe")], &cell_with(&dir, STRICT | NOCLOBBER)).unwrap();
+    assert_eq!(fds.len(), 1, "the plain arm opens through the link");
+}
+
+/// A **directory** is not refused either: the plain arm opens it and the
+/// kernel's own errno answers (bash: `Is a directory`, rc 1).
+#[test]
+fn noclobber_reports_the_errno_on_a_directory() {
+    let (dir, _scratch) = scratch();
+    std::fs::create_dir(format!("{dir}/sub")).unwrap();
+    let abs = format!("{dir}/sub");
+    let report = open_redirect_files(&[write_def(&abs)], &noclobber_cell())
+        .err()
+        .unwrap();
+    assert!(matches!(report.current_context(), OpenRedirectError::Open));
+}
+
+#[test]
+fn strict_noclobber_reports_the_errno_on_a_directory_via_symlink() {
+    let (dir, _scratch) = scratch();
+    std::fs::create_dir(format!("{dir}/sub")).unwrap();
+    std::os::unix::fs::symlink("sub", format!("{dir}/ldir")).unwrap();
+    let report = open_redirect_files(&[write_def("ldir")], &cell_with(&dir, STRICT | NOCLOBBER))
+        .err()
+        .unwrap();
+    assert!(matches!(report.current_context(), OpenRedirectError::Open));
 }

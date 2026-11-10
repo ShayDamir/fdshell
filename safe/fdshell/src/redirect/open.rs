@@ -1,6 +1,7 @@
 // mutants: -C --lib -C --test -C strict -- -E 'test(/^redirect::open::/) | binary(strict)'
 
 mod cwd;
+mod noclobber;
 mod strict;
 mod target;
 

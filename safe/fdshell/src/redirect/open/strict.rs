@@ -7,6 +7,7 @@
 
 // mutants: -C --lib -C --test -C strict -- -E 'test(/^redirect::open::/) | binary(strict)'
 
+use super::noclobber::{Decision, decide_from_base};
 use super::target;
 use crate::error::redirect::OpenRedirectError;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
@@ -59,7 +60,7 @@ pub(super) fn target(
     let name = target_name.export();
     let noclobber_flag = noclobber && def.write_flag();
     let opened = match noclobber_flag {
-        true => noclobber_open(&name, &target_name, base),
+        true => noclobber_open(def, &name, &target_name, base),
         false => open(&name, &open_how(def), base),
     }?;
     let rehomed = opened
@@ -88,22 +89,32 @@ fn open(
     sys::openat2::openat2(AtFd::from(base), name, how).change_context(OpenRedirectError::Open)
 }
 
-/// `noclobber` under strict: an exclusive create through the pinned dirfd;
-/// `EEXIST` means the target exists, and the refusal names the **expanded**
-/// target (bash: `set -C; n=f; echo hi > $n` → `f: cannot overwrite`).
+/// bash's stat gate through the pinned dirfd: refuse a regular file, open every
+/// other existing target with the direction's own flags, and keep the exclusive
+/// create for "not there" (redirect/open/noclobber.rs). The refusal names the
+/// **expanded** target (bash: `set -C; n=f; echo hi > $n` → `f: cannot
+/// overwrite`).
 fn noclobber_open(
+    def: &RedirectDef,
     name: &ExportedCStr,
     path: &ShortCStr,
     base: &LocalFd,
 ) -> Result<LocalFd, Report<OpenRedirectError>> {
-    let how = OpenHow::new(RedirectDirection::noclobber_flags() as u64, 0o666);
-    match open(name, &how, base) {
-        Ok(fd) => Ok(fd),
-        Err(report) => match report.downcast_ref::<SyscallError>() {
-            Some(e) if e.errno() == sys::errno::EEXIST => {
-                Err(OpenRedirectError::Noclobber { name: path.clone() }.into())
+    match decide_from_base(base, name) {
+        Decision::Refuse => Err(OpenRedirectError::Noclobber { name: path.clone() }.into()),
+        Decision::Plain => open(name, &open_how(def), base),
+        // The exclusive create through the pinned dirfd: `EEXIST` is the refusal.
+        Decision::Exclusive => {
+            let how = OpenHow::new(RedirectDirection::noclobber_flags() as u64, 0o666);
+            match open(name, &how, base) {
+                Ok(fd) => Ok(fd),
+                Err(report) => match report.downcast_ref::<SyscallError>() {
+                    Some(e) if e.errno() == sys::errno::EEXIST => {
+                        Err(OpenRedirectError::Noclobber { name: path.clone() }.into())
+                    }
+                    Some(_) | None => Err(report),
+                },
             }
-            Some(_) | None => Err(report),
-        },
+        }
     }
 }

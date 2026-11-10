@@ -1214,27 +1214,97 @@ fn dev_fd_target_expands_to_the_magic_form() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// The boundary the task does **not** move: the pre-open pass still judges the
-/// magic open's success against the pre-command fds, so `set -o noclobber`
-/// refuses the command on an expanded magic word. bash's refusal here is the
-/// regular-file case (the magic name lands on `z`, the earlier def's target —
-/// both shells refuse, rc 1, and the earlier `> z` leaves `z` created empty —
-/// LESSONS: "POSIX redirect order is observable" (task #337)); the pipe-backed
-/// parity divergence of `set -C` on the magic form stays #480's row. Measured
-/// 2026-11-10 against bash 5.3.9 in this harness; the error wording is fdshell's.
+/// The boundary this task **flips**: the pre-open pass still judges the magic
+/// open's success against the pre-command fds, and the harness's fd 1 is a
+/// pipe — so bash's stat gate (regular files only,
+/// `redirect/open/noclobber.rs`) opens it and fdshell lands exactly on its
+/// no-`set -C` twin `dev_fd_target_expands_to_the_magic_form` (measured this
+/// round in the same harness: rc 0, `z` = `e\n\n`, stderr empty). bash's
+/// refusal here is the regular-file case (its redirection step applies `> z`
+/// first, so by the second def the magic name lands on `z` — bash rc 1 for the
+/// command, `cannot overwrite existing file`, `z` left created empty, and the
+/// script prints `rc=1`; LESSONS: "POSIX redirect order is observable" (task
+/// #337)). The pre-open pass judges success against the pre-command fds — the
+/// same rule, now observable for the refusal
+/// (POSIX_COMPATIBILITY's **#482** bullet). Measured 2026-11-10 against bash
+/// 5.3.9 in this harness; the error wording is fdshell's.
 #[test]
-fn set_c_on_an_expanded_magic_target_keeps_the_refusal() {
+fn set_c_on_an_expanded_magic_target_loses_the_refusal_to_the_pipe() {
     let (path, _spath) = temp_path("devfd_noclobber");
     let script = format!(
         "set -o noclobber; f(){{ echo hi; echo e >&2; }}; p=/dev/fd/1; f > {path} 2> $p; echo rc=$?"
     );
     let (out, err, code) = run(&script);
-    assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err:?}");
-    assert!(err.contains("noclobber"), "stderr={err:?}");
+    assert_eq!(
+        (out.as_str(), code),
+        ("rc=0\n", 0),
+        "{script}: stderr={err:?}"
+    );
+    assert!(err.is_empty(), "{script}: stderr={err:?}");
     assert_eq!(
         std::fs::read(&path).unwrap(),
-        b"",
-        "the earlier def's create survives, the command never ran"
+        b"e\n\n",
+        "the magic open ran at apply time against `z`, as the twin pins"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The task's headline row, now parity: `set -C` on a magic target whose
+/// descriptor is a **pipe** — bash's stat gate refuses only regular files, so
+/// bash opens the pipe with the direction's flags and `echo` writes through
+/// (bash 5.3.9, measured 2026-11-10 in this harness: rc 0, stdout `e\n`,
+/// stderr empty). The kernel answers `EEXIST` to `O_EXCL` for pipes too, so
+/// the gate is bash's own stat, not kernel leniency
+/// (LESSONS: "The noclobber refusal is bash's own stat gate, not kernel
+/// leniency").
+#[test]
+fn set_c_on_a_pipe_backed_magic_target_writes_through() {
+    let (out, err, code) = run("set -o noclobber; echo e > /dev/fd/1");
+    assert_eq!((out.as_str(), code), ("e\n", 0), "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+/// A **character device** target: the stat gate passes it to the plain open —
+/// measured row, rc 0 in both shells (the script prints `rc=0`); the kernel
+/// ignores `O_TRUNC` for a non-regular target and `echo` writes into the void.
+#[test]
+fn set_c_on_a_character_device_target_opens_it() {
+    let (out, err, code) = run("set -o noclobber; echo e > /dev/null; echo rc=$?");
+    assert_eq!((out.as_str(), code), ("rc=0\n", 0), "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+/// A **directory** target: no refusal — the kernel answers its own errno
+/// (bash 5.3.9 measured 2026-11-10: rc 1, `Is a directory`; fdshell rc 1, its
+/// chain carries `Is a directory` under `failed to open redirection path`).
+#[test]
+fn set_c_on_a_directory_target_reports_the_errno() {
+    let (_path, sp) = temp_path("noclobber_dir");
+    let dir = sp.to_str().unwrap();
+    let (_out, err, code) = run(&format!("set -o noclobber; echo e > {dir}"));
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(err.contains("Is a directory"), "stderr={err:?}");
+}
+
+/// A symlink to a **regular** file is judged **through** the link (bash's
+/// `stat`, not `lstat`): both shells refuse at rc 1 — bash names the symlink
+/// with `cannot overwrite existing file`, fdshell's chain carries `noclobber
+/// is set` — and the file keeps its bytes. Measured 2026-11-10, bash 5.3.9.
+#[test]
+fn set_c_on_a_symlink_to_a_regular_file_refuses() {
+    let (path, sp) = temp_path("noclobber_symlink");
+    std::fs::write(&path, b"keep\n").unwrap();
+    let link = sp.join("link");
+    let link = link.to_str().unwrap();
+    std::os::unix::fs::symlink(&path, link).unwrap();
+    let (_out, err, code) = run(&format!("set -o noclobber; echo e > {link}"));
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert!(err.contains("noclobber is set"), "stderr={err:?}");
+    assert!(err.contains(link), "the refusal names the symlink: {err:?}");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "keep\n",
+        "the refusal happens before the open"
     );
     let _ = std::fs::remove_file(&path);
 }

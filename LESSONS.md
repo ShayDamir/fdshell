@@ -1664,7 +1664,7 @@ The `seed` is the pipeline child's pipe ends: bash applies a stage's redirection
 
 The same table answers the **magic path**: `/dev/fd/<n>` and `/proc/self/fd/<n>` are ordinary `Path` defs whose `open()` the resolver runs at resolve time, through the number the table gives for `n` (`redirect/resolve/fd_path.rs`; the parse layer used to turn the word into a `RedirectDef::dup`, and that shortcut is gone). bash's open follows the kernel's symlink to the file the fd points at *then*, so the def gets a **fresh** description: `f > z 2> /dev/fd/1` leaves `z` = `e\n\n` (two descriptions racing at 0, `>` truncating), `cat < /dev/fd/0` after a partial read starts at byte 0, and a seed entry behaves like a def. A `dup` is **not** that effect on Linux: it shares the description, so the offset is shared and nothing truncates. The reading is on the **final expanded name** the open pass resolves (`redirect/open/target.rs`), in canonical decimal only — so a target that only *expands* to the magic form is opened at resolve time too (task #479) — and the kernel's entry for fd 1 is named `1`, so `/dev/fd/01`, `/dev/fd/1x` and `/dev/fd/-1` are plain paths whose open fails (bash rc 1), and a `Close` entry fails it too. Say that **"then"** with its boundary: the *content* of the magic open follows the table, its **success** is still judged by the consumer's pre-open pass, which runs against the **pre-command** fds — so a target naming an fd that an **earlier def of the same command** opens fails here (rc 1, and a `>` target created empty) where bash's per-def application succeeds (`echo e 3> z 2> /dev/fd/3`: bash rc 0, `z` empty, fd 2 = `z`; task #482 owns the fix, `POSIX_COMPATIBILITY.md` the rows).
 
-Pins: `tests/redirect.rs::stderr_dup_after_a_write_redirect_lands_on_the_file`, `stderr_dup_before_a_write_redirect_keeps_the_shell_fd` (the fd-major trap a sorted table cannot answer), `stderr_dup_after_duplicate_write_redirects_lands_on_the_last_file` (the reverse walk's killer), `dup_from_a_fd_the_command_closed_fails`, `stderr_dup_after_a_write_redirect_in_a_pipeline_stage` (the seed, both precedences), `exec_and_group_scopes_apply_in_written_order`, `dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at`, `dev_fd_read_target_starts_at_byte_zero`, `dev_fd_target_is_canonical_digits_only`, `dev_fd_target_in_a_pipeline_stage_lands_on_the_pipe`, `dev_fd_target_expands_to_the_magic_form`, `set_c_on_an_expanded_magic_target_keeps_the_refusal`; unit: `redirect/resolve/tests.rs::dup_after_a_path_def_shares_the_preceding_def_s_description`, `dup_shares_the_last_def_s_description_when_two_defs_target_one_fd` (the same killer at the resolver), `dup_after_a_close_def_reports_the_fd_as_not_open`, `dup_clone_of_a_process_fd_sits_above_every_target`, `dup_from_a_seed_entry_shares_the_seed_s_description`, `seed_entries_are_older_than_every_def`, `dev_fd_target_is_a_fresh_open_of_the_named_fd_s_file`, `redirect/open/target/tests.rs::dev_fd_word_is_recognized_only_in_the_exact_form`, `redirect/scope/tests.rs::interleaved_scope_restores_both_fds_after_a_dup`. Closing the gap retired the sibling-dup divergences of tasks #178/#183/#363 (`cat 3<<<str <&3`, `cat 3<<T 1>&3`, `cat 3<<'a <<b' <&3` now match bash): `herestring::prefixed_here_string_sibling_dup_sees_the_descriptor` and the `*_known_divergences` rows of `tests/heredoc.rs`.
+Pins: `tests/redirect.rs::stderr_dup_after_a_write_redirect_lands_on_the_file`, `stderr_dup_before_a_write_redirect_keeps_the_shell_fd` (the fd-major trap a sorted table cannot answer), `stderr_dup_after_duplicate_write_redirects_lands_on_the_last_file` (the reverse walk's killer), `dup_from_a_fd_the_command_closed_fails`, `stderr_dup_after_a_write_redirect_in_a_pipeline_stage` (the seed, both precedences), `exec_and_group_scopes_apply_in_written_order`, `dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at`, `dev_fd_read_target_starts_at_byte_zero`, `dev_fd_target_is_canonical_digits_only`, `dev_fd_target_in_a_pipeline_stage_lands_on_the_pipe`, `dev_fd_target_expands_to_the_magic_form`, `set_c_on_an_expanded_magic_target_loses_the_refusal_to_the_pipe` (flipped to fdshell's side of the boundary by task #480, its bash column in the doc comment); unit: `redirect/resolve/tests.rs::dup_after_a_path_def_shares_the_preceding_def_s_description`, `dup_shares_the_last_def_s_description_when_two_defs_target_one_fd` (the same killer at the resolver), `dup_after_a_close_def_reports_the_fd_as_not_open`, `dup_clone_of_a_process_fd_sits_above_every_target`, `dup_from_a_seed_entry_shares_the_seed_s_description`, `seed_entries_are_older_than_every_def`, `dev_fd_target_is_a_fresh_open_of_the_named_fd_s_file`, `redirect/open/target/tests.rs::dev_fd_word_is_recognized_only_in_the_exact_form`, `redirect/scope/tests.rs::interleaved_scope_restores_both_fds_after_a_dup`. Closing the gap retired the sibling-dup divergences of tasks #178/#183/#363 (`cat 3<<<str <&3`, `cat 3<<T 1>&3`, `cat 3<<'a <<b' <&3` now match bash): `herestring::prefixed_here_string_sibling_dup_sees_the_descriptor` and the `*_known_divergences` rows of `tests/heredoc.rs`.
 
 ## A command's fds must be saved above every redirect target of that command
 Saving a target fd with `dup_cloexec` returns the **lowest** free fd, which can
@@ -7405,3 +7405,38 @@ accepted/reported half of the rule stays pinned by
 `safe/fdshell/tests/set_opts.rs::cluster_error_reports_before_the_builtin_keyword_check`,
 `safe/fdshell/tests/timeout.rs::builtin_prefix_on_timeout_prints_the_message_twice`
 and the `echo a | command cd sub` row of `safe/fdshell/tests/pipeline.rs`.
+
+## The noclobber refusal is bash's own stat gate, not kernel leniency (task #480)
+
+**Rule:** bash's `noclobber_open` (`redir.c`) **stats** the target before it
+opens: a regular file is the refusal; nothing there opens as an **exclusive
+create** (the create stays atomic, and a create that fails with another errno
+reports its own errno); an existing non-regular target opens with the
+direction's flags and `O_EXCL` off. The kernel is **not** lenient —
+`O_WRONLY|O_CREAT|O_EXCL|O_TRUNC` answers `EEXIST` for a FIFO, a character
+device and a pipe reached through `/proc/self/fd/1` alike (measured 2026-11-10
+with Python and bash 5.3.9) — so an errno-based rule cannot express bash's
+rows and fdshell must classify the target itself: the shared decision in
+`redirect/open/noclobber.rs` feeds both routes (the process-CWD path and the
+strict/`openat2` route), each with its own anchor (`stat` on the path, `statx`
+through the pinned `%CWD` fd — both follow symlinks, like bash). A divergence
+doc that attributes behaviour to the kernel must itself be measured: this
+entry's doc line said "Linux ignores `O_EXCL` for a non-regular file", which
+was wrong, and it had pinned fdshell's refusal where bash opens — the mechanism
+decides the implementation (task #480 flipped the row to parity).
+
+The harness-coupling half: a **unit** test must not assert on the type of the
+harness's fd 1 — it must own the fd it redirects to. nextest's fd 1 is a pipe,
+so the magic-word row backed by it flipped the moment the gate matched bash;
+that row now opens a regular file in its scratch dir and spells its word
+`/dev/fd/<n>`, and the pipe row builds its own `pipe2`.
+
+Pins: `redirect/open/noclobber/tests.rs` (the pure-decision arms),
+`redirect/open/tests.rs` (the both-route matrix and the re-backed magic row),
+and `safe/fdshell/tests/redirect.rs`
+(`set_c_on_a_pipe_backed_magic_target_writes_through`,
+`set_c_on_a_character_device_target_opens_it`,
+`set_c_on_a_directory_target_reports_the_errno`,
+`set_c_on_a_symlink_to_a_regular_file_refuses` — bash columns measured
+2026-11-10; the FIFO row stays documented only, its open blocks without a
+reader).
