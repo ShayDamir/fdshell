@@ -182,7 +182,10 @@ keeps the reusable proof. A "registry" below means that allowlist.
     killed on 27 such failures and re-probed green on a clean tree. `git clean
     -fd` before measuring, and stage explicit paths: `git add -A` commits the
     leak, and the committed `safe/fdshell/0` then breaks the *clean* suite at
-    every run.
+    every run. Resolution (task #476): the tests now leave the crate root clean
+    even when a run is aborted; the anchored `safe/fdshell/` `.gitignore` entries
+    for the artifact prefixes are the commit backstop, and the pre-probe habit
+    above stands.
 
 24. **When an entry's own proof shows an operand can never matter, delete the
     operand and the family dies with it.** Prove the operand dead by hand (rule 1),

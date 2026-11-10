@@ -11,3 +11,13 @@ PLAN.md
 .opencode/goals
 __pycache__/
 node_modules/
+
+# Test artifacts a run aborted before cleanup can leave in the fdshell crate
+# root (task #476): these paths must never be committed. Anchored on the crate
+# root so they can never hide a source file elsewhere (see `target` caveat
+# above) — an ignored file silently drops from the nix build.
+safe/fdshell/0
+safe/fdshell/&1
+safe/fdshell/fdshell-sock-*
+safe/fdshell/async-*
+safe/fdshell/sync-*
