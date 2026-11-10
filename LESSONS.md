@@ -7359,3 +7359,49 @@ answers `octal number out of range`). The report's trailing newline is
 script-visible and pinned in exact bytes: `safe/fdshell/tests/umask.rs` and the
 quotes-family rows `safe/fdshell/tests/quotes.rs::a_quoted_umask_applies_the_mask`.
 Symbolic modes and `-S` are a gap, not design (task #554).
+
+## The `builtin`/`command` prefix is a lookup-layer rule: it reaches name lookups, not parse-level keywords (task #473)
+
+**Rule:** the prefix is decided at the **lookup layer**
+(`safe/fdshell/src/parse/command.rs`): word 0 after the `NAME=value` prefix is
+`builtin`/`command`, and the word behind it goes to the name lookups — the
+`safe/builtins/` table, `safe/fdshell/src/parse/builtin.rs::is_builtin`, and the
+in-process intercept table (`safe/fdshell/src/intercept/dispatch.rs`);
+`command NAME` falls through to the `PATH` search for a name no table has and
+`builtin NAME` answers `is not a shell builtin`. A word that lives **only in the
+parser** — `umask`, `unset`, `break`, `continue`, `return`, recognized as the
+statement's word 0 by `safe/fdshell/src/parse/detect.rs` and
+`safe/fdshell/src/parse/detect_keyword.rs` — has no entry to reach, so both
+prefixes answer the lookup failure at rc 1 while bash reaches its builtin
+(`umask` prints the mask and `unset x` clears the variable at rc 0,
+`break`/`continue` warn at rc 0, `return` warns at rc 2 — bash 5.3.9, measured
+2026-11-10). The same rule decides the rest of the class, so it reads as one
+rule: **accepted** on the in-process commands whose semantics the prefix can
+carry — `wait`, `local`, `times`, `export_fd`, `let`
+(`safe/fdshell/src/intercept/validation.rs::validate_intercept_no_builtin`, capture
+check only) plus `shift`, `become`, `exec`, `colon`, which carry no prefix check at
+all — and **reported** as `prefix is not supported` on the ones whose shell state
+the prefix cannot honor (`check_builtin_not_supported` via `validate_intercept`).
+
+Why no builtin can take the five words over, which is what keeps the rows pinned at
+fdshell's values: a builtin's argv is the **expansion** surface (`%f` → the fd's
+number), so `unset %name` would stop closing the descriptor its keyword parse path
+closes; `break`, `continue`, `return` are in-process control signals
+(`safe/fdshell/src/loop_control.rs`) and a pipeline stage's forked child cannot
+raise one to its parent (task #381); and a builtin of only the quoted spelling
+would leave two implementations of one rule, so quoting would change what a command
+means — the layer rule this entry extends,
+
+LESSONS: "A keyword that doubles as a builtin needs the *same* disambiguation at every byte-scanning layer"
+
+Pins: `safe/fdshell/tests/command.rs::prefix_reaches_name_lookups_not_parse_keywords`
+(the ten rows of both prefixes, plus one reaches-half row so a flip on the lookup
+side fails), `safe/fdshell/tests/command.rs::a_prefix_row_loses_the_state_change`
+and `safe/fdshell/tests/command.rs::a_prefix_row_raises_no_loop_control` — the cost,
+bash's column in each comment — and the quoting side
+`safe/fdshell/tests/quotes.rs::the_five_names_have_no_builtins_pinned`; the
+accepted/reported half of the rule stays pinned by
+`safe/fdshell/tests/command.rs::command_prefix_rejected_on_intercepts`,
+`safe/fdshell/tests/set_opts.rs::cluster_error_reports_before_the_builtin_keyword_check`,
+`safe/fdshell/tests/timeout.rs::builtin_prefix_on_timeout_prints_the_message_twice`
+and the `echo a | command cd sub` row of `safe/fdshell/tests/pipeline.rs`.

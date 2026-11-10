@@ -548,12 +548,47 @@ the quoted and unquoted spellings of one command answer differently — `'break'
 rc 0 from the builtin, `break 1` rc 1 from the keyword — and quoting must not
 change what a command means.
 
-The cost of the decision is accepted and pinned
-(`tests/quotes.rs::the_five_names_have_no_builtins_pinned`): the
-`command`/`builtin` prefix cannot reach a parse-level shell command, so
-`command umask` is `"umask" not found` and `builtin break` is `"break" is not a
-shell builtin`, rc 1, where bash runs its builtin at rc 0 (owning task **#473**);
-a second operand to `umask` is reported here where bash accepts it silently —
+The rule behind all of it — stated once here for the whole class, owning task
+**#473** — is that the `command`/`builtin` prefix is a **lookup-layer** rule: word
+0 after the `NAME=value` prefix is `builtin`/`command`, and the word behind it goes
+to the **name lookups** — the `safe/builtins/` table,
+`safe/fdshell/src/parse/builtin.rs::is_builtin` (`true false pwd help explain
+fdexplain printf test type [`), and the in-process intercept table
+(`intercept/dispatch.rs`). `command NAME` falls through to the `PATH` search for a
+name no table has; `builtin NAME` reports `"NAME" is not a shell builtin`. The
+prefix is **accepted** on the in-process commands whose semantics it can carry —
+`wait`, `local`, `times`, `export_fd` and `let`, which call
+`safe/fdshell/src/intercept/validation.rs::validate_intercept_no_builtin` (the
+capture check only), plus `shift`, `become`, `exec` and `colon`, which carry no
+prefix check at all (measured: `command shift`, `builtin times`, `builtin let 1`
+and `command echo hi` all run, rc 0) — and **reported** as `prefix is not
+supported` on the in-process commands whose shell state the prefix cannot honor
+(`check_builtin_not_supported` via `validate_intercept`: `cd`, `eval`, `source`,
+`set`, `alias`, `unalias`, `export`, `hash`, `shopt`, `read`, `ulimit`, `signalfd`,
+`waitpid`, `envfilter`, `exit`, `timeout`, `send_fd`, `sendmsg`, `recvmsg`). The
+split is load-bearing, as `validate_intercept_no_builtin`'s own doc comment says,
+and it is pinned by `tests/command.rs::command_prefix_rejected_on_intercepts`,
+`tests/set_opts.rs::cluster_error_reports_before_the_builtin_keyword_check`,
+`tests/timeout.rs::builtin_prefix_on_timeout_prints_the_message_twice` and the
+`echo a | command cd sub` row in `tests/pipeline.rs`. bash reaches **every**
+builtin; that is the divergence, and this one rule is what makes the three
+behaviors — reaches, reports, falls through — one rule instead of three accidents.
+
+The cost of the decision is accepted and pinned at both locations — the prefix
+layer in `tests/command.rs::prefix_reaches_name_lookups_not_parse_keywords` (plus
+its cost rows `a_prefix_row_loses_the_state_change` and
+`a_prefix_row_raises_no_loop_control`) and the quoting side in
+`tests/quotes.rs::the_five_names_have_no_builtins_pinned`: the five words are in no
+name table, so the prefix cannot reach a parse-level shell command. `command umask`
+is `"umask" not found` and `builtin break` is `"break" is not a shell builtin`, rc
+1, where bash runs its builtin — `umask` prints `0022` and `command unset x`
+clears the variable at rc 0, `break` and `continue` warn at rc 0, and `return`
+warns at **rc 2** (measured against bash 5.3.9 on 2026-11-10). What the rows cost:
+a prefix-qualified `umask 022` leaves the mask pinned before it, a prefix-qualified
+`unset x` leaves `x` set, a prefix-qualified `break` runs the whole loop and a
+prefix-qualified `return 3` ends the function at rc 1 — every report on stderr in
+both shells, so only the rc and the lost state change are visible on stdout
+(owning task **#473**); a second operand to `umask` is reported here where bash accepts it silently —
 task **#472** kept that single-operand rejection by design (POSIX defines one
 `mode` operand, so extras are undefined) after `-p` and the report's trailing
 newline became parity, both pinned byte-exact in `safe/fdshell/tests/umask.rs`,

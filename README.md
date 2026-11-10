@@ -248,7 +248,11 @@ commands and the socket family.
 not reach them (`builtin umask` → `"umask" is not a shell builtin`,
 `command umask` → `"umask" not found`, rc 1), and a quoted spelling is
 transparent — `'umask' 022`, `'unset' %f`, `'break'` behave exactly like the
-unquoted words. See `POSIX_COMPATIBILITY.md`, "Quoted keywords are command words,
+unquoted words. The rule is the same for the whole class: the prefix is a
+**lookup-layer** rule, so it reaches the names in the builtin tables and no
+parse-level word — it is accepted on the in-process commands whose semantics it can
+carry, and reported as `prefix is not supported` on the ones whose shell state it
+cannot honor. See `POSIX_COMPATIBILITY.md`, "Quoted keywords are command words,
 quoted control keywords are not". `umask` takes `[-p] [mode]`: the bare report
 ends with a newline, and `-p` gives that report its reusable `umask MODE` form —
 only for the no-operand report, since applying a mode prints nothing (bash's
