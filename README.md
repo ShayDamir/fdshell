@@ -1727,6 +1727,25 @@ alias ll='ls -l'
 unalias ll
 ```
 
+Expansion is **not** gated to the interactive shell: fdshell expands aliases
+in **every** input mode — the REPL, `-c`, a script file — so `alias e=echo; e
+hi` prints `hi` at rc 0 where bash answers `e: command not found` at rc 127
+(POSIX XCU `alias`/Alias Expansion substitutes in the interactive shell, and
+bash gates the non-interactive case behind `shopt -s expand_aliases`; its `-c`
+string is parsed up front, so `shopt -s expand_aliases; alias e=echo; e hi`
+stays unexpanded there too). The `expand_aliases` option is on by default and
+is the user's control: `shopt -u expand_aliases` opts out, and since fdshell
+runs each statement as it reads it, a mid-script `shopt` toggle applies from
+the next statement on. Pins:
+`tests/alias.rs::expansion_is_not_gated_to_interactive_accepted_divergences`,
+`tests/alias.rs::a_mid_script_shopt_enable_takes_effect_on_later_statements`.
+
+A **quoted** command word is never aliased, and fdshell's command-not-found
+code is 1, not bash's 127 — a shell-wide convention documented at
+`tests/quotes.rs::alias_body_round_trips_a_span`. So `alias ls=x; ls` reports
+the resolve layer's error naming `x` at rc 1, where bash runs the real `ls`
+(task #471).
+
 ### Interactive shell
 
 Run with no arguments, fdshell prompts with `fdshell> ` and reads one logical

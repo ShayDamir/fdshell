@@ -7302,3 +7302,43 @@ Pins: `parse/token_word/tests.rs::opens_with_open_paren_reads_the_two_signals`,
 `parse/for_block/tests.rs::a_quoted_ampersand_in_the_word_list_stays_a_word`,
 `tests/case.rs::a_paren_in_the_case_word_slot_is_rejected`,
 `tests/loops.rs::the_parens_of_a_for_word_list_are_rejected`.
+
+## A pre-parse rewriter runs per statement, so a mid-run option toggle moves the later statements (task #471)
+
+**Rule:** alias expansion is **mode-independent** in fdshell — REPL, `-c` and
+a script file alike — because the rewriter sits inside the per-statement run
+(`run.rs`'s `run_one`, reached one statement at a time from
+`script.rs`/`cond.rs`) and reads the **live** `ShellState`. So an option
+written as an *earlier* statement decides what a *later* statement's rewriter
+sees: `alias e=echo; shopt -u expand_aliases; e hi` does not expand (the
+resolve layer's error naming `e`, rc 1) while `shopt -u expand_aliases; alias
+e=echo; shopt -s expand_aliases; e hi` does. bash parses the **whole** `-c`
+input before running anything and substitutes aliases only in the interactive
+shell — non-interactively it needs `shopt -s expand_aliases`, and that row
+therefore stays unexpanded — so each row of the measured table is an accepted
+divergence, pinned at fdshell's value with bash's in the assertion message:
+`alias e=echo; e hi` prints `hi` at rc 0 where bash gives rc 127 `e: command
+not found`; `alias x=true; x; echo rc=$?` prints `rc=0` against bash's
+`rc=127`; `alias ls=x; ls` names `x` at rc 1 where bash runs the real `ls`;
+`alias e=echo; case abc in (a*) e m;; esac` prints `m` at rc 0 where bash
+gives rc 127 — the row #334 exposed by making that arm reachable (its
+`(`-strip pins stay in `tests/case.rs`, which never aliases a word, so the two
+suites do not overlap). `options::DEFAULTS` already ships `expand_aliases` on
+for every mode and its own doc comment names bash's interactive-only rule, and
+the sibling rewriter (`brace_expand`) runs in every mode for the same reason,
+so the decision is to keep the mode-independent rule with the `shopt` toggle
+as the user's control; making the default mode-dependent is a behavior
+migration (DEFAULTS → 0, an interactive seed in `repl/run.rs`, ~20 flipped
+pins, pty tests) this task does not own.
+
+Not the same mechanism as LESSONS: "A pre-parse text rewrite is re-tokenized: generated `#`/keyword bytes are re-recognized"
+— that entry is about what the tokenizer re-recognizes in rewritten bytes;
+this one is about *when* the rewrite runs relative to the statements that set
+its options.
+
+Pins:
+`tests/alias.rs::expansion_is_not_gated_to_interactive_accepted_divergences`,
+`tests/alias.rs::a_mid_script_shopt_enable_takes_effect_on_later_statements`,
+`tests/alias.rs::expand_aliases_gate_disables_expansion`,
+`tests/shopt.rs::expand_aliases_on_by_default`, plus the README "Aliases"
+paragraph.
