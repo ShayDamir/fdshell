@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use alloc::borrow::ToOwned;
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::ffi::CStr;
@@ -339,7 +340,10 @@ fn file_tests_on_fd_vars() {
     ins(&mut state, c"d", dir_fd);
 
     // Without the original `%var`, the substituted value is just a path.
-    assert_eq!(run(&["-f", "0"], &state).unwrap(), 1);
+    // Scratch-rooted, never bare-relative: a relative operand resolves against
+    // the process CWD (the crate root), where a leaked `0` would flip it (#476).
+    let zero_abs = _scratch.join("0").to_str().unwrap().to_owned();
+    assert_eq!(run(&["-f", zero_abs.as_str()], &state).unwrap(), 1);
 
     assert_eq!(
         with_refs(&["-f", "%f"], |r, o| eval(r, o, &state)).unwrap(),
