@@ -6,7 +6,6 @@
 //! never an operator: `2'>'g` is an argument, `2> "&" 1` opens the file `&1`.
 
 #![allow(clippy::unwrap_used)]
-use super::attached;
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
 use crate::parse::token::tokenize_statement;
@@ -16,14 +15,14 @@ use error_stack::Report;
 /// The attached form of the operator token (token 1) of a probe line.
 fn attached_of(line: &[u8]) -> Option<RedirectDef> {
     let tokens = tokenize_statement(line).unwrap();
-    attached(tokens.get(1)?).unwrap()
+    tokens.get(1)?.attached().unwrap()
 }
 
 /// Its **error**, for the rows the arm reports (`attached_of` swallows the
 /// `Report`, so the variant is asserted through this one).
 fn attached_err_of(line: &[u8]) -> Report<ParseError> {
     let tokens = tokenize_statement(line).unwrap();
-    attached(tokens.get(1).unwrap()).unwrap_err()
+    tokens.get(1).unwrap().attached().unwrap_err()
 }
 
 fn assert_path(line: &[u8], export_to: i32) {
@@ -187,7 +186,7 @@ fn quoted_percent_target_is_a_path_not_an_fd_variable() {
     // The `>>` arm rejects the *unquoted* var target; the quoted one appends.
     let tokens = tokenize_statement(b"cat >>%x").unwrap();
     assert!(
-        attached(tokens.get(1).unwrap()).is_err(),
+        tokens.get(1).unwrap().attached().is_err(),
         "`>>%x` stays the parse error it is"
     );
     // The io-number dup spellings stay mask-blind (bash: `ambiguous redirect`

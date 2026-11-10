@@ -53,7 +53,7 @@ fn a_spaced_gap_is_the_same_pair() {
 
 /// The quote arm: the walk's [`ScanState`] settles a quoted `";;"` before the
 /// predicate is consulted, and at the token level the raw-span gate of
-/// [`span_word`] is the same answer (task #336's rule read at both levels).
+/// [`crate::parse::Token::span_word`] is the same answer (task #336's rule read at both levels).
 #[test]
 fn a_quoted_pair_is_word_data() {
     let mut state = ScanState::new();

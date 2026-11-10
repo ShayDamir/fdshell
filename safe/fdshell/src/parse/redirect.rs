@@ -115,7 +115,7 @@ pub fn parse_redirect(
     if bare::is_bare(t) {
         return bare::parse_bare(tokens, i).map(|def| def.map(|d| (d, 1)));
     }
-    Ok(attached::attached(token)?.map(|def| (def, 0)))
+    Ok(token.attached()?.map(|def| (def, 0)))
 }
 
 #[cfg(test)]

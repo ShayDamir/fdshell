@@ -11,7 +11,7 @@
 
 use crate::error::parse::ParseError;
 use crate::parse::Token;
-use crate::parse::word_quoted::{keyword_word, span_word};
+use crate::parse::word_quoted::keyword_word;
 use error_stack::{Report, ensure};
 use sys::ShortCStr;
 
@@ -49,7 +49,7 @@ pub(super) fn head(
         // test `semi/preceded.rs`'s `Term::Semi` arm makes (task #247). Any word
         // there is `ExpectedIn` (`for i 1 2`, `for i "in"`, bash rc 2).
         ensure!(
-            tokens.get(2).is_some_and(|tok| span_word(tok, b";")),
+            tokens.get(2).is_some_and(|tok| tok.span_word(b";")),
             ParseError::ExpectedIn
         );
         return Ok((var, None));

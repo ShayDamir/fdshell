@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C wait -- -E 'test(/^parse::wait_block::/) | binary(wait)'
+
 //! One `wait` arm: the `(pattern)` head and its body.
 
 use super::WaitArm;
@@ -6,7 +8,6 @@ use crate::error::parse::ParseError;
 use crate::parse::Token;
 use crate::parse::case_clause::extract;
 use crate::parse::semi::trim_semi;
-use crate::parse::word_quoted::span_word;
 use error_stack::Report;
 use sys::ScriptText;
 
@@ -30,7 +31,7 @@ pub(super) fn next_arm(
     done_idx: usize,
 ) -> Result<Option<(WaitArm, usize)>, Report<ParseError>> {
     let mut pos = pos;
-    while tokens.get(pos).is_some_and(|tok| span_word(tok, b";")) {
+    while tokens.get(pos).is_some_and(|tok| tok.span_word(b";")) {
         pos += 1;
     }
     if pos >= done_idx {
@@ -38,7 +39,7 @@ pub(super) fn next_arm(
     }
     let pat_end = tokens
         .get(pos..done_idx)
-        .and_then(|s| s.iter().position(|tok| span_word(tok, b")")))
+        .and_then(|s| s.iter().position(|tok| tok.span_word(b")")))
         .map(|i| pos + i)
         .ok_or(ParseError::WaitMissingCloseParen)?;
     let (pattern, captures) = pattern::parse_pattern(

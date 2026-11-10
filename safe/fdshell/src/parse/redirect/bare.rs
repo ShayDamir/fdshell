@@ -80,7 +80,7 @@ pub(super) fn parse_bare(
         export_to,
         extra_to: None,
         direction: direction(&op),
-        source: super::path_word::full(operand),
+        source: operand.full(),
     }))
 }
 

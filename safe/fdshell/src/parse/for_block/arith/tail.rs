@@ -12,7 +12,7 @@ use crate::parse::block_tail::{is_closer, redirects};
 use crate::parse::group_block::tokens_to_group;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{List, block_body, ensure_before_closer, up_to_closing};
-use crate::parse::word_quoted::{keyword_word, span_word};
+use crate::parse::word_quoted::keyword_word;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
@@ -104,11 +104,11 @@ fn gap_len(tail: &[Token], line: &[u8]) -> usize {
 /// The `;` token at `idx` of `tail` is the separator byte `byte` in `line`: the
 /// tokenizer folds a `;` and a newline into one `;` token
 /// (`parse/token/step/sep.rs`), so only the raw byte tells them apart — the
-/// test `semi/preceded.rs::amp_semi` reads for the same pair. The [`span_word`]
+/// test `semi/preceded.rs::amp_semi` reads for the same pair. The [`Token::span_word`]
 /// gate keeps a quoted `";"` word (and an escaped `\;`) out of the run.
 fn separator_byte(tail: &[Token], line: &[u8], idx: usize, byte: u8) -> bool {
     let Some(tok @ Token { start, .. }) = tail.get(idx) else {
         return false;
     };
-    span_word(tok, b";") && line.get(*start) == Some(&byte)
+    tok.span_word(b";") && line.get(*start) == Some(&byte)
 }

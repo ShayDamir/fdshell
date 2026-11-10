@@ -259,7 +259,7 @@ fn the_walk_is_seeded_with_the_closer_of_its_own_block() {
 }
 
 /// The closer walk's separator rows are gated on the token's raw span (task
-/// #336, [`super::separator_data`]): a quoted `";"` leaves the place an ordinary
+/// #336, [`crate::parse::Token::separator_data`]): a quoted `";"` leaves the place an ordinary
 /// word leaves, so it restarts no command position and the closer written behind
 /// it is a **word**, never the block's closer. Every row stands next to its
 /// unquoted twin, so an ungated walk is dead.
@@ -320,7 +320,7 @@ fn a_heredoc_structure_word_never_scores() {
 }
 
 /// Task #530 (bug #474): the cond-pair rows read **both** neighbours through the ONE
-/// span gate [`crate::parse::word_quoted::span_word`], so a quote-protected `|`/`&`
+/// span gate [`crate::parse::Token::span_word`], so a quote-protected `|`/`&`
 /// **word** standing next to a real operator token is word data and never a pair half
 /// — `echo "|" | cat` is `echo`'s argument through a pipeline, not a split `||` pair.
 /// Both neighbour sides are pinned in both directions (a gate that reads only one

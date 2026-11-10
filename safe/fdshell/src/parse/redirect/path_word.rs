@@ -15,21 +15,15 @@ use error_stack::{Report, bail};
 /// The whole operand token: `> word`, `< word`, the bare `&> word`. The token
 /// *is* the target word, so text, mask and spans are taken as they come from
 /// the tokenizer.
-pub(crate) fn full(token: &Token) -> RedirectSource {
-    let Token {
-        word: t,
-        start,
-        end,
-        mask,
-        spans,
-        ..
-    } = token;
-    RedirectSource::path_word(
-        t.clone(),
-        mask.clone(),
-        spans.clone(),
-        t.is_shorter_than_span(*start, *end),
-    )
+impl Token {
+    pub(crate) fn full(&self) -> RedirectSource {
+        RedirectSource::path_word(
+            self.word.clone(),
+            self.mask.clone(),
+            self.spans.clone(),
+            self.word.is_shorter_than_span(self.start, self.end),
+        )
+    }
 }
 
 /// The target inside the operator token (`>f`, `>f$(echo x)`, `&>f`): the word

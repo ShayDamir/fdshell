@@ -7,7 +7,7 @@
 
 use crate::keywords::carries_region;
 use crate::parse::Token;
-use crate::parse::word_quoted::{gated_word, keyword_word, span_word};
+use crate::parse::word_quoted::{gated_word, keyword_word};
 use sys::ShortCStr;
 
 /// The name-slot word of a definition whose production matches and whose word
@@ -30,5 +30,5 @@ fn name_slot<'a>(tokens: &'a [Token], line: &[u8]) -> Option<&'a Token> {
     if keyword_word(first, line, b"function") {
         return brace.then_some(second);
     }
-    (brace && first.word.ends_with(b"(") && span_word(second, b")")).then_some(first)
+    (brace && first.word.ends_with(b"(") && second.span_word(b")")).then_some(first)
 }

@@ -2,7 +2,6 @@
 use crate::mask::MaskBit;
 use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::parse::Token;
-use crate::parse::array_literal::words::open_word;
 use alloc::vec;
 use alloc::vec::Vec;
 use sys::ShortCStr;
@@ -37,7 +36,9 @@ fn all_mask(n: usize, quoted: bool) -> Vec<MaskBit> {
 #[test]
 fn an_unquoted_open_paren_opens_the_region() {
     let word = b"m=(1";
-    let assign = open_word(&token(word, all_mask(4, false), Vec::new())).unwrap();
+    let assign = token(word, all_mask(4, false), Vec::new())
+        .open_word()
+        .unwrap();
     assert_eq!(assign.name, s(b"m"));
     assert!(!assign.append);
     assert_eq!(assign.elements.len(), 1);
@@ -48,7 +49,9 @@ fn an_unquoted_open_paren_opens_the_region() {
 #[test]
 fn the_name_may_end_with_the_append_sign() {
     let word = b"m+=(3";
-    let assign = open_word(&token(word, all_mask(5, false), Vec::new())).unwrap();
+    let assign = token(word, all_mask(5, false), Vec::new())
+        .open_word()
+        .unwrap();
     assert_eq!(assign.name, s(b"m"));
     assert!(assign.append);
     assert_eq!(assign.elements[0].text, s(b"3"));
@@ -59,7 +62,11 @@ fn a_quoted_open_paren_opens_nothing() {
     // The mask at the `(` byte decides it, never the text: an all-quoted word is
     // an ordinary assignment word, as bash reads it too (task #422).
     let word = b"a=(x";
-    assert!(open_word(&token(word, all_mask(4, true), Vec::new())).is_none());
+    assert!(
+        token(word, all_mask(4, true), Vec::new())
+            .open_word()
+            .is_none()
+    );
 }
 
 #[test]
@@ -68,7 +75,7 @@ fn the_name_predicate_is_envassigns() {
     // (task #422's scope decision).
     for word in [b"%arr=(x".as_slice(), b"=(x", b"echo"] {
         let m = all_mask(word.len(), false);
-        assert!(open_word(&token(word, m, Vec::new())).is_none(), "{word:?}");
+        assert!(token(word, m, Vec::new()).open_word().is_none(), "{word:?}");
     }
 }
 
@@ -76,11 +83,15 @@ fn the_name_predicate_is_envassigns() {
 fn a_word_with_no_bytes_and_no_quote_material_is_no_element() {
     // bash: `a=()` has no elements, so the `(`-word contributes none…
     let word = b"a=(";
-    let assign = open_word(&token(word, all_mask(3, false), Vec::new())).unwrap();
+    let assign = token(word, all_mask(3, false), Vec::new())
+        .open_word()
+        .unwrap();
     assert!(assign.elements.is_empty());
     // …while a word whose quote pair contributed zero bytes is one (bash:
     // `a=("")` → `1`), and the span travels at the element's own start.
-    let assign = open_word(&token(word, all_mask(3, false), vec![3])).unwrap();
+    let assign = token(word, all_mask(3, false), vec![3])
+        .open_word()
+        .unwrap();
     assert_eq!(assign.elements.len(), 1);
     assert_eq!(assign.elements[0].text, ShortCStr::new());
     assert_eq!(assign.elements[0].spans, vec![0]);
@@ -97,7 +108,7 @@ fn the_first_element_keeps_its_own_mask() {
     // plus the `(` — parse.rs's parallel plumbing, task #321.
     let word = b"a=(xb c";
     let whole = mask(&[false, false, false, true, true, true, true]);
-    let assign = open_word(&token(word, whole.clone(), Vec::new())).unwrap();
+    let assign = token(word, whole.clone(), Vec::new()).open_word().unwrap();
     assert_eq!(assign.elements[0].text, s(b"xb c"));
     assert_eq!(
         assign.elements[0].mask,
@@ -113,7 +124,7 @@ fn a_quoted_span_of_the_value_is_shifted_to_the_element() {
     // pair closed; sliced for the element, it names the element's own index.
     let word = b"a=(x";
     let whole = mask(&[false, false, false, true]);
-    let assign = open_word(&token(word, whole, vec![3])).unwrap();
+    let assign = token(word, whole, vec![3]).open_word().unwrap();
     assert_eq!(assign.elements[0].text, s(b"x"));
     assert_eq!(assign.elements[0].spans, vec![0], "shifted to the element");
 }

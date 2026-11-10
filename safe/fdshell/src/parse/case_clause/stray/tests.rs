@@ -10,7 +10,7 @@ use alloc::vec;
 /// `esac`), naming the verdict per row. This is the token list the parse layer
 /// scans (`case_clause::extract::body`), heredoc bodies blanked and byte offsets
 /// preserved, and `line` is the statement's own text, so the span gates
-/// [`super::span_word`] and [`super::separator_data`] read the spans the tokens
+/// [`crate::parse::Token::span_word`] and [`crate::parse::Token::separator_data`] read the spans the tokens
 /// were built from. The seed is the pattern walk's (task #419); these regions
 /// are arms, so it stays 0 and the `((` word sits inside the region.
 fn verdict_of(line: &[u8], limit: Option<usize>) -> Option<Stray> {
@@ -365,7 +365,7 @@ fn a_heredoc_body_written_in_an_arm_is_not_in_the_region() {
 }
 
 /// A **quoted** separator word is word data, so it never restarts command
-/// position for the paren written behind it (task #336, [`separator_data`]): the
+/// position for the paren written behind it (task #336, [`crate::parse::Token::separator_data`]): the
 /// `)` follows an argument and the argument arm of the verdict takes it — the
 /// family task #419 closed (bash rc 2). The unquoted twins are the rows of
 /// [`a_paren_behind_a_command_position_word_opens_the_next_pattern`].

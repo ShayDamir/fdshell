@@ -29,7 +29,6 @@
 use super::Token;
 use crate::parse::case_clause::terminator::{self, Terminator};
 use crate::parse::semi::{List, walk_until};
-use crate::parse::word_quoted::span_word;
 use crate::scan::ScanState;
 
 /// The scanner's reader: is `i` the **head** byte of a stray `;;`? The walk has
@@ -57,7 +56,7 @@ pub(crate) fn pair_at_byte(line: &[u8], i: usize, state: &ScanState) -> bool {
 /// empty-body pins own the rest of that family); a pair with kept content
 /// before it reports.
 pub(crate) fn first_stray(tokens: &[Token], line: &[u8]) -> Option<usize> {
-    let lead = tokens.iter().take_while(|t| span_word(t, b";")).count();
+    let lead = tokens.iter().take_while(|t| t.span_word(b";")).count();
     walk_until(tokens, line, None, List::Plain, 0, &|i, depth, seed| {
         depth == seed
             && i >= lead

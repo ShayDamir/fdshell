@@ -23,35 +23,37 @@ pub(super) fn all_array(assigns: &[ArrayAssign]) -> Option<Vec<ArrayAssign>> {
 /// The `name=(` word that opens a region: an assignment word by `envassign`'s
 /// one name predicate, whose value starts with an **unquoted** `(` — read from
 /// the word's mask at that byte, never derived. The name may end with `+`.
-pub(super) fn open_word(tok: &Token) -> Option<ArrayAssign> {
-    let Token {
-        word: text,
-        fully_quoted: fq,
-        mask,
-        spans,
-        ..
-    } = tok;
-    if !envassign::is_env_assign(text) {
-        return None;
+impl Token {
+    pub(super) fn open_word(&self) -> Option<ArrayAssign> {
+        let Token {
+            word: text,
+            fully_quoted: fq,
+            mask,
+            spans,
+            ..
+        } = self;
+        if !envassign::is_env_assign(text) {
+            return None;
+        }
+        let (name, value) = text.split_once_byte(b'=')?;
+        let open = name.len() + 1;
+        if !value.starts_with(b"(") || quoted_at(mask, open) {
+            return None;
+        }
+        let append = name.ends_with(b"+");
+        let name = if append {
+            name.get(..name.len() - 1)?
+        } else {
+            name
+        };
+        let mut assign = ArrayAssign {
+            name,
+            append,
+            elements: Vec::new(),
+        };
+        first_element(&mut assign, value, mask, spans, *fq, open);
+        Some(assign)
     }
-    let (name, value) = text.split_once_byte(b'=')?;
-    let open = name.len() + 1;
-    if !value.starts_with(b"(") || quoted_at(mask, open) {
-        return None;
-    }
-    let append = name.ends_with(b"+");
-    let name = if append {
-        name.get(..name.len() - 1)?
-    } else {
-        name
-    };
-    let mut assign = ArrayAssign {
-        name,
-        append,
-        elements: Vec::new(),
-    };
-    first_element(&mut assign, value, mask, spans, *fq, open);
-    Some(assign)
 }
 
 /// A later word of the region, kept whole: its own text, mask, spans and quoted

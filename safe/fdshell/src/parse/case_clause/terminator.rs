@@ -23,7 +23,6 @@
 
 use super::Token;
 use crate::parse::semi::semi_byte;
-use crate::parse::word_quoted::span_word;
 
 /// What a terminator says happens after the clause that ended with it ran.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,7 +38,7 @@ pub(crate) enum Terminator {
 }
 
 /// The terminator at token `i` of the arm region, `None` when token `i` starts
-/// none. Every word goes through [`span_word`]'s raw-span gate (task #336), so a
+/// none. Every word goes through [`Token::span_word`]'s raw-span gate (task #336), so a
 /// quoted `";"` / `"&"` pair is body data and terminates nothing.
 pub(crate) fn kind_at(region: &[Token], line: &[u8], i: usize) -> Option<Terminator> {
     let head = region.get(i)?;
@@ -48,15 +47,15 @@ pub(crate) fn kind_at(region: &[Token], line: &[u8], i: usize) -> Option<Termina
         return None;
     }
     // `;&` — the `&` is a word token glued to the `;`.
-    if span_word(next, b"&") && glued(head, next) {
+    if next.span_word(b"&") && head.glued(next) {
         return Some(Terminator::RunNext);
     }
     // `;;&` — the whole triple glued; anything else behind the `;;` pair, a spaced
     // `&`, a non-glued pair or no third token at all, is the plain `;;` the walk
     // has always stopped at (its non-glued spellings included, D2).
-    if span_word(next, b";") {
+    if next.span_word(b";") {
         let third = region.get(i + 2);
-        if glued(head, next) && third.is_some_and(|t| glued(next, t) && span_word(t, b"&")) {
+        if head.glued(next) && third.is_some_and(|t| next.glued(t) && t.span_word(b"&")) {
             return Some(Terminator::Retest);
         }
         return Some(Terminator::Stop);
@@ -72,12 +71,6 @@ pub(crate) fn tokens(kind: Terminator) -> usize {
         Terminator::Stop | Terminator::RunNext => 2,
         Terminator::Retest => 3,
     }
-}
-
-/// The glue test of a terminator pair: `head`'s span ends where `tail`'s begins
-/// (the pair rule `h.2 == t.1`, pinned by `tests/glued_pair.rs` and the #355 pins).
-pub(crate) fn glued(head: &Token, tail: &Token) -> bool {
-    head.end == tail.start
 }
 
 #[cfg(test)]

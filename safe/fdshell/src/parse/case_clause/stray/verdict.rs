@@ -10,7 +10,6 @@ use super::Token;
 use super::opens_groups;
 use crate::keywords::Place;
 use crate::mask::{MaskBit, quoted_at};
-use crate::parse::word_quoted::span_word;
 
 /// The closers a `((` word **outside** the arm region owns (task #419): when
 /// the clause's first pattern word was the production opener — its leading `(`
@@ -36,7 +35,7 @@ pub(crate) fn arith_seed(tokens: &[Token], body_start: usize) -> usize {
         text.as_bytes()
             .is_ok_and(|b| b.starts_with(b"((") && !mask.is_empty() && !quoted_at(mask, 0))
     };
-    usize::from(arms_pair(word) && span_word(closer, b")"))
+    usize::from(arms_pair(word) && closer.span_word(b")"))
 }
 
 /// Why the walk judged a depth-0 `)` token; the caller owns the messages
@@ -97,15 +96,7 @@ pub(crate) fn opens_groups_at(place: Place, bytes: &[u8], mask: &[MaskBit]) -> u
 fn is_a_clause_pattern(before: Place, region: &[Token], i: usize) -> bool {
     matches!(before, Place::Command)
         && i > 0
-        && region.get(i - 1).is_some_and(|prev| !is_operator(prev))
-}
-
-/// The operator words the tokenizer emits as tokens of their own — every one of
-/// them through [`span_word`], so a quoted spelling is a word, never an operator
-/// predecessor (task #336).
-fn is_operator(tok: &Token) -> bool {
-    let w = |sep: &[u8]| span_word(tok, sep);
-    w(b";") || w(b"|") || w(b"&") || w(b")")
+        && region.get(i - 1).is_some_and(|prev| !prev.is_operator())
 }
 
 #[cfg(test)]

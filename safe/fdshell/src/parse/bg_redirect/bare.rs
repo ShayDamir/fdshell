@@ -37,7 +37,7 @@ pub(super) fn parse(
     // A `/dev/fd/N` operand stays a path source: the attached `&>/dev/fd/N`
     // form has always opened the magic path, and the kernel dup is the same
     // effect (the `>` family's `RedirectDef::dup` is recorded in LESSONS).
-    let source = crate::parse::redirect::path_word::full(operand);
+    let source = operand.full();
     Ok(BgRedirectResult {
         redirects: vec![RedirectDef::combined(direction, source)],
         pidvar: None,

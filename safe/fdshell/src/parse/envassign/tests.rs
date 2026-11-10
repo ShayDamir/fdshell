@@ -43,7 +43,7 @@ fn assign(name: &str) -> Assign {
 }
 
 /// The statement bound of the scoped-prefix walk is the **tokenizer's** `;`
-/// token, read through [`span_word`] (task #336): a quoted `";"` is word data,
+/// token, read through [`crate::parse::Token::span_word`] (task #336): a quoted `";"` is word data,
 /// so it bounds nothing and `X=1 ";"` keeps its prefix with the data word as the
 /// command. Every row is paired with its unquoted twin, so a predicate that
 /// drops the span gate is dead.

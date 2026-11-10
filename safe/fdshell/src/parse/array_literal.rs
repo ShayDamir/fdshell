@@ -17,11 +17,10 @@ use alloc::vec::Vec;
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
 use crate::parse::Token;
-use crate::parse::word_quoted::span_word;
 use error_stack::{Report, bail};
 use sys::ShortCStr;
 
-use words::{all_array, open_word, push};
+use words::{all_array, push};
 
 /// One word of an array literal, kept exactly as the tokenizer produced it: text,
 /// mask, spans and the fully-quoted flag travel together (the parallel plumbing
@@ -61,7 +60,7 @@ pub(crate) fn detect(tokens: &[Token]) -> Result<Option<Vec<ArrayAssign>>, Repor
         ..
     } in tokens
     {
-        if span_word(tok, b";") {
+        if tok.span_word(b";") {
             break;
         }
         if let Some(assign) = open.as_mut() {
@@ -75,7 +74,7 @@ pub(crate) fn detect(tokens: &[Token]) -> Result<Option<Vec<ArrayAssign>>, Repor
             }
             continue;
         }
-        let Some(opened) = open_word(tok) else {
+        let Some(opened) = tok.open_word() else {
             // A word that is no array assignment ends the arm's claim: the
             // statement is the walk `detect` is called from's, exactly as it was.
             return Ok(None);

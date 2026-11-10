@@ -32,7 +32,7 @@ use error_stack::{Report, bail};
 /// ([`crate::keywords::after`]/[`crate::keywords::scores`], task #236): a block
 /// keyword written as an argument
 /// (`echo done` in a `do` body) never closes the block — the `;` before a
-/// real closer is what restarts the flag, and [`crate::keywords::separator_data`]
+/// real closer is what restarts the flag, and [`crate::parse::Token::separator_data`]
 /// keeps a quoted
 /// `";"` from being that restart (task #336): bash reads
 /// `while :; do echo a ";" done` with `done` an **argument**, so the block stays

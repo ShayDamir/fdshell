@@ -9,7 +9,7 @@ pub(crate) use definer_prefix::redirect_before_the_brace;
 pub(crate) use definer_region::definer_with_region;
 
 use super::Token;
-use super::word_quoted::{gated_word, keyword_word, span_word};
+use super::word_quoted::{gated_word, keyword_word};
 use crate::keywords::name_len;
 use sys::{ScriptText, ShortCStr};
 
@@ -35,7 +35,7 @@ pub(crate) fn is_function_def(tokens: &[Token], line: &[u8]) -> bool {
 fn posix_def(tokens: &[Token], line: &[u8]) -> bool {
     // The `)` is [`span_word`]'s: a quoted `")"` is a word, not the definer's
     // parameter-list paren (task #336, bash rejects `f()")" { …; }` rc 2).
-    let parens = tokens.get(1).is_some_and(|tok| span_word(tok, b")"));
+    let parens = tokens.get(1).is_some_and(|tok| tok.span_word(b")"));
     parens
         && tokens
             .first()
@@ -54,7 +54,10 @@ fn keyword_def(tokens: &[Token], line: &[u8]) -> bool {
 /// The definer word gate: a word with a definer name, past the word gate
 /// [`gated_word`] (span test next to the scan-back — the POSIX definer token
 /// carries its trailing `(` (`foo'('`), and `quoted_word` breaks its scan at
-/// that `(`, never reaching the quote bytes before it).
+/// that `(`, never reaching the quote bytes before it.
+///
+/// Stays free: it reads the raw script text `line` through [`gated_word`], so its
+/// data is not the token's own state (task #550).
 fn is_definer(tok: &Token, line: &[u8]) -> bool {
     def_len(&tok.word).is_some() && gated_word(tok, line)
 }

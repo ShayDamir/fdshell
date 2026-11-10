@@ -8,7 +8,6 @@ pub use value::{Assign, value_mask, value_spans};
 
 use super::Token;
 use crate::mask::MaskBit;
-use crate::parse::word_quoted::span_word;
 use alloc::vec::Vec;
 use sys::ShortCStr;
 
@@ -22,12 +21,12 @@ pub(crate) fn is_env_assign(word: &ShortCStr) -> bool {
 }
 
 /// A non-assignment word up to the first `;` — a command word that a
-/// leading assignment prefix would attach to. The `;` is [`span_word`]'s, so a
+/// leading assignment prefix would attach to. The `;` is [`Token::span_word`]'s, so a
 /// quoted `";"` is the command word it is (`X=1 ";"` runs the command `;`).
 pub(crate) fn has_command_word(tokens: &[Token]) -> bool {
     tokens
         .iter()
-        .take_while(|tok| !span_word(tok, b";"))
+        .take_while(|tok| !tok.span_word(b";"))
         .any(|Token { word: t, .. }| !is_env_assign(t))
 }
 
@@ -41,10 +40,7 @@ pub(crate) fn has_command_word(tokens: &[Token]) -> bool {
 /// mutants are unkillable (LESSONS: "The scoped-prefix parse bounds are
 /// load-bearing").
 pub(crate) fn prefix_len(tokens: &[Token]) -> usize {
-    let stmt_end = tokens
-        .iter()
-        .take_while(|tok| !span_word(tok, b";"))
-        .count();
+    let stmt_end = tokens.iter().take_while(|tok| !tok.span_word(b";")).count();
     let mut i = 0usize;
     while i + 1 < stmt_end && assign_word(tokens, i).is_some() {
         i += 1;
@@ -112,7 +108,7 @@ pub(crate) fn collect_all(tokens: &[Token]) -> Option<Vec<Assign>> {
         ..
     } in tokens
     {
-        if span_word(tok, b";") {
+        if tok.span_word(b";") {
             break;
         }
         out.push(assign_of(t, mask, spans)?);

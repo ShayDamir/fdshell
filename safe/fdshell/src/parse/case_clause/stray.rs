@@ -9,11 +9,10 @@
 //! the walk; the verdict it asks for lives in [`verdict`] (the classification,
 //! the place gate and their tests).
 
-use crate::keywords::{Glue, Place, after, separator_data, word_place};
+use crate::keywords::{Glue, Place, after, word_place};
 use crate::mask::{MaskBit, quoted_at};
 use crate::parse::case_clause::Token;
 use crate::parse::semi::glue_at;
-use crate::parse::word_quoted::span_word;
 use verdict::{classify, opens_groups_at};
 
 pub(crate) use verdict::{Stray, arith_seed};
@@ -64,12 +63,12 @@ pub(crate) use verdict::{Stray, arith_seed};
 ///   above 0 and swallow the next clause's paren (`a) m=$((1)); b) ;; esac` is
 ///   bash rc 2) — and the region's own rule owns them, so `a) ((1)); b) ;; esac`
 ///   still bails;
-/// - [`span_word`]: a quoted `")"` is a **word** whose text is `)` and whose
+/// - [`Token::span_word`]: a quoted `")"` is a **word** whose text is `)` and whose
 ///   span carries the quote bytes, and an escaped `\)` keeps its pair in the
 ///   word text, so `a) echo ")" ;;` and `a) echo \) ;;` stay arm text. The span
 ///   gate is **stronger** here than the keyword gate [`keyword_word`], whose
 ///   scan-back breaks on the `)` byte itself (task #336);
-/// - [`separator_data`]: a quoted `";"` inside the arm is word data, so it never
+/// - [`Token::separator_data`]: a quoted `";"` inside the arm is word data, so it never
 ///   restarts command position for the `)` written behind it (task #336 — the
 ///   paren lands in **argument** position and the argument arm of the verdict
 ///   takes it; the **unquoted** twins stay [`Stray::ClausePattern`]).
@@ -106,7 +105,7 @@ pub(crate) fn verdict(
         let Ok(bytes) = word.as_bytes() else {
             continue;
         };
-        let paren = span_word(tok, b")");
+        let paren = tok.span_word(b")");
         if arith_closers > 0 {
             // Inside the region every token is arithmetic data; each closer
             // consumed brings the region to its own end.
@@ -140,7 +139,7 @@ pub(crate) fn verdict(
         // A quoted `";"` is word data, so it leaves the place an ordinary word
         // leaves and never reopens command position for the `)` behind it
         // (task #336).
-        place = if separator_data(tok) {
+        place = if tok.separator_data() {
             word_place(place)
         } else {
             after(bytes, line, *end, place, glue, None, mask)

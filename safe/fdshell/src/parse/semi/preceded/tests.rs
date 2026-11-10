@@ -210,7 +210,8 @@ fn ensure_before_closer_reports_the_predicate_failure() {
     }
 }
 
-/// Every separator word of the terminator set is read through [`span_word`]
+/// Every separator word of the terminator set is read through
+/// [`Token::span_word`]
 /// (task #336): a quoted `";"` / `"&"` word is **word data**, so it terminates
 /// no compound list, precedes no clause keyword, is no `& ;` glue and is no
 /// legal closer predecessor. Each row is paired with its unquoted twin, so a
@@ -235,13 +236,13 @@ fn a_quoted_terminator_word_terminates_no_list() {
         "the **unquoted** `&` behind the quoted word terminates the list"
     );
 
-    // [`is_list_terminator`] on the word itself: the newline and `)` tokens (the
+    // [`Token::is_list_terminator`] on the word itself: the newline and `)` tokens (the
     // tokenizer emits a `;` token for each) are terminators, the quoted words
     // are words.
     let last = |line: &[u8]| {
         let tokens = tokenize(line).unwrap();
         let n = tokens.len();
-        is_list_terminator(tokens.get(n - 1).unwrap())
+        tokens.get(n - 1).unwrap().is_list_terminator()
     };
     assert!(last(b"echo a ;"));
     assert!(last(b"echo a\n"), "the newline tokenizes as a `;`");

@@ -4,7 +4,6 @@ use super::walk_until;
 use crate::keywords::Closer;
 use crate::parse::semi::List;
 use crate::parse::token::tokenize_statement;
-use crate::parse::word_quoted::span_word;
 use alloc::vec::Vec;
 
 /// The tokens of `line`, as the parse layer hands them to a walk.
@@ -17,7 +16,7 @@ fn toks(line: &[u8]) -> Vec<crate::parse::Token> {
 fn window(t: &[crate::parse::Token], i: usize) -> bool {
     t.get(i).is_some_and(|a| {
         t.get(i + 1)
-            .is_some_and(|b| span_word(a, b";") && span_word(b, b";"))
+            .is_some_and(|b| a.span_word(b";") && b.span_word(b";"))
     })
 }
 

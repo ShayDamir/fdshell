@@ -202,7 +202,7 @@ fn heredoc_body(pipe: &Pipeline, stage: usize) -> String {
     String::from_utf8_lossy(body.as_bytes().unwrap_or(&[])).into_owned()
 }
 
-/// The stage's first-`;` cut goes through [`span_word`](crate::parse::word_quoted::span_word),
+/// The stage's first-`;` cut goes through [`crate::parse::Token::span_word`],
 /// so a quoted `";"` is a **word** of the stage: the stage keeps its words and
 /// the here-doc operator written behind them (task #336). The ungated text cut
 /// truncated the stage at the quoted word, dropped that operator and handed the

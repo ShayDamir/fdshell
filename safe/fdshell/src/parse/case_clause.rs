@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C case -- -E 'test(/^parse::case_clause::/) | binary(case)'
+
 pub(crate) mod extract;
 pub(crate) mod pattern;
 mod patterns;
@@ -5,7 +7,6 @@ pub(crate) mod stray;
 pub(crate) mod terminator;
 
 use super::Token;
-use super::word_quoted::span_word;
 use crate::error::parse::ParseError;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -30,7 +31,7 @@ pub fn parse_clauses(
     let mut clauses = Vec::new();
     let mut pos = start;
     while pos < esac_idx {
-        if tokens.get(pos).is_some_and(|tok| span_word(tok, b";")) {
+        if tokens.get(pos).is_some_and(|tok| tok.span_word(b";")) {
             pos += 1;
             continue;
         }

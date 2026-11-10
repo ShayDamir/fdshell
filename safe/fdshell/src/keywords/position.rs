@@ -52,7 +52,7 @@ pub(crate) use clause::{
 pub(crate) use paren::closer_payload;
 pub(crate) use place::{Glue, Place};
 pub(crate) use score::{closer_matches, scores};
-pub(crate) use separators::{separator_data, separator_shape, word_place};
+pub(crate) use separators::{separator_shape, word_place};
 
 /// The place of the word written after `word`: separators, cond operators, a
 /// subshell `(`, a group opener and a `case` clause's glued `)` start a

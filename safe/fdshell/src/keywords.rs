@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^keywords::/) | test(/^parse::/)'
+
 mod function;
 mod kind;
 mod pair;
@@ -17,7 +19,7 @@ pub(crate) use pair::pair_payload;
 pub(crate) use pairing::{Decision, Pairing};
 pub(crate) use position::{
     Glue, Place, after, arm_clause_block, body_keyword, clause_keyword, closer_payload,
-    list_keyword, list_opener, scores, separator_data, separator_shape, word_place,
+    list_keyword, list_opener, scores, separator_shape, word_place,
 };
 pub(super) use wait::{first_word_end, is_wait_pattern_keyword, wait_opens_block};
 

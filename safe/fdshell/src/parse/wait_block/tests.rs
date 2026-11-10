@@ -116,7 +116,7 @@ fn a_call_at_the_closer_bails() {
     );
 }
 
-/// Every separator test of the arm walk is [`span_word`]'s (task #336): a quoted
+/// Every separator test of the arm walk is [`crate::parse::Token::span_word`]'s (task #336): a quoted
 /// `";"` in front of an arm is its **pattern word**, never the leading skip, and
 /// a quoted `")"` is pattern text, never the arm's head closer. Each row stands
 /// next to its unquoted twin.

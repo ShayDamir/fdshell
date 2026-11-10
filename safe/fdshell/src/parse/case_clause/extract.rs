@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C case -- -E 'test(/^parse::case_clause::/) | binary(case)'
+
 use super::Token;
 use super::stray;
 use super::terminator;
@@ -20,7 +22,7 @@ use sys::ScriptText;
 ///
 /// Every arm of the window goes through `span_word`, and the pair's **head** must
 /// also be a real `;` byte — [`terminator::kind_at`], whose `;&`/`;;&` arms are
-/// **glued-only** ([`terminator::glued`]), so a quoted `";"` pair is body data and ends
+/// **glued-only** ([`Token::glued`]), so a quoted `";"` pair is body data and ends
 /// no clause (task #336; the glue test `h.2 == t.1` is the pair's own rule, #355). The search accepts a window only **at the arm's
 /// own level** ([`walk_until`], task #418): the region is walked with the `case`
 /// block's seed and the `case` word-list rule — the shared state machine of
@@ -87,7 +89,7 @@ pub(crate) fn body(
             let head_glued = tokens
                 .get(end)
                 .zip(tokens.get(end + 1))
-                .is_some_and(|(h, t)| terminator::glued(h, t));
+                .is_some_and(|(h, t)| h.glued(t));
             let keep = usize::from(!head_glued && amp_semi(body_slice, line, end - body_start));
             let b = part_text(
                 text,

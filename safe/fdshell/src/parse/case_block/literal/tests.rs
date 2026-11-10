@@ -112,7 +112,7 @@ fn pattern_of_a_clause_closed_by_esac_is_protected() {
         vec![1, 3, 9]
     );
 }
-/// The region walk reads its needles through [`span_word`](crate::parse::word_quoted::span_word)
+/// The region walk reads its needles through [`crate::parse::Token::span_word`]
 /// (task #336), so it records the regions `case_clause::parse_clauses` actually
 /// parses (the mirror property of tasks #273/#455): a quoted `")"` never closes a
 /// pattern list — the region it sits in is **no** region at all, the same verdict

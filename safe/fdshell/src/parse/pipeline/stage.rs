@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C pipeline -- -E 'test(/^parse::/) | binary(pipeline)'
+
 //! One pipeline stage. A stage is a full **command**, so its first word goes
 //! through the same keyword dispatch the statement path uses
 //! (`parse::inner_parse`): `echo a | while :; do echo b; break; done` runs the
@@ -10,7 +12,6 @@ use crate::parse::command::parse_command;
 use crate::parse::dispatch::dispatch_keyword;
 use crate::parse::heredoc::{HeredocBody, operator_count};
 use crate::parse::semi::verbatim;
-use crate::parse::word_quoted::span_word;
 use crate::parse::{BlockStage, ParsedLine, Stage};
 use error_stack::Report;
 use sys::{Position, ScriptText};
@@ -79,13 +80,13 @@ fn command_stage(
 }
 
 /// Drop the tokens after the first `;`: heredoc body words are not
-/// command tokens. The `;` is [`span_word`]'s, so a quoted `";"` is a word of
+/// command tokens. The `;` is [`Token::span_word`]'s, so a quoted `";"` is a word of
 /// the stage and cuts nothing (task #336) — the stage keeps the here-doc
 /// operator written behind it.
 fn trim_at_semi(tokens: &[Token]) -> &[Token] {
     let end = tokens
         .iter()
-        .position(|tok| span_word(tok, b";"))
+        .position(|tok| tok.span_word(b";"))
         .unwrap_or(tokens.len());
     tokens.get(..end).unwrap_or(tokens)
 }

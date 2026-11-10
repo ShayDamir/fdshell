@@ -11,7 +11,7 @@
 use super::list;
 use super::{
     Glue, Place, after, arm_clause_block, body_keyword, clause_keyword, list_keyword, list_opener,
-    scores, separator_data, separator_shape, word_place,
+    scores, separator_shape, word_place,
 };
 use crate::keywords::{Closer, first_word_end};
 use crate::mask::MaskBit;
@@ -802,7 +802,8 @@ fn a_closer_restarts_command_position_only_for_its_own_block() {
 }
 
 /// The separator-shape set is the **one** set the plain row of [`after`] and the
-/// `for` list's [`list::step`] share, and [`separator_data`] is its token-level
+/// `for` list's [`list::step`] share, and
+/// [`crate::parse::Token::separator_data`] is its token-level
 /// twin: the text **and** the raw span (task #336). Quoted, a separator-shaped
 /// word leaves the place an ordinary word leaves — [`word_place`], an argument
 /// everywhere, a `for` list that stays a list.
@@ -835,15 +836,15 @@ fn a_quoted_separator_shape_leaves_the_place_of_a_word() {
     assert_eq!(word_place(Place::Pattern), Place::Data);
     assert_eq!(word_place(Place::Words), Place::Words);
 
-    // [`separator_data`]: the **same text** under a quote is word data. The
-    // trimmed-text row is the quoted `" ; "` word, whose text carries spaces.
+    // [`crate::parse::Token::separator_data`]: the **same text** under a quote is
+    // word data.
+    // The trimmed-text row is the quoted `" ; "` word, whose text carries spaces.
     let data = |line: &[u8], idx: usize| {
-        separator_data(
-            crate::parse::token::tokenize(line)
-                .unwrap()
-                .get(idx)
-                .unwrap(),
-        )
+        crate::parse::token::tokenize(line)
+            .unwrap()
+            .get(idx)
+            .unwrap()
+            .separator_data()
     };
     assert!(!data(b"a ; b", 1));
     assert!(!data(b"a\nb", 1), "the newline token is the real separator");

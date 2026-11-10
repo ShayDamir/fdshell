@@ -9,7 +9,6 @@ use crate::parse::bg_redirect::{insert_redirect, parse_bg_redirect};
 use crate::parse::classify::{parse_capture, parse_redirect};
 use crate::parse::here_string::parse_here_string;
 use crate::parse::heredoc::{HeredocBody, is_operator, parse_operator};
-use crate::parse::word_quoted::span_word;
 use crate::parse::{CommandLine, Token};
 use error_stack::{Report, bail};
 use sys::Position;
@@ -33,7 +32,7 @@ pub(crate) fn collect(
         // A quoted `";"` is word data (POSIX 2.9.1, task #336): the statement
         // ends at the tokenizer's separator token, whose span is the one byte
         // it stands for, and never at a word whose *text* is `;`.
-        if span_word(tok, b";") {
+        if tok.span_word(b";") {
             break;
         }
         // A bare `&` token is a parse error here: the scanner consumes every
@@ -41,7 +40,7 @@ pub(crate) fn collect(
         // layer is the empty-command family (`echo a && & echo b` — bash's
         // syntax error too). A quoted `&` is an ordinary argument
         // (`echo "&"` prints `&`, measured bash) — the same span gate.
-        if span_word(tok, b"&") {
+        if tok.span_word(b"&") {
             bail!(ParseError::UnexpectedChar { ch: b'&' });
         }
         let mut skip = 0usize;
@@ -84,6 +83,9 @@ pub(crate) fn collect(
 /// One plain word: into the open command slot when there is one (word 0 of
 /// `>f g` — its mask, spans and quoted flag are word 0's, as `finish_command`
 /// builds them), into `args` otherwise.
+///
+/// Stays free: its data is this module's `CommandLine`, not the token's own state
+/// (task #550).
 fn word(cmd: &mut CommandLine, tok: &Token, slot: &mut bool) {
     let Token {
         word: t,

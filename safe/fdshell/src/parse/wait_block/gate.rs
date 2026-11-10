@@ -5,7 +5,6 @@
 //! the line budget (task #298 added the closer's redirections).
 
 use crate::parse::Token;
-use crate::parse::word_quoted::span_word;
 use sys::ScriptText;
 
 /// Whether the `wait` tokens open an event-case block: the first non-`;`
@@ -22,7 +21,7 @@ pub(crate) fn is_block(tokens: &[Token], text: &ScriptText) -> bool {
     };
     let mut pos = 1;
     while let Some(tok) = tokens.get(pos) {
-        if !span_word(tok, b";") {
+        if !tok.span_word(b";") {
             break;
         }
         pos += 1;

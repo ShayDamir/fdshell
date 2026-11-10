@@ -8,7 +8,6 @@
 use super::Token;
 use crate::keywords::{Glue, Place, scores};
 use crate::parse::delimiter_token_indices;
-use crate::parse::word_quoted::span_word;
 use crate::scan::heredoc::terminator_spans;
 use alloc::vec::Vec;
 
@@ -79,7 +78,7 @@ fn covered(spans: &[(usize, usize)], start: usize) -> bool {
 /// because [`is_word_break`](crate::scan::advance) breaks words at operator
 /// bytes.
 ///
-/// Both neighbour rows go through [`span_word`] (task #530, bug #474): the pair
+/// Both neighbour rows go through [`Token::span_word`] (task #530, bug #474): the pair
 /// is made of **unquoted** operator bytes (POSIX §2.9.1), so a quote-protected
 /// `"|"`/`"&"` word standing next to a real one is word data and is no pair
 /// half — `echo "|" | cat` is `echo`'s argument through a pipeline, not a `||`
@@ -90,7 +89,7 @@ pub(crate) fn glue_at(tokens: &[Token], i: usize, word: &[u8]) -> Glue {
     if !is_op(word) {
         return Glue::None;
     }
-    let same = |j: usize| tokens.get(j).is_some_and(|tok| span_word(tok, word));
+    let same = |j: usize| tokens.get(j).is_some_and(|tok| tok.span_word(word));
     match (same(i - 1), same(i + 1)) {
         (true, _) => Glue::Tail,
         (false, true) => Glue::Head,

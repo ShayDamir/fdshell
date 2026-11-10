@@ -18,9 +18,7 @@
 
 use super::Token;
 use super::word::{List, glue_at, next_word, scores_at, structure_flags};
-use crate::keywords::{
-    Closer, Glue, Pairing, Place, after, pair_payload, scores, separator_data, word_place,
-};
+use crate::keywords::{Closer, Glue, Pairing, Place, after, pair_payload, scores, word_place};
 
 /// Walk `tokens` from `start` and answer the first index at which `stop` accepts
 /// the walk's state: `(index, depth, seed_depth)`. The predicate is asked at
@@ -87,7 +85,7 @@ pub(crate) fn walk_until(
         // A separator-shaped **word** leaves the place an ordinary word leaves
         // ([`word_place`]: an argument, a `for` list stays a list), never the
         // command restart the separator earns (task #336).
-        place = if separator_data(tok) {
+        place = if tok.separator_data() {
             word_place(place)
         } else {
             after(word, line, *end, place, glue, pairing.top(), mask)

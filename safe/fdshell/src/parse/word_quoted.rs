@@ -1,11 +1,13 @@
 // mutants: -C --lib -C --test -C redirect -- -E 'test(/^parse::/) | binary(redirect)'
 
-//! The parse layer's quote gate on a word's **raw** span `(start, end)`. The
-//! string-level half of the test — "the span is longer than the word's own
+//! The parse layer's quote gates that read the **raw script text** (`line`):
+//! the keyword gate, the definer gate and the ONE operator-word predicate. The
+//! string-level half of the span test — "the span is longer than the word's own
 //! bytes" — is a property of the string type, so it lives on
-//! `ShortCStr::is_shorter_than_span` (task #545); what this module owns is the
-//! parse reading of it, because the span here is the word's *raw* span and so
-//! carries bytes the word dropped (quotes, escapes).
+//! `ShortCStr::is_shorter_than_span` (task #545), and the gate that needs no
+//! `line` — the separator span gate — is the token's own
+//! [`Token::span_word`] (task #550); what this
+//! module owns is the readings that combine the gate with the script text.
 //!
 //! An empty quoted region contributes no bytes to the word (and its per-byte
 //! mask), so "this word was quoted" is not representable in the mask — it has
@@ -23,6 +25,9 @@ use crate::keywords::{quoted_word, separator_shape};
 /// block-depth scan and the block builders cannot disagree. Not the per-byte
 /// mask (`""if` has no bit) and not `fq` (`i"f"` is not fully quoted): bash
 /// runs both as command words.
+///
+/// Stays free: it reads the raw script text `line` through [`quoted_word`], so its
+/// data is not the token's own state (task #550).
 pub(crate) fn keyword_word(tok: &Token, line: &[u8], kw: &[u8]) -> bool {
     let Token { word: t, end, .. } = tok;
     t.eq_bytes(kw) && !quoted_word(line, *end)
@@ -33,6 +38,9 @@ pub(crate) fn keyword_word(tok: &Token, line: &[u8], kw: &[u8]) -> bool {
 /// own bytes) and [`quoted_word`]'s scan-back, because a definer word can end in
 /// the POSIX `(` (`foo'('`) and the scan alone never reaches the quote bytes
 /// behind it.
+///
+/// Stays free: it reads the raw script text `line` through [`quoted_word`] — the
+/// `(`-ending definer word is why the scan-back is needed at all (task #550).
 pub(crate) fn gated_word(tok: &Token, line: &[u8]) -> bool {
     let Token {
         word: t,
@@ -43,37 +51,8 @@ pub(crate) fn gated_word(tok: &Token, line: &[u8]) -> bool {
     !t.is_shorter_than_span(*start, *end) && !quoted_word(line, *end)
 }
 
-/// The separator-recognition gate (POSIX §2.9.1, task #336): `tok` **is** the
-/// separator word `w` only when its raw span is exactly those bytes, so it
-/// carries no quote byte. A quote-protected `";"`, `';'`, `"|"`, `"&"`, `")"`
-/// is a word whose *text* is the separator, and bash reads it as word **data**:
-/// it splits no statement, no pipeline, no `case` clause, and it never restarts
-/// command position (`echo a ";" b` prints `a ; b`).
-/// LESSONS: "A separator-shaped word needs the span gate"
-///
-/// The gate is the raw span, never the mask (`"";` is an empty word token
-/// **plus** a real `;`, and `a";"b` is one word whose text is `a;b`) and never
-/// [`quoted_word`]'s scan-back, whose word-break set contains the separator
-/// bytes themselves, so it is sound only for a keyword word, which ends in a
-/// letter. The span form is also the gate the sites that own no `line` can
-/// compute (`semi/trim.rs::is_semi`, `pipeline/stage.rs::trim_at_semi`,
-/// `envassign.rs`). Escape spellings need no arm: `\;`, `\|`, `\)` keep the pair
-/// in the token **text** (`parse/token/escape.rs`), so no separator text exists
-/// to gate. Byte-level twin: the byte scanners read raw bytes, where a quoted
-/// separator's word text is `";"` / `"|"` and no separator row can fire —
-/// `parse::redirect::clobber::pipe::pipe_token_span` is this rule for the `|`.
-pub(crate) fn span_word(tok: &Token, w: &[u8]) -> bool {
-    let Token {
-        word: t,
-        start,
-        end,
-        ..
-    } = tok;
-    t.eq_bytes(w) && !t.is_shorter_than_span(*start, *end)
-}
-
 /// The ONE **standalone operator word** predicate (task #524): `tok` is the
-/// operator word `w` of [`THE_SET`] when [`span_word`]'s gate passes — text
+/// operator word `w` of [`THE_SET`] when [`Token::span_word`]'s gate passes — text
 /// equality plus the raw span — so a quoted `"&&"`, `'&'`, `\&` or glued `x&&`
 /// is word **data** and never the operator. `owned` is the per-site variation the
 /// rule takes as data: it says which of those words **this** grammar position
@@ -102,8 +81,11 @@ pub(crate) fn operator_word(
 const THE_SET: [&[u8]; 8] = [b"", b";", b"&&", b"||", b"&", b"(", b")", b"|"];
 
 /// `w` is a row of [`THE_SET`] and `tok` **is** it: the row's own owner answers
-/// ([`separator_shape`], or [`pipe_token_span`] for the `|`), then [`span_word`]'s
+/// ([`separator_shape`], or [`pipe_token_span`] for the `|`), then [`Token::span_word`]'s
 /// gate.
+///
+/// Stays free: the `|` row reads the raw script text `line` through
+/// [`pipe_token_span`], so its data is not the token's own state (task #550).
 fn is_the_word(tok: &Token, line: &[u8], w: &[u8]) -> bool {
     let Token {
         word: t,
@@ -116,7 +98,7 @@ fn is_the_word(tok: &Token, line: &[u8], w: &[u8]) -> bool {
     } else {
         separator_shape(w) && t.eq_bytes(w)
     };
-    in_the_set && span_word(tok, w)
+    in_the_set && tok.span_word(w)
 }
 
 #[cfg(test)]

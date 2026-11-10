@@ -8,7 +8,7 @@ use crate::error::parse::ParseError;
 use crate::parse::Token;
 use crate::parse::pipe_token_span;
 use crate::parse::semi::trim_semi;
-use crate::parse::word_quoted::{operator_word, span_word};
+use crate::parse::word_quoted::operator_word;
 use alloc::vec::Vec;
 use error_stack::{Report, bail, ensure};
 
@@ -28,7 +28,7 @@ fn owns(w: &[u8]) -> bool {
 /// Collect the `|`-separated patterns of one clause, up to and including `)`.
 /// Advances `pos` past the closing paren.
 ///
-/// The clause's first token goes through [`pattern::take_open_paren`] first, so
+/// The clause's first token goes through [`Token::take_open_paren`] first, so
 /// the pattern list starts behind bash's optional leading `(` (POSIX 2.9.4.3's
 /// `( pattern-list )`, task #334).
 ///
@@ -36,7 +36,7 @@ fn owns(w: &[u8]) -> bool {
 /// [`pipe_token_span`]'s — task #261's ONE pipe-token predicate: a pipe token's
 /// span is exactly one `|` byte, while quote removal makes a `"|"`, a `'|'` and
 /// an escaped `\|` word tokens whose *text* is `|`. `)`, `;` and `;;` keep task
-/// #336's [`span_word`] gate (its rule for a separator word in general), so a
+/// #336's [`Token::span_word`] gate (its rule for a separator word in general), so a
 /// quoted `")"` / `"|"` / `";"` is **pattern text**: `case x in a"|"b)` is the
 /// one pattern `a|b`, and a leading `";"` is a pattern word, never the skip.
 ///
@@ -63,7 +63,7 @@ pub(super) fn collect_patterns(
     let mut closed_paren = false;
     // One token, one byte, the clause's **first** token only: `((a*))` keeps its
     // second `(`, and a `(` written behind a `|` (`z|(a)`) is pattern text.
-    if let Some(opened) = tokens.get(*pos).and_then(pattern::take_open_paren) {
+    if let Some(opened) = tokens.get(*pos).and_then(Token::take_open_paren) {
         current_pattern.extend(opened);
         *pos += 1;
     }
@@ -71,7 +71,7 @@ pub(super) fn collect_patterns(
         let Some(tok @ Token { start, end, .. }) = tokens.get(*pos) else {
             break;
         };
-        if span_word(tok, b")") {
+        if tok.span_word(b")") {
             *pos += 1;
             closed_paren = true;
             break;
