@@ -162,3 +162,82 @@ fn alias_ignores_pipe_inside_quotes() {
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "got\n");
 }
+
+/// Rule (task #471): alias expansion is **not** gated to the interactive
+/// shell — fdshell expands in every input mode (REPL, `-c`, script files), so
+/// an aliased name runs its alias where bash runs the command. bash substitutes
+/// aliases in the interactive shell only, so each row here is an accepted
+/// divergence; every assertion is fdshell's measured value, with bash 5.3.9's
+/// measured answer named in the message. `expand_aliases` (on by default) is
+/// the user's control — `expand_aliases_gate_disables_expansion` pins the
+/// opt-out.
+#[test]
+fn expansion_is_not_gated_to_interactive_accepted_divergences() {
+    // (script, fdshell stdout, fdshell stderr needle — empty means "no stderr",
+    //  fdshell rc, bash's measured answer)
+    for (script, out_want, err_needle, code, bash_want) in [
+        (
+            r#"alias e=echo; e hi"#,
+            "hi\n",
+            "",
+            0,
+            "rc 127 `e: command not found`",
+        ),
+        (
+            r#"alias x=true; x; echo rc=$?"#,
+            "rc=0\n",
+            "",
+            0,
+            "`x: command not found` then `rc=127`",
+        ),
+        (
+            r#"alias ls=x; ls"#,
+            "",
+            r#"resolve command path: "x""#,
+            1,
+            "runs the real ls (directory listing), rc 0",
+        ),
+        (
+            r#"alias e=echo; case abc in (a*) e m;; esac"#,
+            "m\n",
+            "",
+            0,
+            "rc 127 `e: command not found`",
+        ),
+    ] {
+        let (out, err, got) = run(script);
+        assert_eq!(
+            got, code,
+            "{script}: rc (bash: {bash_want}), stderr={err:?}"
+        );
+        assert_eq!(out, out_want, "{script}: stdout (bash: {bash_want})");
+        if err_needle.is_empty() {
+            assert!(
+                err.is_empty(),
+                "{script}: stderr={err:?} (bash: {bash_want})"
+            );
+        } else {
+            // The wording is the resolve layer's and debug builds add source
+            // frames, so pin substrings, never exact bytes.
+            assert!(
+                err.contains(err_needle),
+                "{script}: stderr={err:?} (bash: {bash_want})"
+            );
+        }
+    }
+}
+
+/// The mirror of `expand_aliases_gate_disables_expansion`: a mid-script
+/// `shopt -s` acts on the statements behind it, because fdshell runs each
+/// statement as it reads it. bash parses the whole `-c` input before running
+/// anything, so both rows stay divergences (bash 5.3.9 rc 127,
+/// `e: command not found`); the first row is the task's measured one, the
+/// second is the toggle's own proof.
+#[test]
+fn a_mid_script_shopt_enable_takes_effect_on_later_statements() {
+    let (out, err, code) = run("shopt -s expand_aliases; alias e=echo; e hi");
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err:?}");
+    let (out, err, code) =
+        run("shopt -u expand_aliases; alias e=echo; shopt -s expand_aliases; e hi");
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "stderr={err:?}");
+}
