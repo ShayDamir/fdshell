@@ -11,6 +11,12 @@
 //! the tail is parsed **at** the closer, by this one module, exactly as
 //! [`crate::parse::group_block`] does it for `{ …; }`.
 //!
+//! The walk's **stop** has two readers (task #490): [`word`] reports an ordinary
+//! word, and [`pipe`] — the family's pipeline arm, asked by the statement chain
+//! after a successful parse — takes the tokenizer's pipe token, so `for … done |
+//! cat` is read as the pipeline it is and the block becomes the pipeline's first
+//! stage.
+//!
 //! The `&>` arm takes the family's redirect arms (`&> f`, `&>>f`, the `%var`
 //! target) and **refuses its pidvar arm** (`done &>&job`): at a closer bash
 //! rejects the line, so the walk reports its `&` there instead of backgrounding
@@ -19,6 +25,7 @@
 pub(crate) mod bg;
 pub(crate) mod close;
 pub(crate) mod heredoc;
+pub(crate) mod pipe;
 pub(crate) mod word;
 
 use super::Token;

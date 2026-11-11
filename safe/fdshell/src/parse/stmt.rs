@@ -9,12 +9,17 @@
 
 use crate::error::parse::ParseError;
 use crate::parse::{ParsedLine, Token, pipe_token_span};
-use crate::parse::{arith_cmd, command, detect, dispatch, heredoc, pipeline, time_block, token};
+use crate::parse::{
+    arith_cmd, block_tail, command, detect, dispatch, heredoc, pipeline, time_block, token,
+};
 use error_stack::Report;
 use sys::ScriptText;
 
 /// Parse one statement: the arithmetic-command, keyword, `time` and heredoc
-/// arms in order, then a pipeline or a single command.
+/// arms in order, then a pipeline or a single command. The keyword arm yields to
+/// the pipeline arm when the closer-tail family says the block's tail starts a
+/// pipeline (task #490, `parse::block_tail::pipe`), so `for … done | cat` is read
+/// as the pipeline bash reads and the block becomes its first stage.
 pub(crate) fn parse_statement(
     text: &ScriptText,
     line: &[u8],
@@ -29,6 +34,10 @@ pub(crate) fn parse_statement(
     }
 
     if let Some(pl) = dispatch::dispatch_keyword(&raw, text)? {
+        if block_tail::pipe::starts_a_pipeline(&pl, &raw, text)? {
+            let heredocs = heredoc::layout(line, &raw)?;
+            return pipeline::parse_pipeline(&raw, line, &heredocs, text.start, text);
+        }
         return Ok(pl);
     }
 
