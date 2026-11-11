@@ -4655,25 +4655,93 @@ fn an_escaped_delimiter_word_is_one_word_at_both_levels() {
 /// pinned **as measured** with the owner named (never silently accepted): a `\`
 /// at the **end of the word** opens the tokenizer's line-continuation join —
 /// the delimiter word swallows the next line (`cat <<a\` with a following `a\`
-/// is one word `aa\` in bash, `cat <<E\` with a following `zzz` is `Ezzz`),
-/// which task **#489** owns; a delimiter line that never
-/// arrives is the end-of-file family of task **#364** (both shells read to EOF,
-/// warn and run at rc 0 — parity measured 2026-10-29; the #489 rows keep their
+/// is one word `aa\` in bash — the pinned script's last line has no newline, so
+/// bash's trailing lone `\` keeps its backslash; give that line a newline and
+/// the pair joins and the word is `aa` — and `cat <<E\` with a following `zzz`
+/// is `Ezzz`), a rule task **#489** pins and task **#555** implements
+/// (decision: LESSONS "A delimiter word is a word: quote removal strips
+/// every quote byte"); a delimiter line that never arrives is the
+/// end-of-file family of task **#364** (both shells read to EOF, warn and
+/// run at rc 0 — parity measured 2026-10-29; the #489 rows keep their
 /// word-shape divergence, which decides the warning's text and whether bash
 /// warns at all on the matching row).
 #[test]
 fn an_escaped_delimiter_word_at_the_line_end_keeps_its_owners() {
-    // #489: the trailing `\` joins the word with the next line, so fdshell's
-    // delimiter is the two-line text and the delimiter line never matches
-    // (bash: the delimiter is `a ` / `aa\` / `Ezzz`, rc 0).
-    // #489's rows: the trailing `\` joins the word with the next line **in
-    // bash** (`a ` / `aa\` / `Ezzz`); fdshell keeps its own word shape, so the
-    // delimiter line never matches and the run carries the end-of-file warning
-    // (task #364). Both shells now run at rc 0; only the word text (and the
-    // warning it produces) stays with #489. Measured 2026-10-29.
+    // The **word-glued continuation family** (task **#489**): every row asserts
+    // fdshell's measured value with bash's value in the comment right beside it,
+    // so the rows the fold machine flips (rows 2/3/4/9/11 — bash's joined word
+    // matches a line, so it is silent; task **#555** implements the arm, decided
+    // in LESSONS "A delimiter word is a word: quote removal strips every quote
+    // byte") stay a one-token edit per row. Measured 2026-11-11 on this branch:
+    // bash 5.3.9 against fdshell's debug binary, stdin /dev/null, script text
+    // (the interactive/REPL path is not measured here). The message-format
+    // difference — bash's `line N:` prefix and its escaping of the word — is
+    // task **#364**'s; what is pinned is the **word text** the message names and
+    // whether bash warns at all.
+    for (script, want_out, code) in [
+        // bash: word `ab`, warn, stdout `a b`, rc 0 — rc/stdout/warning parity,
+        // fdshell's word is `a` + newline + `b`.
+        ("cat <<a\\\nb\na b\n", "a b\n", 0),
+        // The joined word `ab` MATCHES line 3, so bash is **silent** and line 3
+        // prints nothing; fdshell's word `a` + newline + `b` never matches, so
+        // line 3 is body and the run carries the end-of-file warning.
+        ("cat <<a\\\nb\nab\n", "ab\n", 0),
+        // `<<-` twin of the matching row: bash **silent**, no stdout; fdshell
+        // warns and prints line 3.
+        ("cat <<-a\\\nb\nab\n", "ab\n", 0),
+        // io-number twin of the matching row: bash **silent**, nothing on stdout
+        // (its body is fd 3); fdshell warns and its body is fd 3 too, so the
+        // only difference on this surface is the warning.
+        ("cat 3<<a\\\nb\nab\n", "", 0),
+        // bash: word `ab`, warn, no stdout, rc 0 — parity bar the word text.
+        ("cat 3<<a\\\nb\na b\n", "", 0),
+        // bash: word `ab`, warn, stdout `a b`, rc 0 — parity bar the word text.
+        ("cat <<-a\\\nb\na b\n", "a b\n", 0),
+        // bash: word `ab`, warn, stdout `b`, rc 0 — parity bar the word text.
+        ("cat <<a\\\nb\nb\n", "b\n", 0),
+        // The join puts the tab *inside* the line, so bash's word is `a` and
+        // `<TAB>b` is a `cat` argument (`cat: b: No such file or directory`,
+        // rc 1, warn word `a`); fdshell prints the same rc and stderr with its
+        // word `a` + newline.
+        ("cat <<-a\\\n\tb\nab\n", "", 1),
+        // A double-quoted word: bash folds the pair — `\<newline>` is an escape
+        // pair inside `"…"` — so its word is `ab`, line 3 matches and bash is
+        // **silent**. fdshell's quoted pair keeps its backslash, so its word is
+        // `a\` + newline + `b`, line 3 is body, and it warns.
+        ("cat <<\"a\\\nb\"\nab\n", "ab\n", 0),
+        // A single-quoted word: POSIX gives no escape pair inside `'…'`, so the
+        // newline is data and **both shells read the same word** — `a\` +
+        // newline + `b` — warn, and print `ab`. The control row: the rule is
+        // about the pair, not about quoting.
+        ("cat <<'a\\\nb'\nab\n", "ab\n", 0),
+    ] {
+        let (out, err, got) = run(script);
+        assert_eq!(
+            (got, out.as_str()),
+            (code, want_out),
+            "script {script:?}: stderr={err:?}"
+        );
+        assert!(
+            err.contains("delimited by end-of-file"),
+            "script {script:?}: stderr={err:?}"
+        );
+    }
+    // #489's rows, pinned as measured 2026-10-29 and re-measured 2026-11-11: the
+    // trailing `\` joins the word with the next line **in bash** — its word is
+    // `a `, `aa\` and `Ezzz`; fdshell keeps its own word shape (`a` + newline +
+    // `a`, `a` + newline + `a` + newline, `E` + newline + `zzz`), so the delimiter
+    // line never matches and fdshell's run carries the end-of-file warning (task
+    // #364). Both shells run every row at rc 0; the first row is behavioural
+    // because bash's joined word matches its line and bash is **silent**.
     for (script, want_out) in [
+        // bash: word `a ` — line 2 is the terminator, so bash is **silent**, rc 0,
+        // no stdout.
         ("cat <<a\\ \na ", ""),
+        // bash: word `aa\` (the pinned script's last line has no newline, so the
+        // trailing lone `\` escapes nothing), warn, rc 0, no stdout — parity bar
+        // the word text.
         ("cat <<a\\\na\\", ""),
+        // bash: word `Ezzz`, warn, stdout `EOF\n`, rc 0 — parity bar the word text.
         ("cat <<E\\\nzzz\nEOF", "EOF\n"),
     ] {
         let (out, err, code) = run(script);
