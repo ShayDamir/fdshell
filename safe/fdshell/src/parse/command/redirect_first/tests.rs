@@ -101,7 +101,9 @@ fn the_gate_fires_on_every_redirect_shape() {
 /// A **here-doc** word 0 opens the gate with the body in hand (task #345):
 /// `<<EOF` is the redirections-only statement, the io-number form carries its
 /// descriptor, and a word behind the operator is the command word, exactly as
-/// the `>f g` row above.
+/// the `>f g` row above. An operator word that **carries its operand** opens the
+/// same gate with a here-doc body behind it (task #488): `>f` written alone is
+/// already this family, so `>f <<EOF` is too — bash is rc 0 on the row.
 #[test]
 fn the_gate_fires_on_a_heredoc_word_zero() {
     for line in [
@@ -113,6 +115,9 @@ fn the_gate_fires_on_a_heredoc_word_zero() {
         b"<<EOF >f\nbody\nEOF",
         b"VAR=x <<EOF\nbody\nEOF",
         b"<<EOF | cat\nbody\nEOF",
+        b">x <<EOF\nbody\nEOF",
+        b">| x <<EOF\nbody\nEOF",
+        b">>x <<EOF\nbody\nEOF",
         // The `| <<EOF` stage is the same gate seen on the **stage**'s token
         // slice (the pipeline layer splits before `parse_command` runs), pinned
         // in `parse/pipeline/stage/tests.rs`.
@@ -143,26 +148,22 @@ fn the_gate_stays_off_on_word_data() {
     }
 }
 
-/// A statement carrying a here-doc body keeps the gate **off** when its word 0
-/// is *not* a here-doc operator: that is what preserves the pinned
-/// leading-operator family (`> <<EOF`, `>| x <<EOF`, `>x <<EOF`, `>>x <<EOF` —
-/// bash rc 2, fdshell the command word their pins record) and every
-/// `cat <<EOF`-shaped command.
+/// A here-doc body keeps the gate **off** while word 0 is a plain **word**: every
+/// `cat <<EOF`-shaped command — a bare word, a builtin, one behind a scoped
+/// `NAME=value` prefix — keeps its command word. The operator words that used to
+/// be here (`>x <<EOF`, `>| x <<EOF`, `>>x <<EOF`) carry their operand and open
+/// the gate like `>f` alone does (task #488); the bare-operator words moved to
+/// the parse-error table below.
 #[test]
 fn a_heredoc_body_keeps_the_gate_off_behind_a_plain_word_zero() {
     for line in [
-        b">x <<EOF\nbody\nEOF" as &[u8],
-        b">| x <<EOF\nbody\nEOF",
-        b">>x <<EOF\nbody\nEOF",
-        b"> <<EOF\nbody\nEOF",
-        b">| <<EOF\nbody\nEOF",
-        b"cat <<EOF\nbody\nEOF",
+        b"cat <<EOF\nbody\nEOF" as &[u8],
         b"builtin cat <<EOF\nbody\nEOF",
         b"VAR=x cat <<EOF\nbody\nEOF",
     ] {
         assert!(
             !gate(line),
-            "a here-doc body behind a non-heredoc word 0 keeps {line:?} off the gate"
+            "a here-doc body behind a plain word 0 keeps {line:?} off the gate"
         );
     }
 }
@@ -184,10 +185,23 @@ fn a_heredoc_operator_without_a_body_reaches_the_gate() {
 }
 
 /// A bare operator with no operand keeps the collection loop's own parse error:
-/// the gate calls the same predicate, so nothing new is reported.
+/// the gate calls the same predicate, so nothing new is reported. The two
+/// here-doc-bodied rows are task #488's surviving guards — the operator word has
+/// no operand, so the loop's error answers even with a body behind it (bash is a
+/// rc-2 syntax error; fdshell maps it to its rc-1 parse error).
 #[test]
 fn a_bare_operator_without_operand_keeps_the_parse_error() {
-    for line in [b">" as &[u8], b">>", b"<", b"<>", b">|", b"&>", b"> >"] {
+    for line in [
+        b">" as &[u8],
+        b">>",
+        b"<",
+        b"<>",
+        b">|",
+        b"&>",
+        b"> >",
+        b"> <<EOF\nbody\nEOF",
+        b">| <<EOF\nbody\nEOF",
+    ] {
         assert!(
             gate_err(line).contains("invalid redirect"),
             "{line:?}: {}",
