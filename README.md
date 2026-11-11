@@ -1219,6 +1219,16 @@ with `case: '(' and ')' are control operators here (quote them)`; the slot's own
 owned `;` (`case x; in esac`) and the quoted, escaped and mid-word spellings stay
 words.
 
+A condition that lists **several** commands answers with the **first** command of
+each of its operator-parts: `if true; false; then echo y; fi` prints `y` and
+`if false; true; then echo y; fi` prints nothing, because each part runs its one
+command and what sits behind a separator inside the condition is dropped unrun,
+where bash runs the whole list and gates on the last (accepted divergence, pinned
+as measured; task **#498**). A newline **behind** an operator is not such a
+separator — it belongs to the operator (POSIX #2.9's AND-IF/OR-IF terminator), so
+the list continues onto the next line there (task **#492**, "Pipelines and
+lists"), and that is why the joined spellings of this family are bash parity.
+
 A `for` **word list** is read as **words**: no keyword scores inside it, so
 `for i in done`, `for i in esac`, `for i in { 1 2` and `for i in }` are ordinary
 words and the block runs from its own `do` to its own `done` —

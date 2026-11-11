@@ -5372,6 +5372,13 @@ links behind it). The exception has a visible cost, pinned as measured in
 `tests/heredoc.rs`: a chain with a comment on one of its middle links still splits at the
 comment's newline, so that one shape does not produce what bash does; closing it means
 discarding comment text, a rule the parse layer owns and the runner must not re-derive.
+The condition granularity closed its own half there (task #498, measured
+2026-11-11): the slice **inherits** the scan's join verbatim — the cond layer
+splits on operators only and never re-splits on separators, so the join rows sit
+at bash's value — and its own answer at a **separator** inside a condition is the
+**first** command's where bash gates on the last; both are pinned at
+`tests/cond_blocks.rs::the_condition_granularity_runs_only_its_first_command`,
+and the separator answer is the entry below.
 
 The byte is read at a second place now (task #415): the `case` clause list, whose
 POSIX #2.9.1 production is a `newline_list`. An empty slot there is legal when a
@@ -7571,3 +7578,20 @@ Pins: `segment/tests.rs::the_line_leading_mark_fires_at_the_scan_unit_head_only`
 (surfaced pin: an empty def makes the helper's script open on the `;`), and the
 unchanged `segment/bg/tests.rs` scan pins (`&\n;` stays a whole-string
 divergence — `newline_ends_the_peek`).
+
+## A condition answers with its first command; each operator-part runs one command (task #498)
+
+`if true; false; then echo y; fi` prints `y` here and nothing in bash (rc 0 both),
+and `if false; true; then echo y; fi` is the same divergence from the other side:
+the cond layer splits on operators **only** and never re-splits on separators, so
+each part is **one** command (`run_part` → `run_one` → `parse` stops at the
+separator and everything behind it is dropped unrun) and the condition's gate is
+the **first** command's status, where bash's `compound_list` runs every command
+and gates on the **last**. Accepted, pinned at fdshell's value with bash's value
+named per row in
+`safe/fdshell/tests/cond_blocks.rs::the_condition_granularity_runs_only_its_first_command`
+(measured 2026-11-11, bash 5.3.9), which also hosts the join's structural rows
+and the owner-named boundaries (the `;`-byte family pinned at its owners' values
+— #300/#415/#423/#424 — #367's report, #496/#524's span gate, #492's region and
+merge rows; the REPL keeps its own completeness pins). It stays this way because
+a condition is **never re-scanned** (LESSONS: "A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)") — bash's reading would need a second split-time validator in the run layer, which that entry refuses — while the newline **behind** an operator is the scan's alone (LESSONS: "A `;` token is a newline in disguise: the body-slice rule must read the token's byte (task #355)"), which the verbatim slice simply inherits.

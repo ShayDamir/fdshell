@@ -1974,7 +1974,8 @@ fn a_dangling_operator_at_the_end_of_a_script_file_reports() {
 /// list's status span the joined list. The acceptance criterion is that the joined
 /// spelling produces what the same-line spelling produces, so every row here is
 /// the joined spelling next to its bash value; the rows whose two disagree name
-/// their owner. Measured 2026-10-30 against bash 5.3.9 and this build.
+/// their owner. Measured 2026-10-30 against bash 5.3.9 and this build. The
+/// condition row is pinned in `the_condition_granularity_runs_only_its_first_command`.
 #[test]
 fn a_line_ending_on_a_cond_operator_continues_the_list() {
     // The short-circuited side never runs: nothing prints, and the rc is the
@@ -2015,13 +2016,197 @@ fn a_line_ending_on_a_cond_operator_continues_the_list() {
         // row is task #496's (bash reads `b`, then `a &`).
         ("echo a \"&&\"\necho b", "a &&\nb\n", 0),
         ("echo a \\&&\necho b", "a &&\nb\n", 0),
-        // The condition granularity is task #498's; this row reaches bash's value
-        // through the scan's join.
-        ("if true ||\nfalse; then echo y; fi", "y\n", 0),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
     }
+}
+
+/// Task #498's decision at the **condition** granularity: accept and pin. The
+/// newline **behind** a top-level `&&`/`||` is decided in the scan (POSIX #2.9's
+/// AND-IF/OR-IF terminator, task #492), and the condition granularity inherits
+/// that decision **verbatim**: its slice is never re-scanned, and
+/// `cond.rs::run_cond_list` splits on operators only and never re-splits on
+/// separators, so the short circuit, the gate and the status span the newline
+/// exactly as bash's does — every row of the task's 2026-10-29 table now sits at
+/// bash's value. What the condition keeps for itself is its answer at a
+/// **separator** (`;`, newline, `;;`) inside it: each operator-part is **one**
+/// command (`run_part` → `run_one` → `parse` stops at the separator and
+/// everything behind it is dropped unrun), so the condition's value is the
+/// **first** command's status, where bash's `compound_list` runs every command
+/// and gates on the **last**. Accepted divergence, pinned at fdshell's value
+/// with bash's measured value named per row. Measured 2026-11-11 against bash
+/// 5.3.9 and this build; the boundary rows are pinned at their owners' values.
+#[test]
+fn the_condition_granularity_runs_only_its_first_command() {
+    // The task's own table. The first row is the **discriminating** one — the
+    // taken side runs, so the short circuit must span the newline (it moved here
+    // from `a_line_ending_on_a_cond_operator_continues_the_list`, which names this
+    // task as its owner) — and the `elif` twin reaches the same value the same way.
+    for (script, want, rc) in [
+        ("if true ||\nfalse; then echo y; fi", "y\n", 0),
+        (
+            "if false; then :; elif true ||\nfalse; then echo y; fi",
+            "y\n",
+            0,
+        ),
+        // Parity **by coincidence**: the short circuit decides before the newline,
+        // so both readings print nothing at rc 0.
+        ("if false &&\ntrue; then echo y; fi", "", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+    // The task table's two loop rows, through the file's bounded harness even
+    // though each ends on `break` (a mis-paired rule must panic, not hang).
+    for (script, want, rc) in [
+        // Parity **by coincidence**: the short circuit decides before the newline
+        // and the loop never runs.
+        ("while false &&\ntrue; do echo y; break; done", "", 0),
+        // The short circuit decides **across** the newline — the scan's join
+        // answer, at bash's value.
+        ("while true ||\nfalse; do echo y; break; done", "y\n", 0),
+    ] {
+        let (out, err, code) = run_bounded(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+    // The structural rows of the join: the second physical line's command must
+    // **run**, so each row proves the condition text spans the newline; all are
+    // bash parity. The glued operator, the trailing space and the comment tail on
+    // the operator line are task #492's join spellings, inherited verbatim.
+    for (script, want, rc) in [
+        ("if false ||\ntrue; then echo y; fi", "y\n", 0),
+        ("if false ||\necho side; then echo y; fi", "side\ny\n", 0),
+        ("if true &&\necho side; then echo y; fi", "side\ny\n", 0),
+        (
+            "if false ||\ntrue &&\nfalse; then echo n; else echo y; fi",
+            "y\n",
+            0,
+        ),
+        ("if true||\nfalse; then echo y; fi", "y\n", 0),
+        ("if true || \nfalse; then echo y; fi", "y\n", 0),
+        ("if true || #c\nfalse; then echo y; fi", "y\n", 0),
+        // The same shape behind a scan unit that **re-scans** — the join lives in
+        // that scan — and the inner condition inherits it verbatim.
+        (
+            "if :; then\nif true ||\nfalse; then echo y; fi\nfi",
+            "y\n",
+            0,
+        ),
+        (
+            "case x in x)\nif true ||\nfalse; then echo y; fi\n;;\nesac",
+            "y\n",
+            0,
+        ),
+        ("{\nif true ||\nfalse; then echo y; fi\n}", "y\n", 0),
+        ("f(){\nif true ||\nfalse; then echo y; fi\n}\nf", "y\n", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+    // The bounded twins: the loop whose body re-scans, and the structural row
+    // whose loop **runs**.
+    for (script, want, rc) in [
+        (
+            "while true; do\nif true ||\nfalse; then echo y; fi\nbreak\ndone",
+            "y\n",
+            0,
+        ),
+        ("while false ||\necho side; do break; done", "side\n", 0),
+    ] {
+        let (out, err, code) = run_bounded(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (want, rc),
+            "{script}: bash parity: {err}"
+        );
+    }
+    // Fact 2 — the accepted divergence, pinned at fdshell's value with bash's
+    // measured value named per row: each operator-part runs its first command
+    // only, and what sits behind the separator is dropped unrun.
+    for (script, want, rc) in [
+        ("if true; false; then echo y; fi", "y\n", 0), // bash prints nothing, rc 0
+        ("if false; true; then echo y; fi", "", 0),    // bash prints `y`
+        ("if true\nfalse; then echo y; fi", "y\n", 0), // bash prints nothing, rc 0
+        ("if false\ntrue; then echo y; fi", "", 0),    // bash prints `y`
+        ("if echo SIDE; false; then echo y; fi", "SIDE\ny\n", 0), // bash prints `SIDE` only
+        ("if true; echo SIDE; then echo y; fi", "y\n", 0), // bash prints `SIDE` and `y`
+        // bash's missing command **runs** and its failure decides the gate; here it
+        // is dropped unrun and the first command decides.
+        ("if true; nonexistent_xyz; then echo y; fi", "y\n", 0), // bash prints nothing, rc 0
+        // The quoted/escaped operator words whose operands prove the span gate —
+        // no join here (owners #496/#524) — and the first command answers. bash's
+        // pipeline of the escaped row genuinely runs, at rc 0.
+        ("if true \"||\"\nfalse; then echo y; fi", "y\n", 0), // bash prints nothing, rc 0
+        ("if true \\||\nfalse; then echo y; fi", "", 1),
+        // A quoted **word** does not disable the operator: the join applies and the
+        // spelling stays parity.
+        ("if \"true\" ||\nfalse; then echo y; fi", "y\n", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
+    }
+    // Boundary rows, each pinned at its owner's measured value — cross-reference,
+    // not re-derivation. `;` and end of input are **not** join points (#492): bash
+    // stops at rc 2 naming the `;`; the `;`-byte family answers rc 0 here (#300's
+    // parse-trim leniency gate, #415/#423/#424).
+    for (script, want, rc) in [
+        ("if true ||;\nfalse; then echo y; fi", "", 0),
+        ("if true ||\n; false; then echo y; fi", "", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (want, rc),
+            "{script}: bash rc 2: {err}"
+        );
+    }
+    // An operator with nothing behind it reports at the house rc 1 where bash stops
+    // at rc 2 — owner **#367** (whose message pins live in this file's
+    // `a_dangling_cond_operator_in_an_if_body_is_measured`). The stray-`;;` row
+    // belongs to **#423**, whose message the family pins in `tests/semi_semi.rs`.
+    for (script, want, rc) in [
+        ("if true ||\nfi", "", 1),
+        ("if true &&\nfi", "", 1),
+        ("if true ;; then echo y; fi", "", 1),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (want, rc),
+            "{script}: bash rc 2: {err}"
+        );
+    }
+    // #423's message covers the `;;` row as well (the semi_semi family's pin).
+    let (_, err, _) = run("if true ;; then echo y; fi");
+    assert!(err.contains("stray ';;'"), "{err}");
+    // The script file ending on the operator — #367's file harness: bash stops at
+    // rc 2 and runs nothing, fdshell reports at rc 1.
+    let dir = scratch("condition-ends-on-operator");
+    let path = dir.join("ends-on-operator.sh");
+    std::fs::write(&path, "if true ||").unwrap();
+    let output = Command::new(BIN)
+        .arg(&path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(
+        str::from_utf8(&output.stdout).unwrap().is_empty(),
+        "bash prints nothing at rc 2"
+    );
+    assert_eq!(output.status.code().unwrap_or(-1), 1, "bash rc 2");
+    // The region/merge row — the condition opens on the join and its text carries
+    // the here-doc region: bash rc 2, `y` rc 0 here; owner **#492**'s pins live in
+    // `tests/heredoc.rs`. The REPL keeps its own completeness rule (`repl/complete/tests.rs`
+    // and `tests/repl.rs` pin it), so there is no REPL row here.
+    let (out, err, code) = run("if true ||\ncat <<EOF\nbody\nEOF\n; then echo y; fi");
+    assert_eq!(
+        (out.as_str(), code),
+        ("y\n", 0),
+        "bash rc 2, nothing runs: {err}"
+    );
 }
 
 /// Task #406: an operator with **nothing in front of it** has no command on that side,
