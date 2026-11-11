@@ -1,7 +1,10 @@
+// mutants: -C --lib -C --test -C cond_blocks -C --test -C errexit -C --test -C set_opts -- -E 'test(/^if_exec::/) | test(/^tests::run::/) | binary(cond_blocks) | binary(errexit) | binary(set_opts)'
+
 use crate::loop_control::LoopControl;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
+use crate::cond::errexit;
 use crate::error::cmd::CmdError;
 use crate::parse::if_block::IfBlock;
 use crate::state::ShellState;
@@ -33,13 +36,17 @@ fn run_if_body(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let cond_bodies = body_bytes(&ifblock.cond_bodies);
-    let control = crate::repl::run_cond_list(
-        &ifblock.condition,
-        &cond_bodies,
-        cell,
-        true,
-        ifblock.cond_background,
-    )?;
+    // The condition runs inside the errexit gate (task #491): bash exempts the
+    // test *and* everything a compound written in it executes, and only the
+    // flag reaches through the nesting.
+    let control = errexit::gated(cell, || {
+        crate::repl::run_cond_list(
+            &ifblock.condition,
+            &cond_bodies,
+            cell,
+            ifblock.cond_background,
+        )
+    })?;
     if let Some(control) = control {
         // An `if` is not a loop level (README "Loop control"), so the signal is
         // the caller's: propagate it whole, consuming nothing.
@@ -56,8 +63,9 @@ fn run_if_body(
     }
     for arm in &ifblock.elifs {
         let arm_bodies = body_bytes(&arm.cond_bodies);
-        let control =
-            crate::repl::run_cond_list(&arm.cond, &arm_bodies, cell, true, arm.cond_background)?;
+        let control = errexit::gated(cell, || {
+            crate::repl::run_cond_list(&arm.cond, &arm_bodies, cell, arm.cond_background)
+        })?;
         if let Some(control) = control {
             return Ok(Some(control));
         }

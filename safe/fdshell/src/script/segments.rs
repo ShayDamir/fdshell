@@ -5,6 +5,8 @@
 //! caught; the dispatch in `script.rs` owns the scan, the pre-passes and the
 //! early return.
 
+// mutants: -C --lib -C --test -C cond_blocks -C --test -C async -- -E 'test(/^script::/) | binary(cond_blocks) | binary(async)'
+
 use alloc::vec::Vec;
 use error_stack::Report;
 use sys::ScriptText;
@@ -55,7 +57,7 @@ pub(super) fn run_statement(
         Some(joined) => text_at(&joined.text, *off, text)?,
         None => sub(text, *off, bytes.len())?,
     };
-    if let Some(control) = crate::cond::run_cond_list(&part, bodies, cell, false, background)? {
+    if let Some(control) = crate::cond::run_cond_list(&part, bodies, cell, background)? {
         return Ok(Some(control));
     }
     Ok(None)
@@ -91,7 +93,7 @@ pub(super) fn run_block(
     let full = sub(text, cmd_start, raw.trim_ascii().len())?;
     // A block statement's own `&` runs it foreground (measured
     // divergence, task #326 — compound background is a follow-up).
-    if let Some(control) = crate::cond::run_cond_list(&full, bodies, cell, false, false)? {
+    if let Some(control) = crate::cond::run_cond_list(&full, bodies, cell, false)? {
         return Ok(Some(control));
     }
     Ok(None)

@@ -1,7 +1,10 @@
+// mutants: -C --lib -C --test -C loops -C --test -C errexit -- -E 'test(/^loop_::/) | test(/^tests::run::/) | binary(loops) | binary(errexit)'
+
 use crate::loop_control::{AtLevel, LoopControl, at_level, in_loop};
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
+use crate::cond::errexit;
 use crate::error::cmd::CmdError;
 use crate::parse::while_block::LoopBlock;
 use crate::state::ShellState;
@@ -44,7 +47,11 @@ fn run_loop_body(
         // `{ …; }` group, a `case` arm, a function called from it) is the loop's
         // own signal: the condition runs inside this loop's level (`in_loop`), so
         // it is consumed here exactly like the body's.
-        let control = crate::repl::run_cond_list(&block.condition, &cond_bodies, cell, true, bg)?;
+        // The condition runs inside the errexit gate (task #491): the exemption
+        // covers everything the test executes, including a compound written in it.
+        let control = errexit::gated(cell, || {
+            crate::repl::run_cond_list(&block.condition, &cond_bodies, cell, bg)
+        })?;
         if let Some(control) = control {
             match at_level(control) {
                 AtLevel::Stop => break,

@@ -1,5 +1,7 @@
+// mutants: -C --lib -C --test -C cond_blocks -C --test -C errexit -C --test -C set_opts -C --test -C group -C --test -C loops -- -E 'test(/^cond::/) | test(/^tests::run::/) | binary(errexit) | binary(cond_blocks) | binary(set_opts) | binary(group) | binary(loops)'
+
 mod boundary;
-mod errexit;
+pub(crate) mod errexit;
 pub(crate) mod part;
 mod parts;
 
@@ -13,10 +15,14 @@ use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
-/// `exempt` disables errexit on the list's final segment (the conditions of
-/// `if`/`while`/`until` are exempt, as in bash). The list's **non-final** parts
-/// carry bash's other errexit suppression, the `&&`/`||` gate
-/// ([`errexit::gated`]) — two independent suppressions of one check.
+/// Bash's errexit exemption is **one** mechanism: the execution-context gate
+/// ([`errexit::gated`], [`crate::state::ShellState::errexit_gated`]). The
+/// list's **non-final** parts run inside it, and the
+/// `if`/`elif`/`while`/`until` **condition** callers (`if_exec.rs`, `loop_.rs`)
+/// run a whole condition list inside it, because bash exempts the test *and*
+/// everything a compound written in it executes — the flag riding the state is
+/// what reaches through the nesting. A list reached ungated keeps exiting on a
+/// failing final part; `should_exit` consults the flag.
 /// `background` marks the list's **last** part to run asynchronously (the plain
 /// `&` ends the statement after that part — task #326); the preceding parts of
 /// the list run foreground.
@@ -24,7 +30,6 @@ pub(crate) fn run_cond_list(
     text: &ScriptText,
     bodies: &[Vec<u8>],
     cell: &ForkCell<ShellState>,
-    exempt: bool,
     background: bool,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let line = text.as_bytes().change_context(CmdError::Never)?;
@@ -71,7 +76,7 @@ pub(crate) fn run_cond_list(
             // group, `if` body, `case` arm, function frame) never consults
             // `should_exit`; the final part is the command following the final
             // operator, so it keeps exiting.
-            if !exempt && !parts::is_empty_part(line, start, i) && errexit::should_exit(cell)? {
+            if !parts::is_empty_part(line, start, i) && errexit::should_exit(cell)? {
                 return Ok(Some(LoopControl::Exit));
             }
             break;

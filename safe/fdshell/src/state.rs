@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C strict -- -E 'test(/^state::/) | binary(strict)'
+
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
 use hashbrown::HashMap;
@@ -59,7 +61,8 @@ pub struct ShellState {
     pub(crate) loop_depth: u32,
     /// True while the command being executed runs inside a part of a `&&`/`||`
     /// list that bash exempts from errexit (every part except the command
-    /// following the final operator) — the execution context set by
+    /// following the final operator), or inside an `if`/`elif`/`while`/`until`
+    /// condition (task #491) — the execution context set by
     /// [`crate::cond::errexit::gated`]; `should_exit` consults it.
     pub(crate) errexit_gated: bool,
     pub(crate) eval_depth: u32,

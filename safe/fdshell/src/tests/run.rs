@@ -70,7 +70,7 @@ fn run_cond_list(
     b: &[u8],
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::cond::run_cond_list(&st(b), &[], cell, false, false)
+    crate::cond::run_cond_list(&st(b), &[], cell, false)
 }
 
 fn run_cond_list_bodies(
@@ -78,7 +78,7 @@ fn run_cond_list_bodies(
     bodies: &[Vec<u8>],
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    crate::cond::run_cond_list(&st(b), bodies, cell, false, false)
+    crate::cond::run_cond_list(&st(b), bodies, cell, false)
 }
 
 fn handle(b: &[u8], cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
@@ -1007,6 +1007,22 @@ fn an_operator_opening_a_part_reports_before_anything_runs() {
     });
 }
 
+/// The `||` short-circuit's gate scan starts **behind the operator**: the quoted
+/// `;` in the left word `a";"` belongs to that word, not to the gate, so the
+/// failing `builtin false` behind the separator runs and is the list's status
+/// (bash's value). Starting the scan inside the word instead — the `i + 2` →
+/// `i - 2` mutant this test kills — sees the quoted `;` as the separator (or an
+/// unterminated quote) and answers differently.
+#[test]
+fn the_or_gate_skips_from_behind_the_operator_not_the_left_word() {
+    child_test(|| {
+        let cell = make_cell();
+        run_cond_list(b"true a\";\"|| builtin true; builtin false", &cell).unwrap();
+        let state = borrow_state(&cell);
+        assert_eq!(state.last_status.exit_code(), 1);
+    });
+}
+
 #[test]
 fn errexit_failing_final_command_exits() {
     child_test(|| {
@@ -1026,13 +1042,14 @@ fn errexit_off_leaves_control_none() {
     });
 }
 
+/// The condition's exemption is the gate (task #491): `false` is the condition,
+/// the test consumes its failure, and the list ends without a stop signal.
 #[test]
-fn errexit_exempt_final_part_does_not_exit() {
+fn errexit_gate_covers_a_condition_list() {
     child_test(|| {
         let cell = make_cell();
         borrow_state_mut(&cell).options |= crate::options::ERREXIT;
-        // Exempt (an `if`/`while` condition): the failure does not stop.
-        let control = crate::cond::run_cond_list(&st(b"false"), &[], &cell, true, false).unwrap();
+        let control = run_script(b"if false; then :; fi", &cell).unwrap();
         assert!(control.is_none());
     });
 }
@@ -1110,6 +1127,22 @@ fn errexit_gate_is_restored_after_the_list() {
         let cell = make_cell();
         borrow_state_mut(&cell).options |= crate::options::ERREXIT;
         let control = run_script(b"{ false; } && builtin echo skipped", &cell).unwrap();
+        assert!(control.is_none());
+        assert!(!borrow_state(&cell).errexit_gated);
+        let control = run_cond_list(b"false", &cell).unwrap();
+        assert!(matches!(control, Some(LoopControl::Exit)));
+    });
+}
+
+/// The same pairing around a **condition** (task #491): the compound inside the
+/// condition is exempt (the fix — no exit here), the flag is off again when the
+/// condition ends, and the next ungated failure exits.
+#[test]
+fn errexit_gate_is_restored_after_a_condition_runs() {
+    child_test(|| {
+        let cell = make_cell();
+        borrow_state_mut(&cell).options |= crate::options::ERREXIT;
+        let control = run_script(b"if { false; }; then :; fi", &cell).unwrap();
         assert!(control.is_none());
         assert!(!borrow_state(&cell).errexit_gated);
         let control = run_cond_list(b"false", &cell).unwrap();
