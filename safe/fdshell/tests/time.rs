@@ -133,7 +133,11 @@ fn terminating_commands_report_before_leaving() {
     }
 }
 
-/// A bare `time` (with and without `-p`) reports zeros and succeeds.
+/// A bare `time` (with and without `-p`) prints a report and succeeds: rc 0,
+/// exactly three fields, in this order. Only the pinnable half is pinned
+/// exactly — the CPU fields stay exact zeros — while `real` is bounded, because
+/// it is a clock delta:
+/// LESSONS: "A test that measures wall-clock under load cannot pin the number"
 #[test]
 fn bare_time_reports_zeros() {
     for script in ["time", "time -p"] {
@@ -141,9 +145,12 @@ fn bare_time_reports_zeros() {
         assert_eq!(out.status.code(), Some(0), "{script}");
         let report = fields(&stderr(&out));
         assert_eq!(report.len(), 3, "{script}: {}", stderr(&out));
-        for (_, value) in &report {
-            let raw = value.replace(['m', 's'], "");
-            assert_eq!(raw.parse::<f64>().unwrap(), 0.0, "{script}: {value}");
+        assert_eq!(report[0].0, "real", "{script}");
+        assert_eq!(report[1].0, "user", "{script}");
+        assert_eq!(report[2].0, "sys", "{script}");
+        assert!(secs(&report[0].1) < 0.10, "{script}: real {}", report[0].1);
+        for (name, value) in &report[1..] {
+            assert_eq!(secs(value), 0.0, "{script}: {name} must stay an exact zero");
         }
     }
 }

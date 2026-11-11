@@ -7442,3 +7442,35 @@ and `safe/fdshell/tests/redirect.rs`
 `set_c_on_a_symlink_to_a_regular_file_refuses` — bash columns measured
 2026-11-10; the FIFO row stays documented only, its open blocks without a
 reader).
+
+## A test that measures wall-clock under load cannot pin the number (task #484)
+
+**Rule:** a number a test *measures off a clock* is pinnable at a **bounded
+upper limit**, never at an exact value; exact pins are only deterministic for
+quantities that cannot drift — CPU-time deltas around a null statement,
+counters, structure. Scheduler delay rides into a `clock_gettime` delta under
+concurrent-load pressure, and a suite run under load is exactly that: a bare
+`time` printed `real 0m0.006s` and `0m0.001s` across 4-concurrent full-suite
+runs, where the row's exact-zero assertion had nothing left to grip.
+
+Why the CPU half of the *same* report stays exact: `getrusage` charges only CPU
+actually consumed, and the null statement between the two marks consumes none —
+time spent descheduled is not CPU time — so the delta is structurally zero and
+load-independent. The two halves of one report are asserted differently because
+they are measured differently: `real` is a clock delta, `user`/`sys` are a CPU
+delta. One bound plus two exact pins are deterministic; three exact pins are
+not.
+
+Pins: `safe/fdshell/tests/time.rs::bare_time_reports_zeros` — the converted row
+(rc 0, three fields named in order, bounded `real`, exact CPU zeros). The
+sibling proof at scale is
+`tests/time.rs::quiet_statement_after_child_cpu_reports_zero_cpu`: it already
+pairs `real < 0.10` with exact `"0.00"` CPU pins, and it survived the campaigns
+that killed the exact-`real` row.
+
+Detector: the load loop — full nextest runs under concurrent full-suite load
+(the #340/#254 harness shape), per-run logs kept so a failing row can be
+classified; it is also the acceptance bar, because a quiet solo run never shows
+the drift. Cross-ref: LESSONS: "A mutant" — a flaky row fakes a mutant kill at
+scale, so a load-flaky row is fixed before any sweep's verdict on its file is
+trusted.
