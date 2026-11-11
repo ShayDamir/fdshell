@@ -4,8 +4,9 @@
 //! executed inside** a compound sitting in such a position (task #348).
 //!
 //! Every row here is measured against bash 5.3.9(1) with stdin `/dev/null`,
-//! stdout only; the expected values are bash's, and the two owner-pinned rows
-//! name their owners (`#490`, `#179`) with bash's value beside them.
+//! stdout only; the expected values are bash's, and the one owner-pinned
+//! divergence names its owner (`#179`) with bash's value beside it. Task **#490**'s
+//! rows — the pipeline-stage exemption — moved to bash's value with the arm.
 
 #![allow(clippy::unwrap_used)]
 
@@ -488,26 +489,51 @@ fn a_gated_compound_with_an_unopenable_redirect_keeps_its_owner_179() {
     }
 }
 
-/// A failing command in a **non-final pipeline stage** is exempt in bash ("any
-/// command in a pipeline but the last"). Owner **#490**: fdshell exits. Pinned
-/// as measured so the row cannot drift silently; bash's value is in the comment.
+/// A failing command in a **non-final pipeline stage** is exempt ("any command in
+/// a pipeline but the last"), and the exemption is the stage's own fork: the failing
+/// command kills the *stage* — whose loop stops right there — while the shell only
+/// ever sees the **last** stage's status, so it runs on at 0. Task **#490** closed
+/// the gap for a statement that *starts* with a keyword block (`for … done | cat`)
+/// by letting the pipeline parser have the line; every row here is bash's value.
 #[test]
-fn a_nonfinal_pipeline_stage_keeps_its_owner_490() {
+fn a_failing_command_in_a_nonfinal_stage_exempts_the_shell() {
     assert_rows(&[
-        // bash: `rc=0` rc 0. fdshell (pinned, owner #490): no output, rc 1.
         (
             "set -e; for x in 1; do false; done | cat; echo rc=$?",
-            "",
-            1,
+            "rc=0\n",
+            0,
         ),
-        // The stage's own last-command status is exempt in bash too:
-        // bash `rc=0` rc 0, fdshell (owner #490) no output rc 1.
+        // The stage's own last-command status is exempt the same way.
         (
             "set -e; for x in 1; do false; done | cat >/dev/null; echo rc=$?",
-            "",
-            1,
+            "rc=0\n",
+            0,
+        ),
+        // The failing command ends the stage's own loop: no `ran-1`, no `ran-2` —
+        // inside a forked stage the errexit decision stays live, no gate is set.
+        (
+            "set -e; for x in 1 2; do false; echo ran-$x; done | cat; echo rc=$?",
+            "rc=0\n",
+            0,
         ),
     ]);
+
+    // The plumbing rows, bash's values: the block really runs in the stage's fork, so
+    // what it prints travels down the pipe — `wc` counts the line it receives, and the
+    // tail stage's redirect owns the file that `cat` reads back (nothing of the block's
+    // own output is printed direct).
+    let dir = Scratch::new("stage-redirect");
+    for (script, out, rc) in [
+        ("set -e; for x in 1; do echo HI; done | wc -c", "3\n", 0),
+        (
+            "set -e; for x in 1; do echo B; done | cat > f; cat f",
+            "B\n",
+            0,
+        ),
+    ] {
+        let (o, err, code) = run_in(&dir, script);
+        assert_eq!((o.as_str(), code), (out, rc), "{script}: stderr={err:?}");
+    }
 }
 
 /// The gate spans a **joined** list (task #492): POSIX #2.9's AND-IF/OR-IF

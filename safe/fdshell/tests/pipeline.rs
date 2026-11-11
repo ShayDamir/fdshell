@@ -601,9 +601,10 @@ fn a_function_stage_keeps_its_own_redirects() {
 /// status is the pipeline's). A `break`/`continue` the body raises, and the
 /// depth cap a recursive body hits, die with the fork — only the status is
 /// reported, as `pipeline/child/block.rs` documents for a block stage. bash
-/// exempts every stage but the last from `set -e` (task **#490**); that gap is
-/// not visible here, where the failing function is the last stage in one row and
-/// the pipeline status is the last stage's in the other — both rows are parity.
+/// exempts every stage but the last from `set -e` (task **#490**, at parity);
+/// the exemption is not visible here, where the failing function is the last
+/// stage in one row and the pipeline status is the last stage's in the other —
+/// both rows are parity.
 #[test]
 fn a_function_stage_reports_the_status_it_runs_with() {
     let dir = Scratch::new();

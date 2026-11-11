@@ -969,9 +969,11 @@ Reproduction trick for any new errexit row: run it with `set -e` **removed**.
 If the shell still stops there, the row is not about errexit. That is how
 `set -e; for x in 1; do true; done > nodir/x && echo after` proved to be the
 redirect-open abort of task #179 (fdshell aborts the script with and without
-`-e`, bash runs on) and how `set -e; for x in 1; do false; done | cat` stayed
-the non-final-pipeline-stage exemption of task #490; both are pinned at
-fdshell's measured value with bash's value beside them and their owner named.
+`-e`, bash runs on) and how `set -e; for x in 1; do false; done | cat` stayed a
+real errexit row: task #490's non-final-stage exemption, whose mechanism is the
+stage's own **fork** — the flag rides the state copy, nothing is gated, and the row
+is pinned at bash's parity. The #179 row stays pinned at fdshell's measured value
+with bash's value beside it and its owner named.
 
 ## Bash's `-c` mode exits 127 on an unbound-variable expansion error; script mode exits 1
 `bash -c 'set -u; echo $x'` exits **127** on bash 5.3 (the `-c` path reports the never-executed command as not-found), while the same two lines in a script file exit **1**. fdshell's `-c` mode reports the child's substitution failure and exits **1** (the script-mode status) — the plan pinned 1 after probing; do not "fix" the integration tests toward 127 to match the `-c` quirk.
@@ -6807,6 +6809,17 @@ the closer position splits the family's arms). A closer
 block; that row keeps its measured value. And a body that never runs never
 reports, so `while false; do if :; then :; fi x; done` runs the statement after
 the block where bash prints nothing.
+
+The stop gained a **second reader** (task #490): the tokenizer's pipe token is the
+one stop that is not silent. `parse/block_tail/pipe.rs` asks the same arms in the
+same order and answers for the stop alone, so `for … done | cat` is read as the
+pipeline bash reads it, with the block as stage 0, while the keyword arm keeps every
+line whose tail is not a pipe. The judge still decides words alone — the report above
+is its answer, unchanged — and the arm is only ever asked after a successful parse, so
+a word behind the closer stays the report. It answers only for the closers this family
+walks: the group, the definer and the arithmetic `for` (whose body decides its own
+closer) keep their pinned readings, and a comment word stays a stop. Nothing here
+gates `set -e`: the stage's fork is the exemption, the flag rides the state copy.
 
 Pins: `parse/block_tail/tests.rs` (one row per exemption arm, and the report for
 each closer `done`/`fi`/`esac`, plus the fdshell-only `wait` twin whose landing is
