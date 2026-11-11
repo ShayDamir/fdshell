@@ -1451,8 +1451,10 @@ print `a` at rc 0, and the body that survives the claim still parses
 measured, bash rejecting each at rc 2. What the rule does **not** reach stays as
 measured too: a quoted `";;"`/`";"` and an escaped `\;\;` are word data (tasks
 #247/#336); a here-doc body, a `$( … )` substitution and an arithmetic
-`for (( … ))` region stay opaque; a `;\n;` pair is task **#487**'s — the gap
-between the two `;` is spaces and tabs only, at both granularities; `;&`/`;;&`
+`for (( … ))` region stay opaque; a `;\n;` pair is task **#487**'s — decided:
+the line-leading `;` reports at a scan unit's head (single-line rows), while a
+newline gap stays no pair, the gap between the two `;` being spaces and tabs
+only, at both granularities; `;&`/`;;&`
 written **outside** a clause keep the split's own message
 (`unexpected character in this context`, bash names the token and stops at rc 2),
 and so does a line carrying both shapes, since the preflight order is pinned; and

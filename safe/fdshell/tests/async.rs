@@ -444,7 +444,10 @@ fn capture_of_a_backgrounded_command_stays_in_the_child() {
 /// The multi-line streaming shape (`echo a &\n; echo b`): line 1 executes and
 /// the `;` line is fdshell's accepted empty-statement divergence (bash stops
 /// with rc 2 and runs only line 1; the same-line `& ;` form matches bash and
-/// is pinned by [`invalid_splits_run_nothing`]).
+/// is pinned by [`invalid_splits_run_nothing`]). Task **#487** decided the
+/// line-leading family and kept this divergence: its mark fires at a scan
+/// unit's head, and the top level delivers this shape as one ScriptText, so
+/// the `;` line is mid-scan and the head-gate holds (owners #326/#468).
 #[test]
 fn multi_line_ampersand_then_semicolon_streams() {
     let (a, b, _s) = two_paths("sla", "slb");

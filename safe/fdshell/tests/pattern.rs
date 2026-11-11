@@ -298,7 +298,14 @@ fn indirect_name_with_a_pattern() {
 
 #[test]
 fn unset_parameter_expands_to_empty_with_a_pattern() {
-    assert_eq!(strips("", &["${undef#q}", "${undef%%*}"]), "[][]");
+    // Task #487: an empty def makes the helper's script **open** on the `;` —
+    // the scan unit's head — so this row is the line-leading separator family
+    // and reports (bash rc 2, syntax error near `;` — the message names the
+    // token, matching exactly). The pattern family's expansions stay pinned on
+    // rows whose defs are non-empty (the row below).
+    let (out, err, code) = run("; r0=${undef#q}; r1=${undef%%*}; printf \"[%s]\" \"$r0\" \"$r1\"");
+    assert_eq!((out.as_str(), code), ("", 1), "bash rc 2: {err}");
+    assert!(err.contains("expected command before ';'"), "{err}");
     assert_eq!(strips("empty=", &["${empty#*}"]), "[]");
 }
 

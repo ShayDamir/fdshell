@@ -57,6 +57,7 @@ fn statements(line: &[u8]) -> Vec<(&[u8], Vec<Vec<u8>>, bool)> {
             Segment::Block { .. } => (b"B".as_slice(), Vec::new(), false),
             Segment::AsyncInvalid => (b"A".as_slice(), Vec::new(), false),
             Segment::UnexpectedSemiSemi => (b"A".as_slice(), Vec::new(), false),
+            Segment::LeadingSeparator => (b"A".as_slice(), Vec::new(), false),
             Segment::StrayCloser { .. } => (b"A".as_slice(), Vec::new(), false),
         })
         .collect()
@@ -72,6 +73,7 @@ fn faces(line: &[u8]) -> Vec<(&'static str, bool)> {
             Segment::Block { .. } => ("B", false),
             Segment::AsyncInvalid => ("A", false),
             Segment::UnexpectedSemiSemi => ("A", false),
+            Segment::LeadingSeparator => ("A", false),
             Segment::StrayCloser { .. } => ("A", false),
         })
         .collect()
@@ -216,6 +218,8 @@ fn block_trailing_ampersand_is_consumed_foreground() {
 /// The invalid-split family (`Segment::AsyncInvalid`): nothing to terminate,
 /// a `;`-terminated target, or a `;`/`|`/`&` peek behind the `&` — bash's
 /// "syntax error, nothing runs" shapes (the pre-pass lives in `script.rs`).
+/// The `&`-then-`;` row carries task #487's mark too (the guard's face and the
+/// line-leading `;`'s face — both report; the row's shape stays the same).
 #[test]
 fn invalid_splits_are_marked() {
     let cases: &[(&[u8], &[(&str, bool)])] = &[
@@ -291,8 +295,12 @@ fn the_three_cursor_rows_are_pinned_at_their_own_answer() {
 
 /// The multi-line streaming shape (measured bash 5.3.9: `echo a &\n; echo b`
 /// prints `a`, rc 2 — line 1 executes, line 2 is the syntax error; fdshell
-/// prints `a` `b` rc 0, its accepted empty-statement divergence). The
-/// newline flushes line 1's run as the statement the next line's `&` marks.
+/// prints `a` `b` rc 0, its accepted empty-statement divergence). The newline
+/// flushes line 1's run as the statement the next line's `&` marks. Task
+/// #487's line-leading mark fires at a **scan unit's head** only, so this
+/// whole-string scan (and the end-to-end run through the `-c` mechanism, one
+/// ScriptText) stays the pinned divergence, as the `&` owners' deferral
+/// (`x\n& y`) does.
 #[test]
 fn newline_ends_the_peek() {
     assert_eq!(

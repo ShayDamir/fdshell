@@ -57,6 +57,19 @@ pub(crate) enum Segment<'a> {
     /// The **top-level** scan records it once per scanned text; the nested
     /// scorers read the same pairing for their score and report nothing.
     StrayCloser { off: usize },
+    /// A real `;` byte that **opens** its run — the separator is the first
+    /// token of the physical line (or of the scan unit), so the run in front of
+    /// it is empty and the splitter's `if !part.is_empty()` erases it (task
+    /// #487; LESSONS: "A separator the splitter erases: the parse layer never
+    /// sees a line-leading `;`"). bash 5.3.9 rejects every such line (rc 2,
+    /// nothing after it runs — measured: complete earlier lines run first), so
+    /// `run_script` bails on it at preflight with `expected command before ';'`
+    /// (the #406 family's message, STYLE §4.7); it is never executed itself.
+    /// Byte-gated on the real `;` (the newline's `;` keeps its leniency),
+    /// line-start-gated (a `;` behind a claimed span or a `;;` pair's tail byte
+    /// is not an opener) and `!in_block`-gated (the parse layer's body-trim
+    /// owns bodies — task #300's "stay as they are").
+    LeadingSeparator,
     /// Block (`if … fi`, `while … done`, `case … esac`, `name() { … }`,
     /// `{ …; }`) spanning from `block_start` to `end_pos`.
     Block {

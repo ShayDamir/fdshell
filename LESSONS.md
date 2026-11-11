@@ -3126,7 +3126,7 @@ Sharing `positional_value` between the two paths makes the braced `${99999999999
 - Do not derive the predicate from `scan::advance::is_word_break`: that list names bytes that *end* a word, and `;`/`&`/`<`/`>` are word-enders **and** tokens.
 - Whitespace never sets the flag, so the pins that kill the `is_token_byte` mutants are the **whitespace-leading runs**: `  <<EOF`, ` <<EOF`, `\t<<EOF`, `  <<EOF x`, `  <<-EOF`, `   | <<EOF` → 0 at both levels. **Task #345 inverted this row set**: a word break *and the run start* open a site, so all of them are **1/1** and their statements are redirections-only commands (rc 0); the kill pins for the byte set moved to the rows of `ops/tests.rs::word_break_bytes_and_the_run_start_open_the_operator`. Every other pin of this rule has a token between the run start and the `<<`, so its flag is already set by that token and a mutation that turns *every* byte into a token byte (`is_token_byte -> true`, `delete !`, `&& -> ||`) cannot be seen there. Pinned in `scan/heredoc/ops/tests.rs::redirect_operator_leading_run_counts_the_operator` and `parse/heredoc/tests.rs::operator_count_leading_operator_forms_agree`.
 
-Rule: when two layers count the same thing, write the predicate on the layer that owns the definition (the tokenizer here) and mirror it byte-wise; a *word*-shaped approximation is equal only on the lines that happen to carry a command word. The delta is pinned, not "fixed" silently: the line-level count claims the body region, so a token-leading line now consumes its body and reports its operator word (`> <<EOF` + body → rc 1 `">" not found`, `; <<EOF` + body → rc 1 `"<<EOF" not found`) where master ran the body lines as commands; bash is a syntax error (rc 2) on all of them (task #185, `tests/heredoc.rs::heredoc_leading_*`).
+Rule: when two layers count the same thing, write the predicate on the layer that owns the definition (the tokenizer here) and mirror it byte-wise; a *word*-shaped approximation is equal only on the lines that happen to carry a command word. The delta is pinned, not "fixed" silently: the line-level count claims the body region, so a token-leading line now consumes its body and reports its operator word (`> <<EOF` + body → rc 1 `">" not found`, `; <<EOF` + body → rc 1, message `expected command before ';'` since task #487 re-decided this row as the line-leading separator report (bash rc 2 names the `;` — the message matches exactly; the `">" not found` row stays #185's own)) where master ran the body lines as commands; bash is a syntax error (rc 2) on all of them (task #185, `tests/heredoc.rs::heredoc_leading_*`).
 
 ## The pipeline-pipe test is the tokenizer's pipe token — unquoted, unescaped, not `>|`-absorbed; the arith region stays opaque to the byte scan
 The leading-redirect-operator class of the byte/token `<<`-count divergence
@@ -7490,3 +7490,42 @@ classified; it is also the acceptance bar, because a quiet solo run never shows
 the drift. Cross-ref: LESSONS: "A mutant" — a flaky row fakes a mutant kill at
 scale, so a load-flaky row is fixed before any sweep's verdict on its file is
 trusted.
+
+
+## A separator the splitter erases: the parse layer never sees a line-leading `;`
+
+The segment splitter drops the empty run before a separator token
+(`segment.rs`, `if !part.is_empty()`), and `parse/semi/trim` trims bracketing
+`;`s off bodies — so a statement whose line **opens** on a separator is a fact
+only the segment scan can see, and the rule lives in the preflight-marker
+family (`Segment::LeadingSeparator`, marked at a scan unit's head: top-level
+scan units are physical lines). bash 5.3.9 rejects every member of the family
+with rc 2 (measured table in the task); the house convention is fdshell's own
+message at rc 1 (task #367's pre-pass shape — the report rides **first**,
+because bash names the leftmost token — the order is pinned by `; echo a ;&
+echo b`). The message reuses `ParseError::ExpectedCommandBeforeOp` naming the
+token (the #406 family — its column-1 gate is this rule's cond-list twin;
+STYLE §4.7). Three gates keep it narrow: byte-gated on the real `;` (the
+newline's `;` and end of input keep their measured leniency — `echo a` + blank
+line + `b` is parity, and the `;\n;` spellings arrive at the top level as one
+ScriptText, so their `;` is mid-scan: measured divergences, the `&` owners'
+deferral precedent of #326/#468 — cross-ref LESSONS: "The byte scan's
+"preceding token" test must mirror the token layer's", and the `;\n;`
+delegation entry above, whose reader must-not-fire pins across newlines stay
+true at both granularities); empty-run-gated at the scan-unit head (`x ; y`,
+`x;`, the `;;` pair's own single mark — `;; x`, `x ;; y` — stay their owners');
+and `!in_block`-gated (task #300's parse trim leniency — `{ ; x; }`,
+`then\n; x`, `do ; x` — "stay as they are"; `if :; then\n; echo hi\nfi` is
+pinned rc 0 naming the gate). The #492 join rule and the split.rs `peek`
+comment ("the `;` line is fdshell's accepted divergence") describe where the
+rule does **not** reach.
+
+Pins: `segment/tests.rs::the_line_leading_mark_fires_at_the_scan_unit_head_only`
+(both sides of every gate, each gate killed), the flip rows and new pins in
+`tests/semi_semi.rs::the_measured_families_stay_measured` (lone `;`, `x\n; y`,
+`# c\n; x`, the order row, `; >f`, the rc-0 gate pin),
+`tests/heredoc.rs::heredoc_after_semicolon_with_no_command_word_reports_the_separator`
++ its `cat`/`> f` twins, `tests/pattern.rs::unset_parameter_expands_to_empty_with_a_pattern`
+(surfaced pin: an empty def makes the helper's script open on the `;`), and the
+unchanged `segment/bg/tests.rs` scan pins (`&\n;` stays a whole-string
+divergence — `newline_ends_the_peek`).

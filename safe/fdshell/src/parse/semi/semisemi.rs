@@ -14,7 +14,8 @@
 //!   nothing — the `Segment::AsyncInvalid` family's shape). The byte walk's
 //!   [`ScanState`] gate settles quotes, escapes and regions before the predicate
 //!   is ever consulted, so the quote rule of task #247/#336 needs no arm here;
-//!   the newline gap is no pair (the `;\n;` family belongs to #487), and the
+//!   the newline gap is no pair (the `;\n;` family is #487's — decided at the scan
+//!   unit's head, this reader's non-firing stands), and the
 //!   glued `;&`/`;;&` spellings are the terminator kinds, not this rule's pair.
 //! - [`first_stray`] is the parse layer's reader. A body is a sub-slice the
 //!   scanner never re-splits, so the pair re-appears in its token list: the
@@ -23,7 +24,8 @@
 //!   nested block is skipped and this reader adds no new predicate logic at all —
 //!   plus the one rule the tokenizer loses: it writes the newline's `;` as a
 //!   separator word, so the reader re-checks the gap ([`real_pair_gap`]) — the
-//!   `;\n;` family stays #487's at both granularities. The lazy-body family
+//!   `;\n;` family stays #487's at both granularities (decided — the verdict rides
+//!   the scan unit's head, never here). The lazy-body family
 //!   governs the rc there (an unrun body is never parsed).
 
 use super::Token;
@@ -34,7 +36,8 @@ use crate::scan::ScanState;
 /// The scanner's reader: is `i` the **head** byte of a stray `;;`? The walk has
 /// already settled the quote/escape/region state ([`ScanState`]), so only a
 /// bare, depth-0 `;` byte can reach the pair test; the gap is spaces and tabs
-/// only (empty = glued), a newline gap is no pair (#487's family), and a `&`
+/// only (empty = glued), a newline gap is no pair (#487's family — decided at the
+/// scan unit's head), and a `&`
 /// glued behind the tail byte is the `;;&` terminator kind, not a pair.
 pub(crate) fn pair_at_byte(line: &[u8], i: usize, state: &ScanState) -> bool {
     if state.in_quote || state.in_single || state.in_backtick || state.paren_depth > 0 {
@@ -68,7 +71,8 @@ pub(crate) fn first_stray(tokens: &[Token], line: &[u8]) -> Option<usize> {
 /// The walk's word stream cannot tell a real `;` from the newline's `;` the
 /// tokenizer writes as a separator word; the byte reader's rule is the same
 /// predicate: both bytes real, the gap between them spaces/tabs only (empty =
-/// glued), so a `;\n;` is no pair here either (#487's family).
+/// glued), so a `;\n;` is no pair here either (#487's family — decided at the
+/// scan unit's head).
 fn real_pair_gap(tokens: &[Token], line: &[u8], i: usize) -> bool {
     let head = match tokens.get(i) {
         Some(t) => t,

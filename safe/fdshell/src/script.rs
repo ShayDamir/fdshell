@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C semi_semi -C --test -C heredoc -C --test -C async -- -E 'test(/^script::/) | binary(semi_semi) | binary(heredoc) | binary(async)'
+
 use crate::segment::Segment;
 use error_stack::{Report, ResultExt};
 
@@ -5,8 +7,8 @@ use crate::error::cmd::CmdError;
 use crate::error::parse::{ParseError, report_stray_closer};
 use crate::loop_control::LoopControl;
 use crate::state::ShellState;
-use sys::ScriptText;
 use sys::fork_cell::ForkCell;
+use sys::{ScriptText, ShortCStr};
 
 mod merge;
 mod segments;
@@ -18,6 +20,23 @@ pub(crate) fn run_script(
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let line = text.as_bytes().change_context(CmdError::Never)?;
     let segments = crate::segment::scan_segments(line, false);
+    // Task #487's arm, riding **first** in the preflight chain because bash names
+    // the leftmost token: on `; x ;& y` the line-opener `;` reports even though
+    // the `;&` also marks `AsyncInvalid` (the order is pinned by
+    // `tests/semi_semi.rs::the_line_leading_separator_family_reports`; the order
+    // among the three arms below is the old decision, pinned elsewhere). The
+    // scan marked the line because the splitter erases the empty run in front of
+    // the separator — the message is the #406 family's, naming the token (STYLE
+    // §4.7).
+    if segments
+        .iter()
+        .any(|seg| matches!(seg, Segment::LeadingSeparator))
+    {
+        return Err(Report::new(ParseError::ExpectedCommandBeforeOp {
+            op: ShortCStr::from(c";"),
+        })
+        .change_context(CmdError::Parse));
+    }
     // The bash preflight: an invalid plain-`&` split is a parse error that
     // runs nothing, so the whole scan is checked before any segment executes.
     if segments
@@ -78,8 +97,12 @@ pub(crate) fn run_script(
                 }
             }
             // Unreachable: the pre-pass above bails on every invalid split, every
-            // stray `;;` and every stray closer (tasks #423, #326, #436).
-            Segment::AsyncInvalid | Segment::UnexpectedSemiSemi | Segment::StrayCloser { .. } => {}
+            // stray `;;`, every stray closer and every line-opening `;` (tasks
+            // #423, #326, #436, #487).
+            Segment::AsyncInvalid
+            | Segment::UnexpectedSemiSemi
+            | Segment::StrayCloser { .. }
+            | Segment::LeadingSeparator => {}
         }
     }
     Ok(None)

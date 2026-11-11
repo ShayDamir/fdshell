@@ -101,6 +101,7 @@ fn the_amp_boundary_opens_the_block() {
             }
             Segment::AsyncInvalid => panic!("unexpected async marker for {:?}", line),
             Segment::UnexpectedSemiSemi => panic!("unexpected async marker for {:?}", line),
+            Segment::LeadingSeparator => panic!("unexpected async marker for {:?}", line),
             Segment::StrayCloser { .. } => panic!("unexpected async marker for {:?}", line),
         }
         assert!(
@@ -133,6 +134,7 @@ fn a_run_that_opens_nothing_is_the_statement_split() {
             Segment::Block { .. } => panic!("expected a Statement, not a block: {line:?}"),
             Segment::AsyncInvalid => panic!("unexpected async marker for {line:?}"),
             Segment::UnexpectedSemiSemi => panic!("unexpected async marker for {line:?}"),
+            Segment::LeadingSeparator => panic!("unexpected async marker for {line:?}"),
             Segment::StrayCloser { .. } => panic!("unexpected async marker for {line:?}"),
         }
     }

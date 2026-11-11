@@ -120,11 +120,60 @@ fn the_measured_families_stay_measured() {
         assert_eq!((out.as_str(), code), ("", 1), "{script}: {err}");
         assert!(err.contains("unexpected character"), "{script}: {err}");
     }
-    // Task #487's family: single separators and every `;\n;` shape (parity).
+    // Task #487's family, decided (b): a statement that **opens** on a `;` at a
+    // scan unit's head reports (bash rejects every such row at rc 2, and every
+    // other family member already reported rc 1 — one convention). A single
+    // separator mid-line and the `;\n;` pair across a newline stay this rule's
+    // readers' pins; the multi-line spellings arrive at the top level as one
+    // ScriptText, so their `;` is mid-scan and the head-gate holds: measured
+    // divergences, the `&` owners' deferral precedent.
     assert_eq!(run("echo a ; echo b").0, "a\nb\n");
     assert_eq!(run("echo a; echo b; echo c").0, "a\nb\nc\n");
-    assert_eq!(run("; echo b").0, "b\n");
+    let (out, err, code) = run("; echo b");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash rc 2, names the `;`: {err}"
+    );
+    assert!(err.contains("expected command before ';'"), "{err}");
     assert_eq!(run("echo a ;\n; echo b").0, "a\nb\n");
+    // The lone `;` (bash rc 2, nothing runs).
+    let (out, err, code) = run(";");
+    assert_eq!((out.as_str(), code), ("", 1), "bash rc 2: {err}");
+    assert!(err.contains("expected command before ';'"), "{err}");
+    // `x\n; y`: bash runs `x` (its 127) and stops at rc 2; fdshell's
+    // multi-line row runs both (each its pinned not-found shape).
+    let (out, err, code) = run("x\n; y");
+    assert_eq!((out.as_str(), code), ("", 1), "{err}");
+    assert!(
+        err.contains("\"x\" not found") && err.contains("\"y\" not found"),
+        "{err}"
+    );
+    // `# c\n; x`: bash rc 2, nothing runs; fdshell runs the post-comment `x`.
+    let (out, err, code) = run("# c\n; x");
+    assert_eq!((out.as_str(), code), ("", 1), "{err}");
+    assert!(err.contains("\"x\" not found"), "{err}");
+    // The order decision, pinned: bash names the leftmost token, so the
+    // line-leading `;` reports even though the `;&` guard marks the line too.
+    let (out, err, code) = run("; echo a ;& echo b");
+    assert_eq!(
+        (out.as_str(), code),
+        ("", 1),
+        "bash rc 2, names the `;`: {err}"
+    );
+    assert!(err.contains("expected command before ';'"), "{err}");
+    // `; >f`: bash rc 2; fdshell reports and the file is **not** created —
+    // the preflight answers before any command starts.
+    let f = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("semi_semi_f487");
+    let (out, err, code) = run(&format!("; >{}", f.display()));
+    assert_eq!((out.as_str(), code), ("", 1), "bash rc 2: {err}");
+    assert!(err.contains("expected command before ';'"), "{err}");
+    assert!(!f.exists(), "the report must precede the redirect");
+    // Task #300's trim leniency pinned from the gate's other side: a `;`
+    // opening a block body is the parse layer's trim's business — bash
+    // rejects this line (rc 2), fdshell stays rc 0 ("stay as they are").
+    let (out, err, code) = run("if :; then\n; echo hi\nfi");
+    assert_eq!((out.as_str(), code), ("hi\n", 0), "{err}");
     // Task #301's closer-claim: the token before the closer is POSIX's `;` and
     // drops out of the body, so the if-row's pair never reaches the guard
     // (bash rc 2; this row keeps its measured acceptance, the plan's risk-2

@@ -620,19 +620,20 @@ fn heredoc_clobber_operator_with_word_consumes_its_body() {
 /// `;` is a token for the tokenizer, so the `<<` after it counts and the body
 /// is consumed: master ran `hi` and `EOF` as commands, the fixed scan does not.
 /// Task #345 then made the statement itself the redirections-only command: rc 0,
-/// silent, the body never a command.
+/// silent, the body never a command — "until #487 decides".
 ///
-/// bash is a **rc-2 syntax error** here (`syntax error near unexpected token
-/// ;'`), and fdshell runs the whole line-leading separator family loosely
-/// (`; echo hi` runs at rc 0; nothing pins rc 1 for it). Task **#487** owns
-/// that separator-led rule; the parse layer cannot tell `; <<EOF` from
-/// `\n<<EOF` (`cond::part::reconstruct` hands both the identical text
-/// `<<EOF\nhi\nEOF`), so this row follows the here-doc family's rule and stays
-/// rc 0 until #487 decides otherwise.
+/// #487 decided: a statement that **opens** on a `;` at a scan unit's head
+/// reports (bash's rc-2 syntax error named the `;`, and every other family
+/// member already reported rc 1). The message names the token — the exact
+/// bash shape. The body stays non-command (the old asserts stand); the
+/// parse layer still cannot tell `; <<EOF` from `\n<<EOF` (the twin's
+/// `cond::part::reconstruct` text is identical), and the newline-led twin
+/// keeps its parity rc 0 — the rule is byte-gated on the real `;`.
 #[test]
-fn heredoc_after_semicolon_with_no_command_word_is_a_redirect_only_statement() {
+fn heredoc_after_semicolon_with_no_command_word_reports_the_separator() {
     let (out, err, code) = run("; <<EOF\nhi\nEOF");
-    assert_eq!((code, out.as_str()), (0, ""));
+    assert_eq!((code, out.as_str()), (1, ""), "bash rc 2: {err}");
+    assert!(err.contains("expected command before ';'"), "{err:?}");
     assert!(
         !err.contains("\"hi\" not found"),
         "body must not leak: {err:?}"
@@ -641,6 +642,38 @@ fn heredoc_after_semicolon_with_no_command_word_is_a_redirect_only_statement() {
         !err.contains("\"EOF\" not found"),
         "body must not leak: {err:?}"
     );
+}
+
+/// The `cat` twin of the row above: the separator opens the unit, so #487's
+/// mark reports (bash rc 2 — syntax error near `;`) and the body is never a
+/// command.
+#[test]
+fn heredoc_after_semicolon_with_a_command_word_reports_the_separator() {
+    let (out, err, code) = run("; cat <<EOF\nhi\nEOF");
+    assert_eq!((code, out.as_str()), (1, ""), "bash rc 2: {err}");
+    assert!(err.contains("expected command before ';'"), "{err:?}");
+    assert!(
+        !err.contains("\"hi\" not found"),
+        "body must not leak: {err:?}"
+    );
+    assert!(
+        !err.contains("\"EOF\" not found"),
+        "body must not leak: {err:?}"
+    );
+}
+
+/// The `; >f` row of #487's family table: the report precedes the redirect, so
+/// the file is **not** created (bash rc 2 — nothing runs). The
+/// `> <<EOF`-family rows of the #185 table stay their own rules' (io_redirects,
+/// not separators).
+#[test]
+fn separator_opened_redirect_reports_before_the_file_is_created() {
+    let dir = scratch("487");
+    let f = dir.join("f");
+    let (out, err, code) = run(&format!("; >{}", f.display()));
+    assert_eq!((code, out.as_str()), (1, ""), "bash rc 2: {err}");
+    assert!(err.contains("expected command before ';'"), "{err:?}");
+    assert!(!f.exists(), "the report must precede the redirect");
 }
 
 // --- New positions: heredoc operators in cond-list and block-condition

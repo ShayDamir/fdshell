@@ -106,7 +106,9 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   backgrounded pipeline is the job's shell pid, not the last stage's.
   `echo a &` followed by a `;` line (`echo a &\n; echo b`) streams: line 1
   executes and the `;` line is fdshell's accepted empty statement, where bash
-  stops with rc 2 (the same-line `& ;` form matches bash).
+  stops with rc 2 (the same-line `& ;` form matches bash). Task #487 decided
+  the family and kept this multi-line divergence: its mark fires at a scan
+  unit's head, and `-c` delivers multi-line shapes as one ScriptText.
 - A plain `&` written **inside a block's text** is a separator inside the span
   (`for i in 1; do echo hi & done`, `{ echo hi & }`, `f(){ echo hi & }`,
   `case x in x) echo a & ;; esac`, `if true & then echo x; fi`): the block stays
@@ -120,7 +122,8 @@ reports and `wait` / `wait <pid>` reap, and continues with status 0.
   done`): the body's own scan then reports the split bash calls a syntax
   error — rc 1, nothing runs (bash rc 2) — in every body, arm, condition and
   function-def position; the multi-line `&` newline `;` form streams as bash
-  runs line 1 (the `;` line is fdshell's accepted divergence), and an
+  runs line 1 (the `;` line is fdshell's accepted divergence — #487 decided the
+  family at the scan unit's head and kept this), and an
   **untaken** arm's body is parsed, never scanned (`if true; then :; else
    echo a & ; fi` runs nothing at rc 0). `for`'s word list is not statement
    text, so the plain `&` there is the async operator and no word at all:

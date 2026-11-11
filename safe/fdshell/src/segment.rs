@@ -1,4 +1,4 @@
-// mutants: -C --lib -- -E 'test(/^segment::/)'
+// mutants: -C --lib -C --test -C semi_semi -C --test -C heredoc -C --test -C async -- -E 'test(/^segment::/) | binary(semi_semi) | binary(heredoc) | binary(async)'
 
 mod bg;
 mod block;
@@ -110,6 +110,30 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
                     background: false,
                 });
                 book.sep_since_run = false;
+            }
+            // Task #487's family, marked next to the `;;` mark because the
+            // splitter erases what it decides on: a real-`;` boundary at the
+            // **head of the scan unit** has an empty run in front of it — the
+            // separator opened the statement (`if !part.is_empty()` erases the
+            // run, so no other layer sees it) — and that is bash's syntax error
+            // (rc 2, nothing after it runs; a complete earlier line runs first),
+            // so the mark rides on the preflight (`script.rs`, whose arm is
+            // first). Top-level scan units are physical lines, so the unit head
+            // **is** the physical-line-start view the rule needs (`x\n; y` and
+            // the rest of the family report through the per-line mechanism).
+            // Byte-gated on the real `;` (the newline's `;` and end of input
+            // keep their measured leniency — `echo a` + blank line + `b` is
+            // parity), mid-scan empties stay silent (`x ; y`, `x ; ; y`, the
+            // `;;` pair's own mark, a `;` behind a block closer), and the
+            // `!in_block` gate is load-bearing for task #300's pinned parse
+            // trim leniency (`{ ; x; }`, `then\n; x`, `do ; x` — "stay as they
+            // are").
+            if kind == Boundary::Separator
+                && !in_block
+                && book.i == 0
+                && line.get(book.i) == Some(&b';')
+            {
+                book.segments.push(Segment::LeadingSeparator);
             }
             // A `;;` pair here is the stray of task #423: the run was not
             // claimed as a block, so this separator is not a `case` clause's

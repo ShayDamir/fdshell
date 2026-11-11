@@ -32,6 +32,7 @@ fn scan_at(line: &[u8], start: usize) -> (usize, usize, bool, usize, Vec<Vec<u8>
         Segment::Statement { cmd, .. } => panic!("expected a Block, got {cmd:?}"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
         Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
+        Segment::LeadingSeparator => panic!("unexpected async marker"),
         Segment::StrayCloser { .. } => panic!("unexpected async marker"),
     }
 }
@@ -204,6 +205,7 @@ fn skip_is_bounded_to_the_blocks_physical_line() {
         Segment::Statement { cmd, .. } => panic!("expected a Block, got {cmd:?}"),
         Segment::AsyncInvalid => panic!("unexpected async marker"),
         Segment::UnexpectedSemiSemi => panic!("unexpected async marker"),
+        Segment::LeadingSeparator => panic!("unexpected async marker"),
         Segment::StrayCloser { .. } => panic!("unexpected async marker"),
     }
 }
