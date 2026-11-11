@@ -281,10 +281,7 @@ fn inet_ports_are_unique_and_below_the_ephemeral_range() {
 /// One dgram-bind cycle's outcome: `(code, (bytes sent, timed recv))`.
 type DgramOutcome = (
     i32,
-    (
-        Result<usize, std::io::Error>,
-        Result<(usize, std::net::SocketAddr), std::io::Error>,
-    ),
+    (Result<usize, std::io::Error>, Result<usize, std::io::Error>),
 );
 
 /// One dgram-bind cycle on `port`: the script binds and holds, the test side
@@ -297,26 +294,30 @@ fn dgram_probe_attempt(port: u16) -> DgramOutcome {
     ));
     std::thread::sleep(std::time::Duration::from_millis(500));
     let probe = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    let sent = probe.send_to(b"x", ("127.0.0.1", port));
+    probe.connect(("127.0.0.1", port)).unwrap();
+    let sent = probe.send(b"x");
     probe
         .set_read_timeout(Some(std::time::Duration::from_millis(500)))
         .unwrap();
     // The datagram was queued for the shell's socket: no ICMP
-    // port-unreachable, so a timed recv just waits.
-    let r = probe.recv_from(&mut [0u8; 1]);
+    // port-unreachable, so a timed recv just waits. On a port the shell
+    // never held, the connected probe answers ECONNREFUSED (111) instead.
+    let r = probe.recv(&mut [0u8; 1]);
     let status = child.wait().unwrap();
     (status.code().unwrap_or(-1), (sent, r))
 }
 
-/// The assertions both dgram rows share. The probe is **unconnected**, and an
-/// unconnected probe answers `WouldBlock` to a timed recv whether or not the
-/// port is bound (measured: `send_to` to an unbound port returns Ok and the
-/// timed recv just waits) — so on a collided attempt this assertion passes
-/// vacuously and the **status** is the guard that sees the collision.
+/// The assertions both dgram rows share. The probe is **connected** so the
+/// assertion is a real guard: an *unconnected* probe answers `WouldBlock` to
+/// a timed recv whether or not the port is bound (measured — send Ok, timed
+/// recv just waits), so only the connected probe sees the ICMP
+/// `ECONNREFUSED` (111) of a port the shell never held. The **status** is the
+/// other guard; on retried attempts both peer outcomes are discarded, so
+/// these assertions only ever see the final attempt.
 fn check_dgram_probe(
     code: i32,
     sent: Result<usize, std::io::Error>,
-    r: Result<(usize, std::net::SocketAddr), std::io::Error>,
+    r: Result<usize, std::io::Error>,
 ) {
     assert!(
         matches!(sent, Ok(1)),
@@ -333,8 +334,8 @@ fn check_dgram_probe(
 /// probe to the port succeeds (no ICMP port-unreachable comes back) while
 /// the shell holds the dgram socket. A stream connect is not used — a bound
 /// socket is not listening, and the kernel refuses it by design. The whole
-/// cycle rides the bounded rename, and the status is the row's real guard
-/// (see `check_dgram_probe` on why the probe assertion is not).
+/// cycle rides the bounded rename, and the row is guarded by the status and
+/// by the connected probe (see `check_dgram_probe`).
 #[test]
 fn bind_inet_loopback() {
     let (code, (sent, r)) = spawn_inet(dgram_probe_attempt, band_ports());
