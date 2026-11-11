@@ -8,7 +8,11 @@
 //! read starts at byte 0 (task #337). The magic reading runs on the **final
 //! expanded name** — the open pass flags such defs on the name it resolves
 //! (`redirect/open/target.rs`), so `2> $p` with `p=/dev/fd/1` is opened here too
-//! (task #479).
+//! (task #479) — and the pass opens nothing for a flagged def on the plain arm:
+//! this open is the def's own, run at its point in the walk, so the table
+//! answers its **success** too — a magic name an earlier def's fd makes
+//! reachable opens like bash's (task #482). The pass keeps only the noclobber
+//! gate's arms on the expanded word.
 
 // mutants: -C --lib -C --test -C redirect -- -E 'test(/^redirect::resolve::/) | binary(redirect)'
 

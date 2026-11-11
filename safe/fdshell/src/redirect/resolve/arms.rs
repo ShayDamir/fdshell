@@ -47,14 +47,13 @@ pub(super) fn resolve_var(
     Ok((Redirect::new(export_to, local), pair))
 }
 
-/// Path source: take the open pass's entry and clone its fd above the targets —
-/// except when the entry is flagged magic: the open pass decided that on the
-/// final expanded name (`redirect/open/target.rs`), and such a def's open
-/// belongs to the fd state the preceding defs leave
-/// (`redirect/resolve/fd_path.rs`). The entry's fd is then left to its owner:
-/// it is CLOEXEC and above every target, so the command never sees it, and its
-/// open ran against the descriptor the shell had **before** the command's
-/// redirections (task #337).
+/// Path source: dispatch on the open pass's entry — a flagged magic def runs
+/// its own open at this point in the walk, through the fd state the preceding
+/// defs leave (`redirect/resolve/fd_path.rs`; the pass decided the flag on the
+/// final expanded name, `redirect/open/target.rs`, and opened nothing for it —
+/// task #482). An ordinary def is adopted: clone the pass's fd above the
+/// targets. `(None, None)` is the invariant arm: only a magic entry ever has no
+/// fd (§4.10).
 pub(super) fn resolve_path(
     def: &RedirectDef,
     entry: &OpenedTarget,
@@ -62,15 +61,17 @@ pub(super) fn resolve_path(
     built: &[Redirect],
     seed: &[Redirect],
 ) -> Result<(Redirect, Option<Redirect>), Report<OpenRedirectError>> {
-    if let Some((prefix, n)) = entry.magic {
-        return fd_path::resolve(def, prefix, n, min_fd, built, seed);
+    match (entry.magic, &entry.fd) {
+        (Some((prefix, n)), _) => fd_path::resolve(def, prefix, n, min_fd, built, seed),
+        (None, Some(fd)) => {
+            let local = fd
+                .try_clone_above(min_fd)
+                .change_context(OpenRedirectError::Open)?;
+            let pair = pair_of(fd, def.extra_to, min_fd)?;
+            Ok((Redirect::new(def.export_to, local), pair))
+        }
+        (None, None) => Err(Report::new(OpenRedirectError::Never)),
     }
-    let local = entry
-        .fd
-        .try_clone_above(min_fd)
-        .change_context(OpenRedirectError::Open)?;
-    let pair = pair_of(&entry.fd, def.extra_to, min_fd)?;
-    Ok((Redirect::new(def.export_to, local), pair))
 }
 
 /// `N>&M` source: the descriptor the command's **preceding** redirections left

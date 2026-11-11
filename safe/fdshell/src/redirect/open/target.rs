@@ -121,10 +121,10 @@ const PREFIXES: &[&str] = &["/dev/fd/", "/proc/self/fd/"];
 /// that fits an `i32` — because the kernel's entry for fd 1 is named `1`:
 /// `/dev/fd/01`, `/dev/fd/1x`, `/dev/fd/-1` and `/dev/fd/` are plain paths, and
 /// bash fails each of them on the open (rc 1, `No such file or directory`).
-/// The pre-open pass still decides the magic open's **success**, against the
-/// pre-command fds — so a name that only exists because an earlier def of the
-/// same command opens it fails there where bash succeeds: divergence #482 owns
-/// that, and the flagged def's fd stays the pass's own pre-open.
+/// A flagged def carries no plain-arm pre-open: its `open()` runs at the
+/// resolver's point in the walk, judged against the fd state the preceding defs
+/// leave (`redirect/resolve/fd_path.rs`, task #482); the pass keeps only the
+/// noclobber gate's arms on the expanded word.
 pub(super) fn magic(name: &ShortCStr) -> Option<(&'static str, i32)> {
     PREFIXES.iter().find_map(|p| digits(name, p))
 }

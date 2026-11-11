@@ -1501,6 +1501,137 @@ fn dev_fd_target_on_a_regular_file_backing_reaches_parity() {
     let _ = std::fs::remove_file(&path);
 }
 
+// --- a magic target naming an fd the command itself opens (task #482) --------
+//
+// The magic def's `open()` runs at the resolver's point in the walk, so its
+// success is judged against the fd state the **preceding defs** left, as bash's
+// is: the pre-open pass flags the magic word (its expansion pipeline and the
+// noclobber gate on the expanded word stay the pass's) and opens nothing on the
+// plain arm. Every row is bash 5.3.9 and this tree's build, measured 2026-11-11
+// in the `run_fd3_closed` shape (fd 3 closed before the script; stdout and
+// stderr piped; fresh scratch dir per row), and every row is byte-for-byte
+// parity, stderr empty in both shells.
+
+#[test]
+fn dev_fd_target_names_an_fd_an_earlier_def_opens() {
+    // `echo e 3>&1 2> /dev/fd/3`: bash applies `3>&1` first, so the magic open
+    // finds fd 3 and fd 2 lands on a fresh description of the pipe — the `e`
+    // reaches stdout, rc 0.
+    let dir = scratch("magic_fd_by_earlier_dup");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run_fd3_closed(&format!("cd {dir}; echo e 3>&1 2> /dev/fd/3"));
+    assert_eq!((out.as_str(), code), ("e\n", 0), "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    // `echo e 3> z 2> /dev/fd/3`: fd 2 = `z` — a fresh description of it — so
+    // the echo's bytes go to stdout and `z` stays empty.
+    let dir = scratch("magic_fd_by_earlier_open");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run_fd3_closed(&format!("cd {dir}; echo e 3> z 2> /dev/fd/3"));
+    assert_eq!((out.as_str(), code), ("e\n", 0), "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read(std::path::Path::new(dir).join("z")).unwrap(),
+        b"",
+        "fd 2 is a fresh description of `z`; nothing is written to it"
+    );
+    // `f(){ echo hi; echo e >&2; }; f 3>&1 > z 2> /dev/fd/3`: fd 3 is the pipe,
+    // fd 1 is `z`, fd 2 is a fresh description of the pipe — bash's split, and
+    // fdshell's, byte for byte.
+    let dir = scratch("magic_fd_by_earlier_fn");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run_fd3_closed(&format!(
+        "cd {dir}; f(){{ echo hi; echo e >&2; }}; f 3>&1 > z 2> /dev/fd/3"
+    ));
+    assert_eq!((out.as_str(), code), ("e\n", 0), "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read(std::path::Path::new(dir).join("z")).unwrap(),
+        b"hi\n",
+        "fd 1 is `z` when the body runs"
+    );
+}
+
+#[test]
+fn dev_fd_target_names_an_fd_a_here_string_def_opened() {
+    // `echo hi 3<<<x 2> /dev/fd/3; echo rc=$?`: the here-string def leaves the
+    // fd-3 table entry, so the magic open succeeds in both shells — bash prints
+    // `hi` then `rc=0`, and the write through fd 2 is invisible (nothing is
+    // written to stderr); the row is parity, stderr empty in both shells.
+    let dir = scratch("magic_fd_by_here_def");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) =
+        run_fd3_closed(&format!("cd {dir}; echo hi 3<<<x 2> /dev/fd/3; echo rc=$?"));
+    assert_eq!((out.as_str(), code), ("hi\nrc=0\n", 0), "stderr={err:?}");
+    assert!(err.is_empty(), "stderr={err:?}");
+}
+
+/// The ordering exception (task #482, LESSONS: "POSIX redirect order is
+/// observable at the filesystem"): the source-order rule holds **within** each
+/// pass, not across their boundary — a magic def's open runs at the resolver's
+/// point in the walk, so a **failing** magic def no longer stops the pre-open
+/// pass from opening the defs **after** it. Bash's columns (5.3.9,
+/// `run_fd3_closed`, measured 2026-11-11): `echo e > z 2> /dev/fd/3 > w` prints
+/// `rc=1` (its per-command failure; the script continues), leaves `z` empty and
+/// **no** `w` — the failing def stops it before `w` is opened;
+/// `echo e 1>&- 2> /dev/fd/1 > w` prints `rc=1` and creates **nothing**;
+/// `set -C; echo e 3> z 2> /dev/fd/3` refuses with `cannot overwrite existing
+/// file` (its stat at apply time lands on `z`, a regular file) and leaves `z`
+/// empty. fdshell's side, pinned: the pass opens the later defs first, and its
+/// failing def is fatal (the standing policy) — except the `set -C` row, whose
+/// stat gate on the **expanded** word decides through the pre-command fd 3
+/// (the pinned `%CWD` directory — non-regular, so the plain arm defers the open
+/// to the resolver, whose table answer makes it succeed), so the command runs
+/// and prints `e` and `rc=0`. The `set -C` gate divergence family is
+/// `set_c_on_an_expanded_magic_target_loses_the_refusal_to_the_pipe`.
+#[test]
+fn a_failing_magic_open_no_longer_stops_a_later_target() {
+    let dir = scratch("magic_fail_order");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run_fd3_closed(&format!(
+        "cd {dir}; echo e > z 2> /dev/fd/3 > w; echo rc=$?"
+    ));
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("redirect"), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read(std::path::Path::new(dir).join("z")).unwrap(),
+        b"",
+        "the earlier def's open landed before the failing one"
+    );
+    assert_eq!(
+        std::fs::read(std::path::Path::new(dir).join("w")).unwrap(),
+        b"",
+        "the pass opened `w` before the resolver ran the magic def's failed open"
+    );
+    let dir = scratch("magic_fail_close");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run_fd3_closed(&format!(
+        "cd {dir}; echo e 1>&- 2> /dev/fd/1 > w; echo rc=$?"
+    ));
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert!(err.contains("redirect"), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read(std::path::Path::new(dir).join("w")).unwrap(),
+        b"",
+        "bash creates nothing here; fdshell's pass had opened `w` before the walk failed"
+    );
+    let dir = scratch("magic_fail_noclobber");
+    let dir = dir.to_str().unwrap();
+    let (out, err, code) = run_fd3_closed(&format!(
+        "cd {dir}; set -C; echo e 3> z 2> /dev/fd/3; echo rc=$?"
+    ));
+    assert_eq!(
+        (out.as_str(), code),
+        ("e\nrc=0\n", 0),
+        "bash refuses at rc=1 for the command; fdshell's gate decides on the expanded word"
+    );
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read(std::path::Path::new(dir).join("z")).unwrap(),
+        b"",
+        "bash and fdshell agree on the filesystem state"
+    );
+}
+
 // --- the bare-operand guard is mask-gated (task #323) -----------------------
 //
 // The operand of a bare `>`/`>>`/`<`/`<>`/`>|`/`&>`/`&>>` is an operator only

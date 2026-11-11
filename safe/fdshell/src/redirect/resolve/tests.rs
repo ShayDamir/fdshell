@@ -450,10 +450,12 @@ fn open_file(path: &str) -> LocalFd {
 }
 
 /// One plain entry of the open pass's outcome (the words these tests write are
-/// ordinary paths, so no entry carries the magic flag; the dev_fd rows below
-/// construct their entries with the flag, exactly as the open pass would).
+/// ordinary paths, so the pass pre-opens them and no entry carries the magic
+/// flag; the dev_fd rows below construct their entries as the open pass would:
+/// the flag, and no fd — the magic def's open belongs to the resolver, task
+/// #482).
 fn opened_target(path: &str) -> OpenedTarget {
-    OpenedTarget::new(open_file(path), None)
+    OpenedTarget::new(Some(open_file(path)), None)
 }
 
 fn pair_of(resolved: &[Redirect], first: i32, second: i32) -> (LocalFd, LocalFd) {
@@ -765,10 +767,10 @@ fn dev_fd_target_is_a_fresh_open_of_the_named_fd_s_file() {
     let seed_fd = open_file(&path);
     seed_fd.write_all(b"abcdef").unwrap();
     let seed = vec![Redirect::new(1, seed_fd.try_clone().unwrap())];
-    // The open pass pre-opened the final name and flagged it magic (this test's
-    // word is already canonical). The magic arm resolves its own open, so this
-    // fd is the one the command never sees.
-    let opened = vec![OpenedTarget::new(open_file(&path), Some(("/dev/fd/", 1)))];
+    // The open pass flagged the final name and opened nothing (this test's word
+    // is already canonical): the def's open — the truncating one — is the
+    // resolver's own, judged at the def's point in the walk (task #482).
+    let opened = vec![OpenedTarget::new(None, Some(("/dev/fd/", 1)))];
     let redirects = vec![RedirectDef::write_path(2, cstr("/dev/fd/1"))];
     let resolved = resolve_redirects(&redirects, &opened, &seed, &c).unwrap();
     let fd2 = dup_of(resolved.first().unwrap());
@@ -786,10 +788,11 @@ fn dev_fd_target_is_a_fresh_open_of_the_named_fd_s_file() {
 #[test]
 fn dev_fd_target_after_a_close_def_fails_the_open() {
     let c = cell();
-    let opened = vec![OpenedTarget::new(
-        open_file("/dev/null"),
-        Some(("/dev/fd/", 1)),
-    )];
+    // The pass flagged the canonical word and opened nothing (task #482); the
+    // def fails on the resolver's own open, which the walk runs at the def's
+    // point: the `Close` entry leaves no fd and the kernel has no
+    // `/dev/fd/1` entry for a closed descriptor.
+    let opened = vec![OpenedTarget::new(None, Some(("/dev/fd/", 1)))];
     let redirects = vec![
         RedirectDef::close(1),
         RedirectDef::write_path(2, cstr("/dev/fd/1")),
@@ -798,4 +801,35 @@ fn dev_fd_target_after_a_close_def_fails_the_open() {
         .err()
         .unwrap();
     assert!(matches!(report.current_context(), OpenRedirectError::Open));
+}
+
+/// The task's shape at the unit level (R2, task #482): a path def, then a
+/// magic def naming the fd that def leaves. The pass hands the ordinary word's
+/// entry **with** its pre-open and the magic word's entry **without** an fd —
+/// the def's open is the resolver's, and the table answers it, so the def
+/// succeeds and its fresh description lands on the first def's file. This is
+/// the killer for the new pass→resolver contract (a resolver that adopted the
+/// fd-less entry, or answered the word from the process table instead, fails
+/// here). The integration twins are the rows of
+/// `tests/redirect.rs::dev_fd_target_names_an_fd_an_earlier_def_opens`.
+#[test]
+fn a_magic_def_opens_through_the_fd_an_earlier_def_left() {
+    let c = cell();
+    let (path, _scratch) = temp_path("magic_through_earlier");
+    let magic_entry = OpenedTarget::new(None, Some(("/dev/fd/", 3)));
+    let src = vec![opened_target(&path), magic_entry];
+    let redirects = vec![
+        RedirectDef::write_path(3, cstr(&path)),
+        RedirectDef::write_path(2, cstr("/dev/fd/3")),
+    ];
+    let resolved = resolve_redirects(&redirects, &src, &[], &c).unwrap();
+    assert_eq!(resolved.len(), 2, "one entry per def, zipped in order");
+    let fd2 = dup_of(resolved.get(1).unwrap());
+    fd2.write_all(b"e\n").unwrap();
+    drop(resolved);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "e\n",
+        "the magic def's open went through the table's answer for fd 3"
+    );
 }

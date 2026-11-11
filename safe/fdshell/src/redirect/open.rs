@@ -5,6 +5,8 @@ mod noclobber;
 mod strict;
 mod target;
 
+use noclobber::Decision;
+
 use super::{RedirectDef, RedirectSource};
 use crate::error::redirect::OpenRedirectError;
 use crate::redirect::OpenedTarget;
@@ -73,11 +75,24 @@ fn open_redirect(
     // the walk, so a magic name — always absolute — can never exist here.
     if let Some(base) = base {
         let opened = strict::target(r, source, cache, base, min_fd, noclobber, cell)?;
-        return Ok(OpenedTarget::new(opened, None));
+        return Ok(OpenedTarget::new(Some(opened), None));
     }
     let name = target::resolve(source, cache, None, cell)?;
     let magic = target::magic(&name);
-    let opened = cwd::open(r, &name, noclobber)?;
+    let decision = if noclobber {
+        cwd::gate(&name)
+    } else {
+        Decision::Plain
+    };
+    // A magic word's plain-arm open belongs to the resolver, run at its own
+    // point in the walk against the fd state the preceding defs leave
+    // (`redirect/resolve/fd_path.rs`): the pass flags the entry and opens
+    // nothing (task #482). Only the gate's own arms stay here — the refusal,
+    // and the exclusive create whose errno *is* the decision (task #480).
+    if magic.is_some() && matches!(decision, Decision::Plain) {
+        return Ok(OpenedTarget::new(None, magic));
+    }
+    let opened = cwd::open(r, &name, decision)?;
     // Re-home the freshly opened fd above every redirect target of this
     // command: a `dup2` of another redirect must never clobber the open
     // fd and then have this descriptor's drop close the target.
@@ -85,7 +100,7 @@ fn open_redirect(
         .try_clone_above(min_fd)
         .change_context(OpenRedirectError::Open)?;
     drop(opened);
-    Ok(OpenedTarget::new(rehomed, magic))
+    Ok(OpenedTarget::new(Some(rehomed), magic))
 }
 
 #[cfg(test)]

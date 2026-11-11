@@ -448,36 +448,54 @@ The `<<<` form's remaining differences from bash:
 with the operator's flags, **as the redirection runs** — so it sees the fd state
 the command's earlier redirections left, a pipeline stage's pipe ends included,
 and the open is a fresh one: `>` truncates, `<` starts at byte 0. The **success**
-of that open is the exception, second bullet below. bash behaves the same way and
-fdshell matches it byte-for-byte on the direct spellings
+of that open follows the same fd state since task #482: the def's `open()` runs
+at the resolver's own point in the walk, and the pre-open pass runs the
+expansion pipeline and the noclobber gate on the expanded word, flags the magic
+word, and opens nothing itself. bash behaves the same way and fdshell matches it
+byte-for-byte on the direct spellings
 (`tests/redirect.rs::dev_fd_target_is_a_fresh_open_of_the_file_that_fd_points_at`
 and its neighbours, task #337) and on words that reach the magic form only
 through an **expansion** — variable, arithmetic, quoted, escape-folded or
 globbed — because the magic reading runs on the final expanded name (task #479,
 `tests/redirect.rs::dev_fd_target_expands_to_the_magic_form`):
 `f(){ echo hi; echo e >&2; }; p=/dev/fd/1; f > z 2> $p` leaves `z` = `e\n\n`
-and prints nothing, in both shells. One measured divergence remains
-(2026-10-28 against bash 5.3.9 with stdout and stderr piped; the #459 rows
-below are not a second — they are this section's own rules made observable by
-the backing, where bash's pipe hides them), plus one row that reached parity
-with task #480:
+and prints nothing, in both shells. A target naming an fd that an **earlier def
+of the same command** opens succeeds there too, in both shells — bash 5.3.9
+measured 2026-11-11 with fd 3 closed in the invoking shell, stdout and stderr
+piped, a fresh scratch dir per row: `echo e 3>&1 2> /dev/fd/3` prints `e` at
+rc 0; `echo e 3> z 2> /dev/fd/3` prints `e` and leaves `z` empty, because fd 2
+is `z`; `f 3>&1 > z 2> /dev/fd/3` (`f(){ echo hi; echo e >&2; }`) leaves
+`z` = `hi\n` and prints `e`; `echo hi 3<<<x 2> /dev/fd/3` prints `hi` and
+`rc=0`, the here-def leaving the table entry. Pins:
+`tests/redirect.rs::dev_fd_target_names_an_fd_an_earlier_def_opens`,
+`dev_fd_target_names_an_fd_a_here_string_def_opened`. Two measured divergences
+remain (the #459 rows below are not a third — they are this section's own rules
+made observable by the backing, where bash's pipe hides them), plus one row that
+reached parity with task #480:
 
-- A target naming an fd that an **earlier def of the same command** opens fails
-  here, because the consumer's pre-open pass opens every path word **before** any
-  redirection is applied; bash applies them one by one, so its open finds the fd
-  (rc 1 for fdshell, `redirect file open failed`, and a `>` target created
-  empty). Measured with fd 3 closed in the invoking shell, bash rc 0 in all
-  three: `echo e 3>&1 2> /dev/fd/3` prints `e`; `echo e 3> z 2> /dev/fd/3` prints
-  `e` and leaves `z` empty, because fd 2 is `z`; `f 3>&1 > z 2> /dev/fd/3`
-  (`f(){ echo hi; echo e >&2; }`) leaves `z` = `hi\n` and prints `e`. Where the
-  fd **exists** the content rule above holds and both shells agree. The rule now
-  reads through the `set -C` gate too (task #480): with noclobber on, the
-  pre-open pass judges the magic word against the **pre-command** fd 1 — a pipe,
-  so bash's stat gate opens it and the command runs (`z` = `e\n\n`, rc 0), while
-  bash applies `> z` first and its stat lands on the regular file — refusal, rc
-  1, `z` created empty (measured 2026-11-10;
+- A magic def's open runs at apply time, so a **failing** magic def no longer
+  stops the pre-open pass from opening the defs **after** it — the source-order
+  rule (LESSONS: "POSIX redirect order is observable at the filesystem") holds
+  within each pass, not across their boundary:
+  `echo e > z 2> /dev/fd/3 > w` (fd 3 closed) — bash prints `rc=1` and creates
+  only the empty `z`, the failing def stopping it before `w`; fdshell creates
+  `z` **and** `w` empty and stops at rc 1. `echo e 1>&- 2> /dev/fd/1 > w` —
+  bash prints `rc=1` and creates nothing; fdshell creates the empty `w` and
+  stops at rc 1. `set -C; echo e 3> z 2> /dev/fd/3` — bash refuses (its
+  apply-time stat lands on the regular `z`) and leaves `z` empty; fdshell's
+  gate decides on the **expanded** word against the **pre-command** fd 3 —
+  fdshell's own pinned `%CWD` fd, non-regular, so the plain arm defers the open
+  to the resolver, whose table answer makes it succeed — and the command runs,
+  printing `e` and `rc=0`. Pins:
+  `tests/redirect.rs::a_failing_magic_open_no_longer_stops_a_later_target`
+  (bash's columns in the doc comment, fdshell's side pinned).
+- The rule reads through the `set -C` gate too (task #480): with noclobber on,
+  the pass's stat gate judges the magic word against the **pre-command** fd 1 —
+  a pipe, so bash's stat gate opens it and the command runs (`z` = `e\n\n`,
+  rc 0), while bash applies `> z` first and its stat lands on the regular file
+  — refusal, rc 1, `z` created empty (measured 2026-11-10;
   `tests/redirect.rs::set_c_on_an_expanded_magic_target_loses_the_refusal_to_the_pipe`).
-  Owning task: **#482**.
+  Owning task: **#482** (measured on this task's tree, 2026-11-11: unchanged).
 - `set -C` on a magic target whose descriptor is a **pipe** is parity since
   task #480 (`set -C; echo e > /dev/fd/1` → both shells rc 0, stdout `e`,
   measured 2026-11-10): bash's `noclobber_open` **stats** the target and refuses

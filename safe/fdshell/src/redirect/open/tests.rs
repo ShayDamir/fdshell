@@ -143,7 +143,7 @@ fn combined_def_opens_the_path_once() {
         "one operator, one open: fd 2 is a clone, not a second open"
     );
     assert!(
-        fds.first().unwrap().fd.as_raw() >= 3,
+        fds.first().unwrap().fd.as_ref().unwrap().as_raw() >= 3,
         "the open sits above the def's highest target (fd 2)",
     );
 }
@@ -563,21 +563,23 @@ fn opens_run_in_source_order_and_stop_at_the_first_failure() {
 // --- the magic decision on the final expanded name (task #479) --------------
 
 /// The decision runs once, on the final expanded name: a word whose expansion
-/// produces the magic form flags the entry, and the fd is the **real pre-open**
-/// (the pass owns it; its success is still judged against the pre-command fds —
-/// divergence #482 keeps that rule).
+/// produces the magic form flags the entry **and opens nothing** — the def's
+/// `open()` is the resolver's, run at its point in the walk (task #482), so
+/// the pass hands over an entry without an fd. This is the killer for that
+/// pass→resolver hand-off.
 #[test]
-fn an_expanded_magic_word_flags_the_entry() {
+fn an_expanded_magic_word_flags_the_entry_and_opens_nothing() {
     let cell = ForkCell::new(ShellState::new());
     set_var(&cell, "p", "/dev/fd/1");
     let entries = open_redirect_files(&[word_def("$p", false)], &cell).unwrap();
     let entry = entries.first().unwrap();
     assert_eq!(entry.magic, Some(("/dev/fd/", 1)));
-    entry.fd.verify().unwrap();
+    assert!(entry.fd.is_none(), "the plain arm's open is the resolver's");
 }
 
-/// The other arm of the decision: an ordinary word leaves the flag `None`,
-/// even though its open runs through the very same pipeline.
+/// The other arm of the decision: an ordinary word leaves the flag `None` and
+/// keeps the pass's own real pre-open, even though its open runs through the
+/// very same pipeline.
 #[test]
 fn an_ordinary_word_leaves_the_flag_none() {
     let (dir, _scratch) = scratch();
@@ -586,7 +588,7 @@ fn an_ordinary_word_leaves_the_flag_none() {
     let entries = open_redirect_files(&[write_def(&abs)], &cell).unwrap();
     let entry = entries.first().unwrap();
     assert_eq!(entry.magic, None);
-    entry.fd.verify().unwrap();
+    entry.fd.as_ref().unwrap().verify().unwrap();
 }
 
 /// The parser stores the word **without its quotes**, so the quoted spelling
@@ -739,17 +741,21 @@ fn strict_noclobber_opens_a_symlink_to_the_character_device() {
     assert_eq!(fds.len(), 1, "the plain arm opens through the link");
 }
 
-/// A **pipe** reached through the magic form opens (the task's row: bash rc 0,
-/// prints `e`). The test owns the pipe (`pipe2`, the pattern the crate's tests
-/// use) — the harness's fd 1 is not a test's to assert on (LESSONS: "The
-/// noclobber refusal is bash's own stat gate, not kernel leniency").
+/// A **pipe** reached through the magic form passes the stat gate on the plain
+/// arm (the task's row: bash rc 0, prints `e`) — and the pass **flags, does not
+/// open**: the entry is pushed without an fd, the def's open being the
+/// resolver's (task #482). The test owns the pipe (`pipe2`, the pattern the
+/// crate's tests use) — the harness's fd 1 is not a test's to assert on
+/// (LESSONS: "The noclobber refusal is bash's own stat gate, not kernel
+/// leniency").
 #[test]
 fn noclobber_opens_a_pipe_reached_through_the_magic_form() {
     let (_dir, _scratch) = scratch();
     let (_rd, wr) = pipe2(0).unwrap();
     let word = format!("/dev/fd/{}", wr.as_raw());
     let fds = open_redirect_files(&[write_def(&word)], &noclobber_cell()).unwrap();
-    assert_eq!(fds.len(), 1, "the plain arm opens the pipe");
+    assert_eq!(fds.len(), 1, "the entry is still the pass's one per def");
+    assert!(fds.first().unwrap().fd.is_none(), "flags, does not open");
 }
 
 #[test]
