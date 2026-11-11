@@ -1646,7 +1646,10 @@ exemption reaches **everything a compound in that position executes** — a
 `for`/`while`/`until` body, a `{ …; }` group, an `if` then/elif/else body, a
 `case` arm, a function frame, a `source`d file — so
 `set -e; { false; } && echo after; echo rc=$?` prints `rc=1` and ends 0, and
-`set -e; for x in 1; do false; done && echo after` runs on. The exemption
+`set -e; for x in 1; do false; done && echo after` runs on. The condition exemption **is**
+the same execution-context flag, so it reaches everything a compound written in the
+condition executes — `set -e; if { false; }; then echo yes; fi; echo rc=$?` prints `rc=0`
+and ends 0 (task #491). The exemption
 suppresses the exit, never the status: the list ends with the failing status,
 and it ends with the list, so the next statement's failure is fatal again. A
 compound that **is** the command following the final operator keeps exiting —

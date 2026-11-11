@@ -239,3 +239,12 @@ keeps the reusable proof. A "registry" below means that allowlist.
     while the ask-side sum stays killable only through rule 2's direct probe
     (`segment/tests.rs::the_stray_decision_measures_the_word_where_its_bytes_lie`,
     a quote-removed text read at an offset inside a quote region).
+
+28. **A scan-start offset mutant dies on a state-flipping byte inside the
+    shifted window.** For an `i + 2`-style start, put a quote (or separator) byte
+    in the bytes the honest scan has already consumed as part of the word just
+    before the operator; the mutant starts the scan mid-quote and answers
+    differently. Pin the difference at the scan's consumer, at bash's value.
+    Measured on `cond.rs`'s `||` short-circuit `let after = i + 2;` (`+`→`-`),
+    killed by `tests/run.rs::the_or_gate_skips_from_behind_the_operator_not_the_left_word`
+    (left word `a";"`, verified by applying the mutant and re-running the pin).

@@ -4,9 +4,11 @@
 //! executed inside** a compound sitting in such a position (task #348).
 //!
 //! Every row here is measured against bash 5.3.9(1) with stdin `/dev/null`,
-//! stdout only; the expected values are bash's, and the one owner-pinned
-//! divergence names its owner (`#179`) with bash's value beside it. Task **#490**'s
-//! rows — the pipeline-stage exemption — moved to bash's value with the arm.
+//! stdout only; the expected values are bash's, and the owner-pinned
+//! divergences name their owners (`#179`, and `#556` for the `for`-block-as-
+//! loop-condition parse gap pinned in task #491's test) with bash's value
+//! beside them. Task **#490**'s rows — the pipeline-stage exemption — moved to
+//! bash's value with the arm.
 
 #![allow(clippy::unwrap_used)]
 
@@ -453,6 +455,25 @@ fn existing_errexit_pins_stay_green() {
             "after\n",
             0,
         ),
+        // A plain command in an exempt condition (bash's measured output is the
+        // single `rc=0` line).
+        ("set -e; if false; then :; fi; echo rc=$?", "rc=0\n", 0),
+        // The condition succeeds, so the `until` body never runs: `rc=0` only,
+        // measured (no `body` line).
+        (
+            "set -e; until { true; }; do echo body; break; done; echo rc=$?",
+            "rc=0\n",
+            0,
+        ),
+        // A group not in a condition is not exempt: fatal in both.
+        ("set -e; { false; }; echo rc=$?", "", 1),
+        // The `&&` gate reaches the whole `if`, so the condition's compound is covered
+        // from outside (this row agreed only from task #348 on).
+        (
+            "set -e; if for x in 1; do false; done; then :; fi && echo after; echo rc=$?",
+            "after\nrc=0\n",
+            0,
+        ),
     ]);
 }
 
@@ -552,5 +573,56 @@ fn the_gate_spans_a_joined_list() {
         // The list ends with the failing status of the command that decided it, so
         // the next statement reports `rc=1` and the shell runs on at rc 0.
         ("false &&\necho b\necho rc=$?", "rc=1\n", 0),
+    ]);
+}
+
+/// bash's condition clause ("part of the test following the `if` or `elif` reserved
+/// words", "part of the command list immediately following a `while` or `until`
+/// keyword") covers **everything executed inside** the test, so it reaches a compound
+/// written there: the condition exemption is the execution-context flag (task #348's
+/// mechanism) wrapped around the condition's run (task #491). Rows 1-5 and 7 are bash's
+/// values, measured 2026-11-11; the last row is fdshell's measured value with bash's
+/// beside it — a `for` block as a loop condition is fdshell's parse error, not an
+/// errexit row, and its owner is task **#556**.
+#[test]
+fn the_condition_exemption_reaches_a_compound_written_in_it() {
+    assert_rows(&[
+        (
+            "set -e; if { false; }; then echo yes; fi; echo rc=$?",
+            "rc=0\n",
+            0,
+        ),
+        (
+            "set -e; if for x in 1; do false; done; then echo yes; fi; echo rc=$?",
+            "rc=0\n",
+            0,
+        ),
+        (
+            "set -e; if case 1 in 1) false;; esac; then echo yes; fi; echo rc=$?",
+            "rc=0\n",
+            0,
+        ),
+        (
+            "set -e; if { false; }; then :; elif { false; }; then :; fi; echo rc=$?",
+            "rc=0\n",
+            0,
+        ),
+        (
+            "set -e; while { false; }; do echo body; break; done; echo rc=$?",
+            "rc=0\n",
+            0,
+        ),
+        (
+            "set -e; if for x in 1; do true && false; done; then echo yes; fi; echo rc=$?",
+            "rc=0\n",
+            0,
+        ),
+        // fdshell (pinned, owner #556): parse error `expected 'do'`, rc 1. bash:
+        // `rc=0`, rc 0. Not an errexit row — it stops fdshell with `set -e` removed too.
+        (
+            "set -e; while for x in 1; do false; done; do :; done; echo rc=$?",
+            "",
+            1,
+        ),
     ]);
 }

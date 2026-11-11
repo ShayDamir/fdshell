@@ -172,7 +172,7 @@ A limit that must be visible to both the block executors and `$(…)` (the `nest
 bash's `break`/`continue` are builtins, so the signal's own run succeeded and `$?` is 0 the moment it is raised: a loop that ends via `break` reports 0, not the status of the last command that ran (measured 2026-10-19: `for x in 1 2 3; do false; break; done; echo rc=$?` → bash `rc=0`, fdshell `rc=1` before task #262). Set it at the dispatch site (`run_dispatch/loop_ctl.rs`, beside the clamp), which is where every other builtin sets its status (`Unset`, `Umask`, `Return n`, `finish_assignment`). The loop-consumption sites cannot own it: the `AtLevel::Outer` propagation path (`break 2` from a nested level, bash `rc=0` too) would need every consuming level to re-zero, a control leaving a **function** frame is that function's exit status and never reaches a loop site at all, and `loop_.rs`'s `!ran_body` zeroing is the condition-false-first-test rule (adjacent to task #164's), a different rule with a different owner. The status is only *final* when nothing runs after the signal — a command after a `continue` in the same iteration, or after the loop, overwrites it, exactly as bash's does. Pin the shape with a row where the signal never runs (`for x in 1; do false && break; done; echo rc=$?` → `rc=1` in both shells): the zeroing belongs to the signal's run, not to the statement's parse.
 
 ## A cond-list run returns loop control — every consumer must bind it
-`run_cond_list` and `run_script` return `Result<Option<LoopControl>, _>`, and a bare `?` propagates only the error: the `Some(Break(_))`/`Some(Continue(_))` is dropped on the floor. That is how a `break` written in a `while` condition became an infinite loop (task #205): the loop body sites consumed the control, while the three **condition** sites — `loop_.rs`'s condition and `if_exec.rs`'s `if` and `elif` conditions — ran it with `?` and re-tested. Rule: bind the `Option`. At a **loop** level map it with `loop_control::at_level` (`Break(1)`→stop this loop, `Continue(1)`→its next iteration, `n`→hand `n-1` outward, `Return`/`Exit`→unchanged) and treat a condition exactly like the body — the condition runs inside the loop's own level (`in_loop`), so consuming it there is what makes `break 2` in a nested condition exit both loops; an early exit must return through the loop body's `Ok(..)`, never past the `in_loop` restore (the unit pins assert `loop_depth` is restored). At a **transparent** level (`if`, `{ …; }`, `case`, a function-call frame, `time`) propagate the control whole and consume nothing: clamping already happened at the call site (see "Clamp a `break`/`continue` count at the call site"), so any level that consumes a count it does not own loses one loop. Conditions run errexit-exempt (`run_cond_list(…, exempt = true)`), so `Exit` never comes out of one and the `AtLevel::Outer(Exit)` arm is defensive — it is exercised through the body path (`set -e; while true; do false; done`), so it is not an accepted-equivalent-mutant source. A `continue` in a condition advances the loop to its next condition test, which is an infinite loop in bash too (`while continue; do …; done`): never pinned, and every integration pin of a loop condition runs under a bounded child (`tests/loops.rs::run_bounded`, 5 s, strictly under nextest's 10 s `slow-timeout`) so a regression panics with the script in its message instead of hanging the suite.
+`run_cond_list` and `run_script` return `Result<Option<LoopControl>, _>`, and a bare `?` propagates only the error: the `Some(Break(_))`/`Some(Continue(_))` is dropped on the floor. That is how a `break` written in a `while` condition became an infinite loop (task #205): the loop body sites consumed the control, while the three **condition** sites — `loop_.rs`'s condition and `if_exec.rs`'s `if` and `elif` conditions — ran it with `?` and re-tested. Rule: bind the `Option`. At a **loop** level map it with `loop_control::at_level` (`Break(1)`→stop this loop, `Continue(1)`→its next iteration, `n`→hand `n-1` outward, `Return`/`Exit`→unchanged) and treat a condition exactly like the body — the condition runs inside the loop's own level (`in_loop`), so consuming it there is what makes `break 2` in a nested condition exit both loops; an early exit must return through the loop body's `Ok(..)`, never past the `in_loop` restore (the unit pins assert `loop_depth` is restored). At a **transparent** level (`if`, `{ …; }`, `case`, a function-call frame, `time`) propagate the control whole and consume nothing: clamping already happened at the call site (see "Clamp a `break`/`continue` count at the call site"), so any level that consumes a count it does not own loses one loop. Conditions run inside the errexit gate (`cond/errexit.rs::gated` wraps them whole since task #491), so `Exit` never comes out of one and the `AtLevel::Outer(Exit)` arm is defensive — it is exercised through the body path (`set -e; while true; do false; done`), so it is not an accepted-equivalent-mutant source. A `continue` in a condition advances the loop to its next condition test, which is an infinite loop in bash too (`while continue; do …; done`): never pinned, and every integration pin of a loop condition runs under a bounded child (`tests/loops.rs::run_bounded`, 5 s, strictly under nextest's 10 s `slow-timeout`) so a regression panics with the script in its message instead of hanging the suite.
 
 ## Never hold a ForkCell borrow across a recursive call that re-borrows
 `nest::deeper` increments the depth, drops the borrow, runs the body (which borrows the same cell), then re-borrows to decrement. Holding the `RefMut` across the body would clash with the body's own borrows.
@@ -927,20 +927,24 @@ print `after`). The guard is `!is_empty_part(line, start, i)`: `run_part`
 returns `Ok(None)` both for a part that ran cleanly and for an empty part, so
 "ran" must be decided from the raw bytes, not from `run_part`'s result. The
 same guard is what makes `true || false` (short-circuit returns before the
-final segment) and `if`/`while` conditions (the `exempt` parameter) behave like
-bash. Pinned by `errexit_skipped_and_chain_does_not_exit` (unit) and the
+final segment) behave like bash; the `if`/`while` conditions behave like bash by
+running inside the gate (task #491, below). Pinned by
+`errexit_skipped_and_chain_does_not_exit` (unit) and the
 `set -e; false && …` integration tests.
 
 The rule's other half is an execution **context**, not a status. The exemption
 covers *everything executed inside* a compound sitting in a gated position — a
 `for`/`while`/`until` body, a `{ …; }` group, an `if` then/else body, a `case`
 arm, a function frame — because each of them reaches `cond/errexit.rs::should_exit`
-through its **own nested** `run_cond_list`, which hardcodes `exempt = false`.
-No parameter threaded down from `cond.rs` can reach them all (every executor
+through its **own nested** `run_cond_list`, which consults the flag. No
+parameter threaded down from `cond.rs` can reach them all (every executor
 and `run_script` would have to forward it, and a dropped argument is a silent
 regression), so the gate rides `ShellState::errexit_gated`:
-`cond/errexit.rs::gated` sets it around the **non-final** part's `run_part` and
-`should_exit` reads it as one extra conjunct; the final part is unwrapped, so a
+`cond/errexit.rs::gated` sets it around the **non-final** part's `run_part` —
+and, since task #491, around a whole `if`/`elif`/`while`/`until` condition's
+run, wrapped by the condition callers — and
+`should_exit` reads it as one extra conjunct; the final part of a list reached
+ungated is unwrapped, so a
 compound that is the command following the final operator keeps exiting. Three
 shape decisions carry the mechanism:
 
@@ -952,18 +956,21 @@ shape decisions carry the mechanism:
 * `drop(state)` before running the closure — the borrow never spans the
   recursive body.
 
-`exempt` (a condition's failure is data for the test) and the gate (a list
-position) are two independent suppressions of one check, documented next to
-each other in `cond.rs`. The flag is state, so it rides the fork copy into a
-pipeline stage and a background job, as bash's execution context does. Pins:
+One mechanism now — the gate (task #491): the condition's old `exempt`
+parameter is gone, and the condition callers wrap the condition's **whole**
+run in `gated`, so a condition's failure is data for the test through the same
+flag that carries a gated list position. The flag is state, so it rides the
+fork copy into a pipeline stage and a background job, as bash's execution
+context does. Pins:
 the unit pins `errexit_gate_reaches_a_group_body`,
 `errexit_gate_reaches_a_loop_body`, `errexit_gate_reaches_a_function_frame`,
 `errexit_gate_is_restored_after_the_list`,
+`errexit_gate_is_restored_after_a_condition_runs`,
 `errexit_gate_is_restored_on_a_returned_control`,
 `errexit_gate_is_restored_on_an_error`,
 `ungated_compound_as_final_list_element_exits` and
-`ungated_compound_body_exits`; the whole bash-measured table is
-`safe/fdshell/tests/errexit.rs`.
+`ungated_compound_body_exits`; the whole bash-measured table, task #491's
+condition rows included, is `safe/fdshell/tests/errexit.rs`.
 
 Reproduction trick for any new errexit row: run it with `set -e` **removed**.
 If the shell still stops there, the row is not about errexit. That is how
@@ -2536,7 +2543,8 @@ coreutils dependency, deterministic exit codes.
 
 `&&` / `||` inside a `while`/`until`/`if` condition, a loop body, an `if` body, a
 `case` arm or a `wait` arm is the block's *own* cond list: the block executors
-run a condition through `run_cond_list` (with `exempt`) and parse bodies inside
+run a condition through `run_cond_list` (inside the errexit gate since task
+#491) and parse bodies inside
 the block. So `cond/boundary::next_boundary` must not split a block text in
 half — it counts the block's keywords (`cond/boundary/block.rs::word_delta`, the
 shared `keywords::keyword_delta` scorer) and only splits at `group_depth == 0 &&
