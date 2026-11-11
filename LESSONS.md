@@ -5748,7 +5748,7 @@ which used the empty body as a convenient no-output body). Rewrite such a row in
 place, keep the row's own point (there: the definer-word leniency), and point at
 the rule's integration home from the comment.
 
-## A statement of redirections **is** a command: gate on the loop's own predicates, and open the gate only when the line has no here-doc body (task #303)
+## A statement of redirections **is** a command: gate on the loop's own predicates plus the here-doc-operator arm (task #303)
 
 `>f` reported `failed to resolve command path: ">f"` / `">f" not found` at rc 1.
 POSIX #2.9 makes a list of redirections with no command word a **command**: the
@@ -5763,16 +5763,28 @@ pipeline stages, placed **before** the `$_` send because the child's `$_` dies
 with the fork (the arm's `$_` rule is at the end of this entry: bash does **not**
 leave `$_` alone).
 
-**The load-bearing condition is `specs.is_empty()`.** The gate fires on the raw
-word-0 token through the **same three predicates the collection loop uses, in
-the loop's order** (`parse_bg_redirect`, `parse_here_string`, `parse_redirect`),
-so it inherits every operator-quoting gate and adds no operator vocabulary — and
-it stays **off** for any statement carrying a here-doc body. That one condition
-is what keeps the pinned leading-operator family intact (`> <<EOF`, `>| <<EOF`,
-`>| x <<EOF`, the `; <<EOF` row and the async `cat <<A & <<B` pin, all still the
-operator-word report) and routes the here-doc-only statement to **#345**.
-Loosening it to "word 0 is an operator token" breaks all of them. The tail
-collector moved (`command_args` was 89 LoC, one line under the §2.2 cap) into
+**The load-bearing shape is the loop's own predicates plus the here-doc arm —
+one disjunction, in the loop's order.** The gate fires on the raw word-0 token
+through the **same predicates the collection loop uses** (`parse_bg_redirect`,
+`parse_here_string`, `parse_redirect`) with task **#345**'s here-doc arm
+(`is_operator`) as a member, so it inherits every operator-quoting gate and adds
+no operator vocabulary. The `specs.is_empty()` branch that used to **replace**
+the predicates for a statement carrying a here-doc body was over-broad, and task
+**#488** deleted it: a here-doc body behind word 0 no longer closes the gate for
+an operator that **carries its operand** — `>f` written alone is already this
+family (this entry's rule), so `>f <<EOF` and its siblings `>x <<EOF`, `>>x <<EOF`
+and `>| x <<EOF` are too, at bash's rc 0 with the operand created. The surviving
+guards are the **bare** operator words (`> <<EOF`, `>| <<EOF`), and they now
+report the loop's own parse error, not the operator-word report. The rows the
+old branch decided are pinned at
+`tests/redirect.rs::a_heredoc_only_statement_is_a_redirect_only_statement`,
+`parse/command/redirect_first/tests.rs::the_gate_fires_on_a_heredoc_word_zero`,
+`parse/command/redirect_first/tests.rs::a_bare_operator_without_operand_keeps_the_parse_error`
+and
+`tests/heredoc.rs::a_heredoc_word_in_another_owner_family_keeps_its_reading`
+(word-list, `case` pattern and subshell rows, each kept as measured by its own
+owner). The tail collector moved (`command_args` was 89 LoC, one line under the
+§2.2 cap) into
 `parse/command/collect_tail.rs` with one added parameter, `word0_slot`: the
 **first** plain word becomes the command word (`>f g` runs `g` with the
 redirect), every other word is an argument — a move, not a copy, so

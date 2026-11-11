@@ -67,8 +67,8 @@ fn target(source: &RedirectSource) -> Vec<u8> {
     }
 }
 
-/// Every plain redirection shape at word 0 opens the gate: the same three
-/// predicates the collection loop uses.
+/// Every plain redirection shape at word 0 opens the gate: the same four
+/// predicates the collection loop uses (this table is where three of them live).
 #[test]
 fn the_gate_fires_on_every_redirect_shape() {
     for line in [
