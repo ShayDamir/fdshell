@@ -120,15 +120,41 @@ const INET_ATTEMPTS: u32 = 5;
 /// shared name"; task #341). A caller that wants non-errexit inet semantics
 /// must use `run` directly.
 fn run_inet(script: &dyn Fn(u16) -> String) -> (String, String, i32) {
-    let attempt = |port: u16| run(&format!("set -e; {}", script(port)));
-    let mut last = attempt(inet_port());
+    let attempt = |port: u16| {
+        let (out, err, code) = run(&format!("set -e; {}", script(port)));
+        (code, (out, err))
+    };
+    let (code, (out, err)) = spawn_inet(attempt, band_ports());
+    (out, err, code)
+}
+
+/// Bounded rename-and-re-attempt around a whole AF_INET cycle (spawn, peer
+/// side, reap), a fresh port per attempt — `run_inet`'s rule for cycles whose
+/// peer is the test process. The script runs under `set -e` (the callers
+/// prefix it) so a port collision is the failing builtin's errno, not a later
+/// rc 1. Only `PORT_BUSY` is re-attempted; the peer-side outcomes are
+/// *returned*, not asserted, so a retried attempt swallows nothing — the test
+/// asserts the returned outcome, unchanged. `ports` is a parameter so a pin
+/// can name the sequence and force a collision on the attempts it controls;
+/// production callers pass band naming.
+fn spawn_inet<T>(
+    mut attempt: impl FnMut(u16) -> (i32, T),
+    mut ports: impl Iterator<Item = u16>,
+) -> (i32, T) {
+    let mut last = attempt(ports.next().unwrap());
     for _ in 1..INET_ATTEMPTS {
-        if !PORT_BUSY.contains(&last.2) {
+        if !PORT_BUSY.contains(&last.0) {
             break;
         }
-        last = attempt(inet_port());
+        last = attempt(ports.next().unwrap());
     }
     last
+}
+
+/// The band-naming sequence production callers hand to `spawn_inet`: one
+/// fresh `inet_port()` per attempt, its rule untouched.
+fn band_ports() -> impl Iterator<Item = u16> {
+    std::iter::from_fn(|| Some(inet_port()))
 }
 
 /// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
@@ -252,31 +278,80 @@ fn inet_ports_are_unique_and_below_the_ephemeral_range() {
     }
 }
 
-/// `bind --bind ADDR --port N` binds a real AF_INET v4 endpoint: a UDP
-/// probe to the port succeeds (no ICMP port-unreachable comes back) while
-/// the shell holds the dgram socket. A stream connect is not used — a bound
-/// socket is not listening, and the kernel refuses it by design.
-#[test]
-fn bind_inet_loopback() {
-    let port = inet_port();
+/// One dgram-bind cycle's outcome: `(code, (bytes sent, timed recv))`.
+type DgramOutcome = (
+    i32,
+    (
+        Result<usize, std::io::Error>,
+        Result<(usize, std::net::SocketAddr), std::io::Error>,
+    ),
+);
+
+/// One dgram-bind cycle on `port`: the script binds and holds, the test side
+/// probes. The peer outcomes are *returned* for the same reason as the TCP
+/// rows — a panic inside the retry loop is fatal — and the test asserts them
+/// after the loop.
+fn dgram_probe_attempt(port: u16) -> DgramOutcome {
     let mut child = spawn_server(&format!(
-        "builtin bind --type dgram --bind 127.0.0.1 --port {port} %>%s; sleep 1"
+        "set -e; builtin bind --type dgram --bind 127.0.0.1 --port {port} %>%s; sleep 1"
     ));
     std::thread::sleep(std::time::Duration::from_millis(500));
     let probe = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    probe.send_to(b"x", ("127.0.0.1", port)).unwrap();
+    let sent = probe.send_to(b"x", ("127.0.0.1", port));
     probe
         .set_read_timeout(Some(std::time::Duration::from_millis(500)))
         .unwrap();
     // The datagram was queued for the shell's socket: no ICMP
     // port-unreachable, so a timed recv just waits.
     let r = probe.recv_from(&mut [0u8; 1]);
+    let status = child.wait().unwrap();
+    (status.code().unwrap_or(-1), (sent, r))
+}
+
+/// The assertions both dgram rows share. The probe is **unconnected**, and an
+/// unconnected probe answers `WouldBlock` to a timed recv whether or not the
+/// port is bound (measured: `send_to` to an unbound port returns Ok and the
+/// timed recv just waits) — so on a collided attempt this assertion passes
+/// vacuously and the **status** is the guard that sees the collision.
+fn check_dgram_probe(
+    code: i32,
+    sent: Result<usize, std::io::Error>,
+    r: Result<(usize, std::net::SocketAddr), std::io::Error>,
+) {
+    assert!(
+        matches!(sent, Ok(1)),
+        "the peer's send must succeed, code={code} r={r:?}"
+    );
     assert!(
         matches!(r, Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock),
         "port must be bound, got {r:?}"
     );
-    let status = child.wait().unwrap();
-    assert!(status.success());
+    assert_eq!(code, 0, "sent={sent:?} r={r:?}");
+}
+
+/// `bind --bind ADDR --port N` binds a real AF_INET v4 endpoint: a UDP
+/// probe to the port succeeds (no ICMP port-unreachable comes back) while
+/// the shell holds the dgram socket. A stream connect is not used — a bound
+/// socket is not listening, and the kernel refuses it by design. The whole
+/// cycle rides the bounded rename, and the status is the row's real guard
+/// (see `check_dgram_probe` on why the probe assertion is not).
+#[test]
+fn bind_inet_loopback() {
+    let (code, (sent, r)) = spawn_inet(dgram_probe_attempt, band_ports());
+    check_dgram_probe(code, sent, r);
+}
+
+/// Deterministic detector of the rename, in the **UDP** family the test uses
+/// (a cross-family holder does not collide, measured): the pin holds one
+/// name in the test process, so the spine must rename it and land the next
+/// attempt on the free band. The bound is pinned by the TCP pin
+/// (`listen_accept_inet_roundtrip_renames_a_port_held_by_another_process`).
+#[test]
+fn bind_inet_loopback_renames_a_port_held_by_another_process() {
+    let held = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let ports = std::iter::once(held.local_addr().unwrap().port()).chain(band_ports());
+    let (code, (sent, r)) = spawn_inet(dgram_probe_attempt, ports);
+    check_dgram_probe(code, sent, r);
 }
 
 /// A non-numeric `--bind` address is `inet_pton`'s EINVAL (exit 22).
@@ -364,25 +439,94 @@ fn listen_accept_abstract_roundtrip() {
     assert_eq!(str::from_utf8(&out.stdout).unwrap(), "ready\ngot:hello\n");
 }
 
-/// The AF_INET variant: the test side connects over `std::net::TcpStream`.
-#[test]
-fn listen_accept_inet_roundtrip() {
-    let port = inet_port();
+/// One AF_INET round-trip cycle's outcome: `(code, (stdout, connect, write))`.
+type RoundtripOutcome = (
+    i32,
+    (
+        String,
+        Result<(), std::io::Error>,
+        Option<Result<(), std::io::Error>>,
+    ),
+);
+
+/// One AF_INET round-trip cycle on `port`: the script serves one line, the
+/// test side is the peer. The peer outcomes are *returned*, not asserted — a
+/// collided attempt answers `ECONNREFUSED` (111) on connect (measured), and a
+/// panic inside the retry loop is fatal — so the test asserts them after the
+/// loop (the honest spelling of the two unwraps this test used to carry).
+fn inet_roundtrip_attempt(port: u16) -> RoundtripOutcome {
     let child = spawn_server(&format!(
-        "builtin listen --bind 127.0.0.1 --port {port} %>%s; echo ready; \
+        "set -e; builtin listen --bind 127.0.0.1 --port {port} %>%s; echo ready; \
          builtin accept %s %>%c; read -u %c L; echo \"got:$L\""
     ));
     std::thread::sleep(std::time::Duration::from_millis(500));
-    let mut client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-    client.write_all(b"hello\n").unwrap();
+    let (mut client, connect) = match std::net::TcpStream::connect(("127.0.0.1", port)) {
+        Ok(client) => (Some(client), Ok(())),
+        Err(e) => (None, Err(e)),
+    };
+    let write = client.as_mut().map(|client| client.write_all(b"hello\n"));
     let out = child.wait_with_output().unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        (
+            str::from_utf8(&out.stdout).unwrap().to_string(),
+            connect,
+            write,
+        ),
+    )
+}
+
+/// The assertions both round-trip rows share: status, stdout — the ones the
+/// test asserts today — plus the two peer results.
+fn check_roundtrip(
+    code: i32,
+    stdout: &str,
+    connect: Result<(), std::io::Error>,
+    write: Option<Result<(), std::io::Error>>,
+) {
     assert_eq!(
-        out.status.code(),
-        Some(0),
-        "stderr={:?}",
-        str::from_utf8(&out.stderr).unwrap()
+        code, 0,
+        "stdout={stdout:?} connect={connect:?} write={write:?}"
     );
-    assert_eq!(str::from_utf8(&out.stdout).unwrap(), "ready\ngot:hello\n");
+    assert_eq!(stdout, "ready\ngot:hello\n");
+    assert!(
+        matches!(connect, Ok(())),
+        "the peer's connect must succeed, code={code} write={write:?}"
+    );
+    assert!(
+        matches!(write, Some(Ok(()))),
+        "the peer's write must succeed, code={code} connect={connect:?}"
+    );
+}
+
+/// The AF_INET variant: the test side connects over `std::net::TcpStream`,
+/// and the whole cycle rides the bounded rename — a collision lands on the
+/// **test** side here: the script's `listen` dies 98 under `set -e`, and the
+/// peer's connect sees 111.
+#[test]
+fn listen_accept_inet_roundtrip() {
+    let (code, (stdout, connect, write)) = spawn_inet(inet_roundtrip_attempt, band_ports());
+    check_roundtrip(code, &stdout, connect, write);
+}
+
+/// Deterministic detector of the rename, in the **TCP** family the test uses
+/// (a cross-family holder does not collide, measured): the pin holds the
+/// first `INET_ATTEMPTS - 1` ports with live std `TcpListener`s inside the
+/// test process, so the spine must rename exactly that many times and land
+/// the last attempt on the free band. The count is spelled literally — it is
+/// `INET_ATTEMPTS - 1`: shrinking the bound, or deleting the loop, leaves a
+/// held port as the final attempt and this row fails.
+#[test]
+fn listen_accept_inet_roundtrip_renames_a_port_held_by_another_process() {
+    let held: Vec<std::net::TcpListener> = (0..4)
+        .map(|_| std::net::TcpListener::bind("127.0.0.1:0").unwrap())
+        .collect();
+    let ports = held
+        .iter()
+        .map(|l| l.local_addr().unwrap().port())
+        .chain(band_ports());
+    let (code, (stdout, connect, write)) = spawn_inet(inet_roundtrip_attempt, ports);
+    check_roundtrip(code, &stdout, connect, write);
 }
 
 /// `accept` on a bound (not listening) socket: EINVAL (22).

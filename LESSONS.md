@@ -2253,6 +2253,22 @@ so the first failing builtin's errno *is* the exit code the retry reads; widen
 `PORT_BUSY` never — under errexit a `111` (`ECONNREFUSED`) from the
 self-connect can only mean the script's own listener died, i.e. a real bug,
 and it must fail the test (`run_inet` in `safe/fdshell/tests/sockets.rs`).
+The two spawn-form rows (script is the server, the test is the peer) had no
+retry, so the collision landed on the **test** side: TCP `connect` answers 111
+(a panic inside the loop is fatal — return the peer outcomes and assert them
+after the loop) and the dgram row's guard is its **status**, because an
+*unconnected* UDP probe answers `WouldBlock` whether or not the port is bound
+(measured; only a *connected* probe sees the 111). `set -e` is what makes the
+status readable: un-prefixed, the script walks past the failed builtin and
+exits 1. A std pre-check is no substitute — std's `bind` sets `SO_REUSEADDR`,
+so it calls a `TIME_WAIT` name free while the shell's bind answers 98; the
+shell's own bind is the faithful probe. A pin can force the collision
+deterministically: hold the name in the test process **in the same family**
+(cross-family holders do not collide, measured) and hand the retry a sequence
+whose tail is band naming — a name the pin itself holds must be refused, so
+the loop must rename. Pins:
+`listen_accept_inet_roundtrip_renames_a_port_held_by_another_process`,
+`bind_inet_loopback_renames_a_port_held_by_another_process`.
 
 ## Measure every spelling of a command you put in a classification list
 `time_exec`'s `TERMINATING` list ("the statements that end the shell process, so the
