@@ -3544,7 +3544,12 @@ fn heredoc_quoted_pipe_predecessor_is_a_word_not_a_stage() {
 /// Task #345 made the second stage a redirections-only command (`<<EOF` is its
 /// word 0), so the count is 1 at both levels (pinned in
 /// `parse/heredoc/tests.rs::operator_count_pipe_predecessors_agree`), the body
-/// is consumed, and the pipeline exits rc 0 — bash 5.3.9's number.
+/// is consumed, and the pipeline exits rc 0 — bash 5.3.9's number. The `cat`
+/// report is asserted **per write** (`cat:`, `'a>'`, `No such file or
+/// directory`): coreutils emits that diagnostic as separate writes, so pinning
+/// its concatenation is load-dependent whenever the capture pipe gains a second
+/// writer (#486; the family rule of #463 — never pin a multi-write
+/// concatenation).
 #[test]
 fn heredoc_quoted_gt_word_keeps_the_pipeline_split() {
     let (out, err, code) = run("echo \"a>\"| <<EOF\nbody\nEOF");
@@ -3555,7 +3560,9 @@ fn heredoc_quoted_gt_word_keeps_the_pipeline_split() {
     assert!(!err.contains("not found"), "stderr={err:?}");
     let (out, err, code) = run("cat \"a>\"| <<EOF\nbody\nEOF");
     assert_eq!((code, out.as_str()), (0, ""), "stderr={err:?}");
-    assert!(err.contains("cat: 'a>'"), "stderr={err:?}");
+    assert!(err.contains("cat:"), "stderr={err:?}");
+    assert!(err.contains("'a>'"), "stderr={err:?}");
+    assert!(err.contains("No such file or directory"), "stderr={err:?}");
     assert_eq!(
         err.lines().filter(|l| l.contains("not found")).count(),
         0,
