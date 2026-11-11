@@ -19,6 +19,35 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
+/// `run` with a scratch dir as the child's **cwd**, so a pin's created-file set
+/// is a real listing without putting a `cd {dir}; ` in front of a
+/// position-dependent line (LESSONS: "Measure a position-dependent shape with
+/// its real prefix").
+fn run_in(dir: &std::path::Path, script: &str) -> (String, String, i32) {
+    let output = Command::new(BIN)
+        .args(["-c", script])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// The scratch dir's file names, sorted — the created-file set a pin asserts.
+fn listing(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
 /// Run with the shell's fd 3 **closed from the start**: `sh` closes it before
 /// `exec`-ing fdshell, so the fd 3 the child sees is deterministic whatever
 /// the harness inherited (cargo-mutants hands every test process its
@@ -545,15 +574,21 @@ fn heredoc_pipe_position_is_a_redirect_only_stage() {
 // *token*, not a preceding word — task #185), so the scanner claims the body
 // region and the statement fails on its operator word. The body lines are
 // consumed, never executed. bash is a rc-2 syntax error on every line here;
-// fdshell maps it to its rc-1 "not found" family. ---
+// fdshell maps it to its rc-1 family. Since task #488 the family splits in two:
+// an operator word that **carries its operand** (`>| x <<EOF`) is the
+// redirections-only statement of task #345/#303 and answers bash's rc 0 with the
+// operand file created, while a **bare** operator word keeps rc 1 — but its
+// report is the collection loop's own `invalid redirect syntax`, the parse error
+// the same shape with a command word in front already gives. ---
 
-/// A leading bare `>`: the statement's command word is `>`, its body is consumed.
+/// A leading bare `>`: no operand, so the collection loop's parse error answers
+/// (task #488), and its body is consumed.
 #[test]
 fn heredoc_leading_redirect_operator_consumes_its_body() {
     let (out, err, code) = run("> <<EOF\nhi\nEOF");
     assert_eq!(code, 1);
     assert_eq!(out, "");
-    assert!(err.contains("\">\" not found"), "stderr={err:?}");
+    assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
     assert!(
         !err.contains("\"hi\" not found"),
         "body must not leak: {err:?}"
@@ -564,13 +599,15 @@ fn heredoc_leading_redirect_operator_consumes_its_body() {
     );
 }
 
-/// The same with the POSIX #2.2 clobber operator.
+/// The same with the POSIX #2.2 clobber operator: bare operator, no operand, so
+/// the loop's parse error — the shape with a command word in front
+/// (`cat >| <<EOF`) reports the same text.
 #[test]
 fn heredoc_leading_clobber_operator_consumes_its_body() {
     let (out, err, code) = run(">| <<EOF\nhi\nEOF");
     assert_eq!(code, 1);
     assert_eq!(out, "");
-    assert!(err.contains("\">|\" not found"), "stderr={err:?}");
+    assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
     assert!(
         !err.contains("\"hi\" not found"),
         "body must not leak: {err:?}"
@@ -582,13 +619,14 @@ fn heredoc_leading_clobber_operator_consumes_its_body() {
 }
 
 /// Both operators of a `&&` cond-list are allocated in order and the failing
-/// first part stops the chain: no body line runs.
+/// first part stops the chain: no body line runs. The report is the loop's parse
+/// error since task #488 — the first part's operator has no operand.
 #[test]
 fn heredoc_leading_operator_in_cond_list_allocates_both_bodies() {
     let (out, err, code) = run("> <<EOF && cat <<A\nhi\nEOF\nx\nA");
     assert_eq!(code, 1);
     assert_eq!(out, "");
-    assert!(err.contains("\">\" not found"), "stderr={err:?}");
+    assert!(err.contains("invalid redirect syntax"), "stderr={err:?}");
     assert!(
         !err.contains("\"hi\" not found"),
         "body must not leak: {err:?}"
@@ -600,13 +638,17 @@ fn heredoc_leading_operator_in_cond_list_allocates_both_bodies() {
 }
 
 /// Regression guard for the shape the divergence was found on: a word between
-/// the clobber operator and the `<<` behaves exactly as before.
+/// the clobber operator and the `<<` is the operator's **operand**, so task #488
+/// moved the row to bash parity — the redirections-only statement of task
+/// #345/#303: rc 0, silence, `x` created, the body consumed and never a command.
 #[test]
 fn heredoc_clobber_operator_with_word_consumes_its_body() {
-    let (out, err, code) = run(">| x <<EOF\nhi\nEOF");
-    assert_eq!(code, 1);
-    assert_eq!(out, "");
-    assert!(err.contains("\">|\" not found"), "stderr={err:?}");
+    let dir = scratch("488");
+    let x = dir.join("x");
+    let (out, err, code) = run_in(&dir, ">| x <<EOF\nhi\nEOF");
+    assert_eq!((code, out.as_str()), (0, ""), "bash agrees: {err:?}");
+    assert_eq!(err, "", "silence is part of the pin");
+    assert!(x.exists(), "the operand file must be created");
     assert!(
         !err.contains("\"hi\" not found"),
         "body must not leak: {err:?}"
@@ -615,6 +657,54 @@ fn heredoc_clobber_operator_with_word_consumes_its_body() {
         !err.contains("\"EOF\" not found"),
         "body must not leak: {err:?}"
     );
+}
+
+/// The three adjacent shapes whose here-doc word sits in **another owner's**
+/// position, pinned as measured (bash 5.3.9 measured the same day, one fresh
+/// directory per shell). Each keeps its owner family's reading — the here-doc
+/// operator is not at a word 0 here — so only rc, stdout, the report and the
+/// created-file set are pinned, plus the body never running as a command:
+///
+/// * **Word list** (owner #306, LESSONS: "A word-list rule lives at **two
+///   granularities**: the builder's `List`, and the byte scans' place **plus
+///   seed**"): the operator is a `for` word-list word. Measured on the current
+///   tree rc 1 `expected 'do'` — the task description's rc 0 / `[<<EOF]` reading
+///   is stale; the row is pinned with its real prefix, not a bare `<<EOF`.
+/// * **`case` pattern** (owners #280/#334, LESSONS: "A `case` pattern is a word:
+///   fold it, expand it, and match it with its own mask"): the arm pattern is the
+///   operator word, so nothing matches and the arm body never runs.
+/// * **No subshells** (the pre-existing family): fdshell has none, so `(` and `)`
+///   are command words, both reported; the body is still consumed.
+#[test]
+fn a_heredoc_word_in_another_owner_family_keeps_its_reading() {
+    for (script, want_code, want_out, needle) in [
+        (
+            "for x in <<EOF\nbody\nEOF\ndo echo \"[$x]\"; done",
+            1,
+            "",
+            "expected 'do'",
+        ),
+        ("case x in <<EOF) echo hit;; esac", 0, "", ""),
+        ("( <<EOF\nbody\nEOF\n)", 1, "", "\"(\" not found"),
+    ] {
+        let dir = scratch("488");
+        let (out, err, code) = run_in(&dir, script);
+        assert_eq!((code, out.as_str()), (want_code, want_out), "{script:?}");
+        if needle.is_empty() {
+            assert_eq!(err, "", "{script:?}");
+        } else {
+            assert!(err.contains(needle), "{script:?}: stderr={err:?}");
+        }
+        assert!(
+            !err.contains("\"body\" not found"),
+            "{script:?}: the body must not run as a command: stderr={err:?}"
+        );
+        assert!(
+            listing(&dir).is_empty(),
+            "{script:?}: created {:?} (bash: nothing)",
+            listing(&dir)
+        );
+    }
 }
 
 /// `;` is a token for the tokenizer, so the `<<` after it counts and the body

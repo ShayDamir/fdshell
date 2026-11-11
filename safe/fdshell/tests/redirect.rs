@@ -3353,6 +3353,10 @@ fn a_redirect_only_statement_with_a_word_runs_that_word() {
 /// (never a command of its own). The io-number opens the descriptor it names,
 /// a second redirection joins it, and the shapes that stay rc 1 are the owners
 /// named below (#275's missing body, the glued word, the operator-word family).
+/// Task #488 added the **operator word carrying its operand** (`>f <<EOF`,
+/// `>x <<EOF`, `>>x <<EOF`, `>| x <<EOF`) to the family: writing `>f` alone is
+/// already this rule (task #303), so a here-doc body behind it changes nothing —
+/// the four rows in the created-file group are bash parity.
 #[test]
 fn a_heredoc_only_statement_is_a_redirect_only_statement() {
     let dir = seeded("heredoc_only");
@@ -3386,9 +3390,17 @@ fn a_heredoc_only_statement_is_a_redirect_only_statement() {
     }
     // A redirection written behind the operator joins the same statement: both
     // files appear, empty, rc 0 (bash: the empty command's fds, then restored).
+    // The last four rows are task #488's alignment: the **operator word carrying
+    // its operand** is the same statement whether or not a here-doc body follows
+    // (`>f` alone already is — task #303), so the operand file is created and the
+    // body feeds the empty command; bash 5.3.9 measures rc 0, silence, the file.
     for (script, want) in [
         ("<<EOF >f\nbody\nEOF", &["f"][..]),
         ("<<EOF >f 2>g\nbody\nEOF", &["f", "g"]),
+        (">f <<EOF\nbody\nEOF", &["f"]),
+        (">x <<EOF\nbody\nEOF", &["x"]),
+        (">>x <<EOF\nbody\nEOF", &["x"]),
+        (">| x <<EOF\nbody\nEOF", &["x"]),
     ] {
         clean(dir);
         let (out, err, code, files) = run_ls(dir, script);
@@ -3396,6 +3408,10 @@ fn a_heredoc_only_statement_is_a_redirect_only_statement() {
             (code, out.as_str(), created(&files)),
             (0, "", names(want)),
             "{script}: stderr={err:?}"
+        );
+        assert!(
+            !err.contains("\"body\" not found"),
+            "{script}: the body must never be a command: stderr={err:?}"
         );
     }
     // The scoped `NAME=value` prefix **persists** through a redirections-only
@@ -3465,8 +3481,12 @@ fn a_heredoc_only_statement_with_a_word_runs_that_word() {
 ///   in both scopes and its 1 at the token level (the byte/token word-0
 ///   agreement for a part text beginning with an io-number operator).
 /// * The **operator-token**-leading rows (`> <<EOF`, `>| <<EOF`) are the #185
-///   family: word 0 is a non-here-doc operator, the statement keeps its rc-1
-///   command word (bash rc 2).
+///   family: word 0 is a **bare** operator with no operand, so the collection
+///   loop's own parse error answers — the same report the `cat >| <<EOF` pin
+///   records for the shape with a command word in front (task #488). rc stays 1,
+///   the body stays consumed; bash is a rc-2 syntax error. The rows whose operator
+///   word **carries its operand** (`>f <<EOF`, `>x <<EOF`, `>| x <<EOF`) are
+///   parity rows now, pinned by the test above.
 #[test]
 fn a_heredoc_word_zero_keeps_its_owner_guards() {
     let dir = seeded("heredoc_only_guards");
@@ -3517,10 +3537,11 @@ fn a_heredoc_word_zero_keeps_its_owner_guards() {
             "{script}: the body runs as a command on this family: stderr={err:?}"
         );
     }
-    // The operator-token-leading twin of the #185 pins stays rc 1 on its word.
+    // The operator-token-leading twin of the #185 pins stays rc 1 — on the loop's
+    // own parse error, since task #488 removed the spec-count guard.
     for (script, needle) in [
-        ("> <<EOF\nbody\nEOF", "\">\" not found"),
-        (">| <<EOF\nbody\nEOF", "\">|\" not found"),
+        ("> <<EOF\nbody\nEOF", "invalid redirect syntax"),
+        (">| <<EOF\nbody\nEOF", "invalid redirect syntax"),
     ] {
         clean(dir);
         let (_out, err, code) = run_cwd(dir, script);
@@ -3534,12 +3555,12 @@ fn a_heredoc_word_zero_keeps_its_owner_guards() {
 /// lookup (bash 127, `f` created by the redirection that still applies), an
 /// io-number must be glued to its operator (`2 > f` is the command `2`), a bare
 /// operator with no operand stays the parse error, and the **operator-token**-
-/// leading here-doc family keeps the rc-1 behavior the #185 pins record; bash
-/// splits it by shape (measured, 5.3.9): the bare operator words (`> <<EOF`,
-/// `>| <<EOF`) are rc 2 (syntax error near `<<`), the operator words **with
-/// their operand** (`>| x <<EOF`, `>x <<EOF`) are rc 0 — bash creates the
-/// operand file and feeds the body to the empty command, the divergence
-/// #488 owns (POSIX_COMPATIBILITY lists `>f <<EOF` as bash rc 0, fdshell rc 1).
+/// leading here-doc family is now exactly that case: the **bare** operator words
+/// (`> <<EOF`, `>| <<EOF`) stay rc 1 on the loop's own parse error — the same
+/// report the `cat >| <<EOF` pin gives — where bash is a rc-2 syntax error
+/// (task #488). The operator words **with their operand** (`>| x <<EOF`,
+/// `>x <<EOF`, `>f <<EOF`) left this test with #488's decision: they are the
+/// parity rows of the test above, rc 0, the operand file created.
 /// A **word-0** here-doc operator is the other family: rc 0, the
 /// redirections-only statement of task #345, pinned by the async row at the end.
 #[test]
@@ -3578,19 +3599,14 @@ fn a_quoted_operator_or_heredoc_word_stays_a_command() {
         assert!(err.contains("invalid redirect"), "{script}: {err}");
         assert!(created(&files).is_empty(), "{script}: {files:?}");
     }
-    // The operator-token-leading family keeps its owners: the operator word
-    // is reported and the body lines never run. bash (5.3.9) splits by shape:
-    // the bare operator words (`> <<EOF`, `>| <<EOF`) are rc 2 (syntax error
-    // near `<<`); the operator words **with their operand** (`>| x <<EOF`,
-    // `>x <<EOF`) are rc 0 — bash creates the operand file and feeds the body
-    // to the empty command, the divergence shape #488 owns. The here-doc
-    // **word-0** rows moved to rc 0 with task #345, so the async
-    // `cat <<A & <<B` row is asserted below, next to the rc-0 family.
-    let rows: [(&str, &str); 4] = [
-        ("> <<EOF\nbody\nEOF", "\">\" not found"),
-        (">| <<EOF\nbody\nEOF", "\">|\" not found"),
-        (">| x <<EOF\nbody\nEOF", "\">|\" not found"),
-        (">x <<EOF\nbody\nEOF", "\">x\" not found"),
+    // The operator-token-leading family — bare operators, no operand — stays with
+    // the collection loop's own report (task #488). bash (5.3.9) is a rc-2 syntax
+    // error near `<<`; fdshell maps it to its rc-1 parse error, and the body lines
+    // never run. The rows whose operator carries its operand (`>| x <<EOF`,
+    // `>x <<EOF`) moved to the parity test above.
+    let rows: [(&str, &str); 2] = [
+        ("> <<EOF\nbody\nEOF", "invalid redirect syntax"),
+        (">| <<EOF\nbody\nEOF", "invalid redirect syntax"),
     ];
     for (script, needle) in rows {
         // `run_cwd`, not `run_ls`: the rows are `&`-terminated segments and

@@ -4779,6 +4779,11 @@ fdshell's own not-found rc 1 where bash is 127. The arm-command-position
 `(`/bare-`)` rows are refused now —
 LESSONS: "A `case` arm is a command list"
 
+And a here-doc operator written as the **pattern word** (`case x in <<EOF) echo
+hit;; esac`) stays measured too: the pattern is an ordinary word, nothing matches,
+the arm body never runs, rc 0 silent — where bash is a rc-2 syntax error (task
+#488, pinned in `tests/heredoc.rs::a_heredoc_word_in_another_owner_family_keeps_its_reading`).
+
 ## A guard the window invariant makes unreachable is recorded, not chased (task #311, `scan/heredoc/regions.rs`)
 
 `semi_terminated_regions` now states its two opening rules as their own early
@@ -6090,6 +6095,16 @@ landing on the separator scores the **empty** word, which every place machine
 maps to a command start — an assertion that passes for that reason kills no
 mutant (this task's own `for i in done; do` rows had two).
 
+**Pinned as measured (task #488):** the list-word row of the here-doc family —
+`for x in <<EOF` + body + `EOF` + `do echo "[$x]"; done` — is bash rc 2 and fdshell
+rc 1 `expected 'do'` (fresh measurement; the row's first filing read rc 0 with the
+list printed). The two granularities answer the same word differently: the byte scan
+treats `<<EOF` as an operator site at a word start and claims the body lines, while
+the builder keeps the word in the list, so the parse layer's `do` lands where a body
+line was — and the same shape with **no** body (`for x in <<EOF` + `do …; done`)
+answers `'for' is missing its closing 'done'`. Pin:
+`tests/heredoc.rs::a_heredoc_word_in_another_owner_family_keeps_its_reading`.
+
 ## A tool that skips every `target/` directory mis-resolves source references (task #441)
 
 `safe/fdshell/src/redirect/open/target/` is a real source package (STYLE §2.9), and `.gitignore`
@@ -6387,9 +6402,11 @@ here-doc operator — and it lives in three places that must open **in one step*
 - the **token index**, `parse/heredoc/operator.rs::is_operator` +
   `operator_indices` (the scan starts at index **0**: no `i != 0` skip, no
   pipe-predecessor bail);
-- the **parse gate**, `parse/command/redirect_first.rs::leads()` (with
-  redirections collected, an operator at word 0 fires the gate; with none, the
-  statement's own predicates decide).
+- the **parse gate**, `parse/command/redirect_first.rs::leads()` (the loop's own
+  predicates, in the loop's own order, with the here-doc arm as a member: the gate
+  recognizes exactly what the loop consumes. Task **#488** removed the spec-count
+  branch that used to **replace** them whenever a body was collected — the branch
+  was over-broad, it refused an operator word carrying its operand).
 
 **The operator count is the region contract between the scan layer and the parse
 layer.** Opening one layer alone shifts the body-region allocation: with only the
@@ -6452,10 +6469,16 @@ command in front before writing any divergence bullet.
 The **guards** of the family must not start succeeding because word 0 became an
 operator: `<<EOF` with **no body** is the end-of-file shape of task **#364** now
 (both shells warn and run at rc 0 — the pins assert the warning); a `>`-led
-statement keeps its own rc-1
-reading (the bare operator words `> <<EOF`, `>| <<EOF` — bash rc 2 — and
-`>f <<EOF` — bash rc 0: rule family #185, the decision owned by #488);
-the **glued** word keeps its lookup rc 1 with the body free.
+statement keeps its own rc-1 reading for the **bare** operator words `> <<EOF`,
+`>| <<EOF` (bash rc 2), whose report is now the collection loop's own parse error
+— the same one `cat >| <<EOF` gives; and the **glued** word keeps its lookup rc 1
+with the body free. Task **#488** decided the row that was listed here as the
+divergence: `>f <<EOF` (bash rc 0) **is** the family, because `>f` written alone
+already is (task #303) — the gate no longer refuses an operator word that carries
+its operand, and `leads()` is one disjunction of the loop's own predicates with the
+here-doc arm as a member (a spec count is not a predicate: it decided which slot
+word 0 landed in, which is exactly what the loop's predicates already answer). The
+surviving guards are the bare-operator words, nothing else.
 
 Pins: `tests/redirect.rs::a_heredoc_only_statement_is_a_redirect_only_statement`
 (every position: run start, cond part, block arm, group, pipeline stage, io-number,
@@ -6467,7 +6490,11 @@ Pins: `tests/redirect.rs::a_heredoc_only_statement_is_a_redirect_only_statement`
 `parse/heredoc/tests.rs::operator_count_counts_word_zero` /
 `operator_count_pipe_position_is_an_operator`,
 `parse/command/redirect_first/tests.rs::the_gate_fires_on_a_heredoc_word_zero` /
-`a_heredoc_operator_without_a_body_never_reaches_the_gate`.
+`a_heredoc_operator_without_a_body_never_reaches_the_gate`,
+`tests/heredoc.rs::a_heredoc_word_in_another_owner_family_keeps_its_reading`
+(task **#488**: the three shapes whose here-doc word sits in another owner's
+position, pinned as measured, with the with-operand rows in
+`tests/redirect.rs::a_heredoc_only_statement_is_a_redirect_only_statement`).
 
 **Renaming a pin is a LESSONS.md edit.** `python3 tools/lessons_check.py --check`
 gates a dangling heading citation and an unresolved `<file>.rs` **path**; the

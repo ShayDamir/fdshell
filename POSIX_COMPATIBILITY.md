@@ -356,10 +356,24 @@ files nothing). A word behind the operator is the command word (`<<EOF g` looks
 set, as bash). Three owners stay measured: `<<EOF` with **no body line at all** is
 the incomplete-stream report rc 1 (owner **#275**, where bash reads to EOF with a
 warning), a `<<` **glued inside a word** (`x<<EOF`) is word data (the no-split rule
-above), and `> <<EOF` / `>| <<EOF` keep the operator-token-leading reading rc 1
-(owner **#185**; bash rc 2). The adjacent shapes — `>f <<EOF` (bash rc 0, fdshell
-rc 1), `for x in <<EOF` and `case x in <<EOF)` (bash rc 2, fdshell rc 0),
-`( <<EOF … )` (bash rc 0, fdshell rc 1: no subshells) — are owner **#488**.
+above), and `> <<EOF` / `>| <<EOF` keep rc 1 — a **bare** operator has no operand,
+so the collection loop's own parse error answers, the report the `cat >| <<EOF`
+shape already gives (owner **#185**; bash rc 2).
+
+An operator word that **carries its operand** is part of the same rule (task
+**#488**, decided and pinned): `>f <<EOF`, `>x <<EOF`, `>>x <<EOF` and
+`>| x <<EOF` are rc 0, silent, and create the operand file, as bash measures —
+writing `>f` alone is already this family, so a here-doc body behind the word
+changes nothing (`tests/redirect.rs::a_heredoc_only_statement_is_a_redirect_only_statement`,
+`tests/heredoc.rs::heredoc_clobber_operator_with_word_consumes_its_body`). The three
+shapes whose here-doc word sits in **another owner's** position keep that owner's
+reading, pinned as measured by
+`tests/heredoc.rs::a_heredoc_word_in_another_owner_family_keeps_its_reading`: the
+`for` **word list** (`for x in <<EOF` + body + `EOF` + `do … done`) stays the
+word-list family's parse error rc 1 (owner **#306**; bash rc 2), the `case`
+**pattern** (`case x in <<EOF) echo hit;; esac`) stays rc 0 with the arm unmatched
+(owners **#280** and **#334**; bash rc 2), and `( <<EOF` + body + `EOF` + `)` stays
+rc 1 on the missing-subshell lookup of `(` and `)` (bash rc 0, silent).
 
 The **post-expansion** member of that family (task **#426**, POSIX #2.9.1) is a
 word 0 that expands to **no word at all**: `$(true) >f`, `` `false` >f ``,
