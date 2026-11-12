@@ -43,8 +43,12 @@ pub struct ShellState {
     /// The status of the last command substitution performed **for the command
     /// being built** (`None` = none ran): the omitted-name command's status is
     /// this, or 0 (POSIX #2.9.1). Recorded at the `cmd_subst` reap site — the one
-    /// path both `$( … )` and `` ` … ` `` go through — and reset with
-    /// [`ShellState::word0_vanished`].
+    /// path both `$( … )` and `` ` … ` `` go through — which from task #533 also
+    /// records the same status as [`ShellState::last_status`] the moment the
+    /// substitution completes (bash's rule, and what `$?` renders). Reset with
+    /// [`ShellState::word0_vanished`] at the top of `command_word::expand` per
+    /// command word, and at the top of `run_dispatch::run_simple` per assignment
+    /// statement — the two dispatcher entries that own a statement's expansion.
     pub(crate) last_substitution: Option<WaitStatus>,
     pub(crate) shell_pid: sys::Pid,
     pub(crate) last_bg_pid: Option<sys::Pid>,

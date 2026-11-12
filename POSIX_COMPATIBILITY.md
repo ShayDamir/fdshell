@@ -399,6 +399,19 @@ message left on the stage that is not the last one: the per-command scratch is r
 by the next stage's expansion before the children are forked, so only the last
 stage's word still knows it vanished.
 
+The **general** form of the same clause (task **#533**) is bash's rule at every site
+a statement performs a command substitution and runs no command of its own: `$?` is
+updated the moment a substitution completes — left to right inside a word, both
+spellings — and the statement completes with the status of the last substitution
+performed, and with **0** when none ran. So `x=$(false); echo rc=$?` prints `rc=1`
+and `` x=`false`; echo rc=$? `` prints `rc=1`, while `x=$(true); echo rc=$?` prints
+`rc=0`, and `echo a $(false); x=1; echo rc=$?` prints `rc=0` because *this* statement
+performed none. `if`, `&&`, `||` and `set -e` test the same status. A statement whose
+own command — or builtin — runs takes that command's status, which is why bash's
+`f(){ local x=$(false); }; f` and `export x=$(false); echo rc=$?` both leave 0. No
+documented divergence closes here; the backgrounded-assignment rows stay the
+**#352**/**#353** divergence above.
+
 ## Here-document and here-string descriptor numbers
 
 `[N]<<word` delivers the body to descriptor `N` (`cat 3<<EOF` writes the body

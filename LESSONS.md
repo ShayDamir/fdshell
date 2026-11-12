@@ -5913,8 +5913,27 @@ clause is what keeps it there.
 ("exit code irrelevant"); the reap site is the one path both `$( … )` and
 `` ` … ` `` share, so it records the status in the scratch slot and the child exits
 with its script's status — the only way a `$(false)` in word-0 position can report
-1. The *general* "`$?` is the last substitution" rule (`x=$(false); echo rc=$?`) is
-a different owner; do not decide it from here.
+1. Task **#533** is the general rule that paragraph deferred, and it is written at
+the **same site**: the reap records the status as the shell's `$?` the moment the
+substitution completes, left to right inside a word, because bash's update happens at
+completion time — `echo "$(false) $?"` answers ` 1`, `echo "$? $(false)"` answers `0 `.
+The two `$?` renderers stay untouched (they already read `last_status`), and the slot's
+`None` is the only thing that can answer "none ran → 0": that answer is the **bare
+assignment's** POSIX #2.9.1 decision (`run_dispatch::finish_assignment`), not the
+renderer's, so both halves land. A statement whose own command or builtin runs takes
+*that* status — bash's `local x=$(false)` and `export x=$(false)` rows stay 0.
+
+**An assignment statement never reaches `command_word::expand`**, so the per-command
+scratch reset needs a per-statement twin at the top of the statement dispatcher;
+without it the slot a bare assignment reads is stale from an earlier command and bash's
+`echo a $(false); x=1; echo rc=$?` → `rc=0` turns into 1 (the row is the reset's kill
+test). Pins: `tests/cmd_subst.rs::a_command_substitution_updates_the_exit_status` (the
+family, every row bash-measured), `cmd_subst/tests.rs::the_reap_records_the_substitution_status`,
+`state/tests.rs::the_word_scratch_is_per_command`, `tests/last_arg.rs` (the `$_` half)
+and `src/tests/run.rs::the_substitution_scratch_is_per_statement`. The `&` row cannot
+move here — a backgrounded **assignment** runs foreground (owners **#352**, **#353**),
+so `$?` after the `&` is the statement's own answer and `wait $!` has no job; pinned at
+both values by `tests/async.rs::a_backgrounded_assignment_keeps_the_foreground_status_rule`.
 
 **The arm must not swallow an async statement.** A `&` job is a fork in bash too,
 so the gate says "not background" (`bg_force`/`pidvar`) and the forked job runs the

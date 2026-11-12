@@ -942,6 +942,22 @@ expansion](#word-splitting-and-pathname-expansion)). The here-document
 **delimiter** word is the exception — it is quote-removal only, so
 `cat <<$(echo EOF)` delimits on the literal `$(echo EOF)`.
 
+A completed substitution also **updates `$?`**, the moment it completes, left to
+right inside the word and in both spellings — and POSIX #2.9.1 finishes the rule for
+a statement that runs no command of its own: it completes with the status of the
+**last substitution performed**, and with **0** when none ran (task #533).
+
+```shell
+x=$(false); echo rc=$?             # rc=1; with $(true) it is rc=0
+echo "inner $(false) then $?"      # inner  then 1
+echo "$? $(false)"                 # 0  — the read happened before the region
+x=1; echo rc=$?                    # rc=0 — no region ran
+if x=$(false); then :; fi          # the status is 1: `&&`, `||` and `set -e` see it
+```
+
+A statement whose own command (or builtin) runs takes *that* command's status
+instead: `f(){ local x=$(false); }; f` leaves 0, as bash does.
+
 ### Word splitting and pathname expansion
 
 The result of an expansion is split into words on the `IFS` bytes (space, tab

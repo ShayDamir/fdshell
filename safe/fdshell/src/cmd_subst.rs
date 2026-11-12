@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C cmd_subst -C --test -C redirect -C --test -C backtick -- -E 'test(/^cmd_subst::/) | binary(cmd_subst) | binary(redirect) | binary(backtick)'
 use crate::error::cmd_subst::CmdSubstError;
 use crate::state::ShellState;
 use alloc::vec::Vec;
@@ -37,9 +38,10 @@ pub(crate) fn run_and_capture(
                     sys::Origin::Shell,
                 );
                 // Command substitution output already read. The exit code is
-                // the script's status: the parent's reap records it for a
-                // command with no name (task #426), which is the only way a
-                // `$(false)` in word-0 position can report 1.
+                // the script's status: the parent's reap records it as the
+                // shell's status the moment the substitution completes (task
+                // #533), which is also how a `$(false)` in word-0 position — a
+                // command with no name (task #426) — reports 1.
                 let _ = crate::repl::run_script(&text, cell);
                 let code = cell.borrow().map_or(0, |s| s.last_status.exit_code());
                 sys::exit(code)
@@ -56,13 +58,17 @@ pub(crate) fn run_and_capture(
                     let _ = pidfd.send_signal(sys::signal::SIGKILL);
                 }
                 // Reap child; stdout already consumed (or abandoned) above. The
-                // status is kept in the scratch slot: it is the status of the
-                // command this substitution ran for (task #426).
+                // status is the shell's from this moment on — bash updates `$?`
+                // the moment a substitution completes — and the scratch slot
+                // keeps it for the statement the substitution ran for, the only
+                // place that can still answer "none ran" (tasks #426, #533).
                 if let Ok((status, times)) = pidfd.wait_pidfd_rusage()
                     && let Ok(mut s) = cell.borrow_mut()
                 {
+                    let code = status.exit_code();
                     s.add_child_times(times);
                     s.last_substitution = Some(status);
+                    s.set_last_exit(code);
                 }
                 out
             }

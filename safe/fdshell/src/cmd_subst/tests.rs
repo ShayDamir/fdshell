@@ -50,9 +50,11 @@ fn drain_empty_is_empty() {
 }
 
 /// The reap site **keeps** the child's status in the state's scratch slot — the
-/// only way a word-0 `$(false)` can report 1 (task #426, POSIX #2.9.1). It is the
-/// shared path of both spellings, so each spelling answers through it, and the
-/// child exits with its script's status for the recording to mean anything.
+/// only way a word-0 `$(false)` can report 1 (task #426, POSIX #2.9.1) — and
+/// records it as the shell's status at the same moment, because bash updates `$?`
+/// the moment a substitution completes (task #533). It is the shared path of both
+/// spellings, so each spelling answers through it, and the child exits with its
+/// script's status for the recording to mean anything.
 #[test]
 fn the_reap_records_the_substitution_status() {
     for (name, want) in [
@@ -67,14 +69,16 @@ fn the_reap_records_the_substitution_status() {
         let word = ShortCStr::from_vec(name.as_bytes().to_vec()).unwrap();
         let mask = vec![MaskBit::Unquoted; word.len()];
         substitute_arg(&word, &mask, &[], &mut cache, &cell).unwrap();
+        let state = cell.borrow().unwrap();
         assert_eq!(
-            cell.borrow()
-                .unwrap()
-                .last_substitution
-                .as_ref()
-                .map(|s| s.exit_code()),
+            state.last_substitution.as_ref().map(|s| s.exit_code()),
             Some(want),
             "{name} must reach the state through the shared reap"
+        );
+        assert_eq!(
+            state.last_status.exit_code(),
+            want,
+            "{name} must be the shell's status from the moment it completes"
         );
     }
 }

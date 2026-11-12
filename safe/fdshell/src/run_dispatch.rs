@@ -1,4 +1,4 @@
-// mutants: -C --lib -C --test -C umask -C --test -C last_arg -C --test -C arrays -C --test -C unset -C --test -C loops -C --test -C function_keyword -- -E 'test(/^tests::run::/) | binary(umask) | binary(last_arg) | binary(arrays) | binary(unset) | binary(loops) | binary(function_keyword)'
+// mutants: -C --lib -C --test -C umask -C --test -C last_arg -C --test -C arrays -C --test -C unset -C --test -C loops -C --test -C function_keyword -C --test -C cmd_subst -- -E 'test(/^tests::run::/) | binary(umask) | binary(last_arg) | binary(arrays) | binary(unset) | binary(loops) | binary(function_keyword) | binary(cmd_subst)'
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::state::{FdVar, ShellState};
@@ -19,6 +19,14 @@ pub(crate) fn run_simple(
     text: &ScriptText,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
+    // The per-statement twin of `command_word::expand`'s scratch reset: an
+    // assignment statement never reaches that pass, so the slot it reads must be
+    // the one its **own** expansion filled (task #533 — bash answers 0 for
+    // `echo a $(false); x=1; echo rc=$?`).
+    cell.borrow_mut()
+        .change_context(CmdError::Never)?
+        .last_substitution = None;
+
     if arith_cmd::run(parsed, cell)? || array_ops::run(parsed, text, cell)? {
         return Ok(None);
     }
@@ -81,10 +89,16 @@ pub(crate) fn run_simple(
 }
 
 /// The state a bare assignment statement leaves behind: `$_` cleared (as
-/// bash does) and the exit status zeroed.
+/// bash does) and the exit status set to the last substitution the statement
+/// performed — 0 when it performed none (POSIX #2.9.1, task #533). The `$_`
+/// half is unchanged.
 fn finish_assignment(cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+    let code = state
+        .last_substitution
+        .as_ref()
+        .map_or(0, |s| s.exit_code());
     state.clear_last_arg();
-    state.set_last_exit(0);
+    state.set_last_exit(code);
     Ok(())
 }

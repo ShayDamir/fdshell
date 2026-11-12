@@ -495,7 +495,10 @@ fn empty_dollar_at_in_word_zero_leaves_the_next_word_as_command() {
 /// so both answer. The reset rows are the load-bearing half: a substitution recorded
 /// by an earlier command must not answer for a command that ran none (the `$unset`,
 /// `"$@"` and `n=` rows). Every row is a `bash -c` 5.3.9 measurement; the
-/// file-creating shapes live in `tests/redirect.rs`.
+/// file-creating shapes live in `tests/redirect.rs`. The general form of the same
+/// rule — `$?` for statements that *do* have a name, and for assignment statements
+/// that run no command — is pinned by
+/// [`a_command_substitution_updates_the_exit_status`].
 #[test]
 fn the_omitted_command_name_reports_the_last_substitution_status() {
     for (script, stdout, rc) in [
@@ -518,6 +521,65 @@ fn the_omitted_command_name_reports_the_last_substitution_status() {
             (out.as_str(), code),
             (stdout, rc),
             "{script:?}: stderr={err:?}"
+        );
+        assert_eq!(err, "", "{script:?}: bash is silent");
+    }
+}
+
+/// bash updates `$?` the **moment a command substitution completes**, left to right
+/// inside a word, and POSIX #2.9.1 finishes the rule for a statement that runs no
+/// command of its own: it completes with the last substitution performed, and with 0
+/// when none ran. Task #533 is that general rule, measured row by row against
+/// `bash -c` 5.3.9 with every row silent on bash's side: the reap site
+/// (`cmd_subst::run_and_capture`, the one path both `$( … )` and `` ` … ` `` share)
+/// records the status, so the argument-position rows answer from it, and an
+/// assignment statement — which never reaches `command_word::expand` — answers from
+/// the slot its **own** expansion filled, hence the per-statement reset the
+/// `echo a $(false); x=1` and `false; x=1` rows pin.
+///
+/// A statement whose own command (or builtin) runs takes that command's status, so
+/// the `local`/`export` rows stay 0; the `read before the substitution` row shows
+/// the ordering. The `$( … )`-region rows of `${ … }` are a different mechanism
+/// (nothing is reaped inside a `${ … }` region here) and belong to task #561; the
+/// `&` row is the backgrounded-assignment divergence owned by #352/#353 and is pinned
+/// in `tests/async.rs`.
+#[test]
+fn a_command_substitution_updates_the_exit_status() {
+    for (script, stdout, rc) in [
+        ("x=$(false); echo rc=$?", "rc=1\n", 0),
+        ("echo \"inner $(false) then $?\"", "inner  then 1\n", 0),
+        ("x=`false`; echo rc=$?", "rc=1\n", 0),
+        ("x=$(true); echo rc=$?", "rc=0\n", 0),
+        ("false; x=$(false); echo rc=$?", "rc=1\n", 0),
+        ("x=$(true) y=$(false); echo rc=$?", "rc=1\n", 0),
+        ("x=$(false) y=$(true); echo rc=$?", "rc=0\n", 0),
+        ("a=($(false)); echo rc=$?", "rc=1\n", 0),
+        ("a+=(a $(false)); echo rc=$?", "rc=1\n", 0),
+        ("a[0]=$(false); echo rc=$?", "rc=1\n", 0),
+        ("echo \"$(false) $?\"", " 1\n", 0),
+        ("printf \"%s %s\\n\" \"$(false)\" \"$?\"", " 1\n", 0),
+        ("echo \"$? $(false)\"", "0 \n", 0),
+        ("echo \"a $(false) b $(true) c $?\"", "a  b  c 0\n", 0),
+        ("x=$(false); echo \"$?\"; echo \"$?\"", "1\n0\n", 0),
+        ("x=$(x=$(false)); echo rc=$?", "rc=1\n", 0),
+        ("f(){ x=$(false); }; f; echo rc=$?", "rc=1\n", 0),
+        ("if x=$(false); then echo T; else echo F; fi", "F\n", 0),
+        ("x=$(false) && echo yes; echo rc=$?", "rc=1\n", 0),
+        ("set -e; x=$(false); echo after", "", 1),
+        ("{ x=$(false); }; echo rc=$?", "rc=1\n", 0),
+        ("for i in 1; do x=$(false); done; echo rc=$?", "rc=1\n", 0),
+        ("false; x=1; echo rc=$?", "rc=0\n", 0),
+        ("echo a $(false); x=1; echo rc=$?", "a\nrc=0\n", 0),
+        ("false; a=(x); echo rc=$?", "rc=0\n", 0),
+        ("f(){ local x=$(false); echo rc=$?; }; f", "rc=0\n", 0),
+        ("export x=$(false); echo rc=$?", "rc=0\n", 0),
+        ("x=$(printf \"%s\" \"$(false)\") ; echo rc=$?", "rc=0\n", 0),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (stdout, rc),
+            "{script:?}: stderr={err}"
         );
         assert_eq!(err, "", "{script:?}: bash is silent");
     }

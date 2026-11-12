@@ -267,6 +267,19 @@ fn assignment_only_statement_runs_foreground() {
     contains_all(&out, &["v=1"]);
 }
 
+/// The substitution half of that divergence (owners #352/#353,
+/// POSIX_COMPATIBILITY "assignment-only"): bash forks the job, so `$?` right after
+/// the `&` is 0 and `wait $!` reports the **job's** status; fdshell runs the
+/// assignment in the foreground, so `$?` renders the statement's own answer — the
+/// last substitution's (task #533) — and `wait $!` has no job to report.
+/// `bash -c` 5.3.9 measures `rc0=0`, `rc=1`; fdshell measures `rc0=1`, `rc=0`.
+#[test]
+fn a_backgrounded_assignment_keeps_the_foreground_status_rule() {
+    let out = run("x=$(false) & builtin echo rc0=$?; wait $!; builtin echo rc=$?");
+    assert_eq!(rc(&out), 0);
+    contains_all(&out, &["rc0=1", "rc=0"]);
+}
+
 /// bash's preflight property: an invalid split runs **nothing** and exits 1 —
 /// validated at the split, before any statement executes (`script.rs`'s
 /// pre-pass).

@@ -651,7 +651,8 @@ fn string_assign_multiple_vars() {
 
 /// One **statement** of two bare assignments (the `AssignStrs` arm, task #472's
 /// mutation gate): every assignment persists, and the statement leaves the exit
-/// status at the arm's `set_last_exit(0)`.
+/// status at the arm's zero — no substitution ran, so POSIX #2.9.1's "0 when
+/// none" is what answers here.
 #[test]
 fn one_statement_of_two_assignments_keeps_both() {
     let cell = make_cell();
@@ -672,6 +673,45 @@ fn one_statement_of_two_assignments_keeps_both() {
         Some(&c"bar".into())
     );
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+/// The assignment arm answers with the substitution its **own** statement
+/// performed (bash 5.3.9, measured: `x=$(false); echo rc=$?` → `rc=1`, POSIX
+/// #2.9.1's rule for a statement with no command name).
+#[test]
+fn a_failing_substitution_in_an_assignment_decides_the_status() {
+    let cell = make_cell();
+    run_script(b"x=$(false)", &cell).unwrap();
+    assert!(matches!(
+        borrow_state(&cell).last_status,
+        WaitStatus::Exited(1)
+    ));
+}
+
+/// The array arm takes the same decision — `a=($(false)); echo rc=$?` is bash's
+/// `rc=1`, and the `+=` and `[i]=` spellings share the arm.
+#[test]
+fn a_failing_substitution_in_an_array_assignment_decides_the_status() {
+    let cell = make_cell();
+    run_script(b"a=($(false))", &cell).unwrap();
+    assert!(matches!(
+        borrow_state(&cell).last_status,
+        WaitStatus::Exited(1)
+    ));
+}
+
+/// The per-statement reset of the scratch slot is load-bearing here: the
+/// substitution ran for the **previous** statement, so this assignment performed
+/// none and completes with 0 (bash's `echo a $(false); x=1; echo rc=$?` → `rc=0`).
+/// Deleting the reset turns this row into `rc=1`.
+#[test]
+fn the_substitution_scratch_is_per_statement() {
+    let cell = make_cell();
+    run_script(b"builtin echo a $(false); x=1", &cell).unwrap();
+    assert!(matches!(
+        borrow_state(&cell).last_status,
+        WaitStatus::Exited(0)
+    ));
 }
 
 #[test]
