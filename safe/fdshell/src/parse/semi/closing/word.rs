@@ -35,10 +35,14 @@ pub(crate) enum List {
 
 /// The place the walk starts in — the byte-level scan's seed rule, read by the
 /// token walk for the first time (task #522): the `for` run is seeded in
-/// [`Place::Words`] ([`crate::segment::block`]'s `list_seed`, task #306), so
-/// every word behind the opener — the **name** slot included — is list data,
-/// and a closer-shaped name never closes the block. The plain and `case` walks
-/// keep their command-position seed.
+/// [`Place::Words`] ([`crate::segment::block`]'s `list_seed`, task #306), so the
+/// words of the block's own list — the **name** slot included — are list data,
+/// and a closer-shaped name never closes the block. The walk leaves the list at
+/// its first separator, and the merged arm of [`scores_at`] stays **live**
+/// beyond it: for the words it then reaches at [`Place::Pattern`] — a nested
+/// `case x in esac` — the fold *is* the rule, and the rows are behavior-bearing
+/// (`parse/semi/closing/tests.rs::a_nested_case_with_an_empty_clause_list_completes_in_the_words_walk`).
+/// The plain and `case` walks keep their command-position seed.
 pub(super) fn seed_place(list: List) -> Place {
     match list {
         List::Plain | List::Case => Place::Command,

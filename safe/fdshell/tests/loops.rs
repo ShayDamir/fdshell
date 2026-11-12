@@ -2658,6 +2658,43 @@ fn for_clause_without_in_iterates_the_positional_parameters() {
     }
 }
 
+/// A nested `case` with an **empty clause list** inside a `for` block is a
+/// complete `case`, and the block runs at bash parity (measured 2026-11-12
+/// against bash 5.3.9). This is the family task #522's fold of the word-list rule
+/// into the plain rule **moves**: the merged arm is the crate's `scores` rule
+/// read through
+/// the place, live past the block's own list — the walk leaves the list at its
+/// first separator and the nested `case` puts it back at the pattern place
+/// through the `in` row, where `esac` scores. On the pre-fold arm the nested
+/// `case` never closed and the `for` found no closer (a parse error); the fold is
+/// the rule, so the rows are its pins. The parse-level twin is
+/// `parse/semi/closing/tests.rs::a_nested_case_with_an_empty_clause_list_completes_in_the_words_walk`.
+#[test]
+fn a_nested_case_with_an_empty_clause_list_inside_a_for_block_runs_at_bash_parity() {
+    for (script, want) in [
+        (
+            "set -- a; for x in a; do case x in esac; echo tail; done",
+            "tail\n",
+        ),
+        (
+            "set -- a b; for x in a b; do case x in esac; echo tail; done; echo end",
+            "tail\ntail\nend\n",
+        ),
+        (
+            "set -- a; for x in a; do true && case x in esac; echo tail; done",
+            "tail\n",
+        ),
+        (
+            "set -- a; for x in a; do { case x in esac; echo tail; }; done",
+            "tail\n",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+        assert_eq!(err, "", "{script}");
+    }
+}
+
 /// The default list is `"$@"` and nothing else: one word per parameter, verbatim —
 /// no IFS split, no pathname expansion (the scratch dir has a one-character file so
 /// a glob would have matched), an empty parameter is **one** iteration with an

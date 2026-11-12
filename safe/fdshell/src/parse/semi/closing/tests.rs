@@ -218,6 +218,54 @@ fn a_closer_shaped_name_of_a_for_block_is_walked_as_the_name() {
     }
 }
 
+/// Task #522's **fold is the rule at these rows**, not dead-code cleanup: the
+/// merged arm of [`super::word::scores_at`] is [`crate::keywords::scores`] read
+/// through the place, and it stays **live** past the block's own list — the walk
+/// leaves [`Place::Words`] at the list's first separator and a nested `case` puts
+/// it back at [`Place::Pattern`] through the `in` row, where a complete
+/// `case x in esac` **scores**. So a nested `case` with an empty clause list
+/// inside a `for` block completes and the block closes at its own `done`; every
+/// row is bash parity (measured 2026-11-12, bash 5.3.9, rc 0), pinned
+/// end-to-end in
+/// `tests/loops.rs::a_nested_case_with_an_empty_clause_list_inside_a_for_block_runs_at_bash_parity`.
+/// The `plain` column is the walk
+/// without the list gate — equal by the fold — and the pre-fold arm
+/// (`List::Words => false`, the mutation the fold deletes) left the nested `case`
+/// unclosed: **no** closing keyword for the block.
+#[test]
+fn a_nested_case_with_an_empty_clause_list_completes_in_the_words_walk() {
+    for (line, plain, words) in [
+        (
+            b"for x in a; do case x in esac; echo tail; done".as_slice(),
+            Some(14),
+            Some(14),
+        ),
+        (
+            b"for x in a b; do case x in esac; echo tail; done".as_slice(),
+            Some(15),
+            Some(15),
+        ),
+        (
+            b"for x in a; do true && case x in esac; echo tail; done".as_slice(),
+            Some(16),
+            Some(16),
+        ),
+        (
+            b"for x in a; do { case x in esac; echo tail; }; done".as_slice(),
+            Some(17),
+            Some(17),
+        ),
+    ] {
+        let t = toks(line);
+        assert_eq!(closing_keyword_index(&t, line), plain, "{line:?}");
+        assert_eq!(
+            super::list_closing_keyword_index(&t, line, Closer::Done, List::Words),
+            words,
+            "{line:?}"
+        );
+    }
+}
+
 /// Task #301's scan-side arm: a closer in command position restarts command
 /// position, so the walk reaches depth 0 at the block's **own** closer written
 /// right behind a compound command's closer — bash makes the `;` after a
