@@ -1285,3 +1285,28 @@ fn the_scan_records_a_top_level_closer() {
         "the closer word records its own start — a `time` prefix run alone resolves to no keyword"
     );
 }
+
+/// Task #520: the run's word unit is a space **or a tab** — the two bytes bash
+/// breaks a word on that can sit *inside* a run. `case x in` + tab + `esac` is
+/// the three words `x`, `in`, `esac`; `in` opens the clause list and POSIX
+/// #2.9.1 makes the clause list optional, so the block closes at the `esac`
+/// written in list position (bash rc 0; the end-to-end pin is
+/// `tests/case.rs::the_tab_spelling_of_the_empty_clause_list_is_the_space_one`).
+/// Each row is the kill row of one side of the arm: the tab row kills the tab
+/// test and the `||`, the space row kills the space test and the `||` (a byte is
+/// only ever one of the two, so the `&&` mutant splits nothing at all), and the
+/// `<VT>` row is the control that the set is not "any whitespace".
+#[test]
+fn the_run_splits_its_words_on_a_space_or_a_tab() {
+    for raw in [b"case x in\tesac".as_slice(), b"case x in esac"] {
+        let r = scan_open(raw, 5, Closer::Esac);
+        assert!(r.closed, "{raw:?}: the closer is a word of its own");
+    }
+    // Bash refuses the `<VT>` row too (rc 2, here rc 1), so the byte stays word
+    // data and the run never reaches the closer as a word.
+    let raw: &[u8] = b"case x in\x0besac";
+    assert!(
+        !scan_open(raw, 5, Closer::Esac).closed,
+        "the set is the two bytes, not every whitespace byte"
+    );
+}

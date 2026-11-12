@@ -11,7 +11,18 @@ use alloc::vec::Vec;
 
 pub(crate) use word_step::word_step;
 
-/// Sum the block-depth deltas of the keywords in a space-separated word run.
+/// Sum the block-depth deltas of the keywords in a whitespace-separated word
+/// run — the two bytes bash breaks a word on that can sit **inside** a run: a
+/// space and a tab (task #520: `case x in` + tab + `esac`).
+///
+/// The set is the tokenizer's whitespace minus the run-boundary bytes, and it
+/// is neither of the two shared word-break predicates: `bytes::word_break`'s
+/// metacharacters (`;` `|` `&` `<` `>` `(` `)`) are run *content* here — the
+/// glued cond pair of task #236, the glued closer operand of task #413, the
+/// clause `)` of tasks #396/#421 — while `;` and a newline are exactly where
+/// `scan_block` broke the run; and `scan::advance::is_word_break`'s wider
+/// whitespace is bash's, which refuses a `\v`/`\f`/`\r` break here, so those
+/// bytes must stay word bytes.
 ///
 /// A keyword only counts when its word is unquoted: a `for` / `if` / … inside
 /// double quotes, a single-quoted span, backticks, or a `$( )` substitution is
@@ -94,7 +105,7 @@ pub(crate) fn depth_delta(
             depth = depth.saturating_sub(1);
         } else if b == b'`' && bare != in_backtick {
             in_backtick = bare;
-        } else if b == b' ' && bare && depth == 0 {
+        } else if (b == b' ' || b == b'\t') && bare && depth == 0 {
             // A split only exists outside quotes and substitutions, so the
             // next word always starts unquoted.
             if !frag_quoted {

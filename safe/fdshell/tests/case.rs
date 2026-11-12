@@ -371,19 +371,59 @@ fn a_single_quoted_case_word_or_pattern_word_keeps_the_block_closed() {
     }
 }
 
-/// The **tab** in front of the `esac` of an empty clause list stays a measured
-/// divergence (owner task **#520**): bash 5.3.9 takes the row at rc 0; fdshell
-/// reports its missing-`esac` message at rc 1 (measured 2026-11-03). The space
-/// spelling is rc 0 in both shells — the contrast row. The single-quote rows
-/// that shared this test are parity now and live in
+/// The **tab** spelling of the empty clause list is the space one (task
+/// **#520**): bash's lexer breaks a word on any whitespace, and POSIX #2.9.1
+/// leaves the clause list optional, so `case x in` + tab + `esac` is the three
+/// words `x`, `in`, `esac` — `in` opens the word list and the `esac` written in
+/// list position terminates it, rc 0 in both shells. The block scan's run split
+/// is now space **or tab** (the scan-level pin is
+/// `comment/tests.rs::the_run_splits_its_words_on_a_space_or_a_tab`), so every
+/// tab spelling equals its space spelling; the row was a missing-`esac` report
+/// before this task. The space/newline spellings were already green, the `;`
+/// byte in that slot is a parse error (see
+/// [`a_semicolon_byte_in_an_empty_clause_list_is_a_parse_error`]), and the
+/// single-quote rows live in
 /// [`a_single_quoted_case_word_or_pattern_word_keeps_the_block_closed`].
+///
+/// Every value is bash 5.3.9 measured on the clean tree. The control rows are
+/// the bytes that are whitespace to `is_ascii_whitespace()` but are **not** word
+/// breaks here (bash refuses them, rc 2, fdshell rc 1 — the rc-1-vs-2 family is
+/// pinned as measured), and the closer behind an argument word never scores.
+/// The other blocks' tab-before-closer rows stay as their owners pinned them
+/// (`tests/block_conditions.rs::the_neighbouring_leniencies_stay_green`,
+/// `tests/block_bodies.rs`, `tests/block_closers.rs`).
 #[test]
-fn a_tab_before_the_closer_of_an_empty_clause_list_stays_as_measured() {
-    let (out, err, code) = run("case x in\tesac");
-    assert_eq!((out.as_str(), code), ("", 1), "bash rc 0: {err}");
-    assert!(err.contains("missing its closing 'esac'"), "{err}");
-    let (out, err, code) = run("case x in  esac");
-    assert_eq!((out.as_str(), code), ("", 0), "{err}");
+fn the_tab_spelling_of_the_empty_clause_list_is_the_space_one() {
+    for script in [
+        "case x in\tesac",
+        "case x in \tesac",
+        "case x in  \tesac",
+        "case x in\t esac",
+        "case x in esac",
+        "case x in  esac",
+        "case x in\n\tesac",
+        "case x in a) echo A;;\tesac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");
+    }
+    for script in [
+        "case x in a) echo\tesac",
+        "case x in\x0besac",
+        "case x in\x0cesac",
+        "case x in\resac",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: {err}");
+        assert!(
+            err.contains("missing its closing 'esac'"),
+            "{script}: {err}"
+        );
+    }
+    // A closer written inside a command's arguments is word data, at the top
+    // level too, and the tab row equals its space row here.
+    let (out, err, code) = run("echo a\tesac");
+    assert_eq!((out.as_str(), code), ("a esac\n", 0), "{err}");
 }
 
 // --- the `case` pattern's own quote mask (task #280) ------------------------

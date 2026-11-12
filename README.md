@@ -1523,8 +1523,12 @@ there (bash rc 2, here rc 1 with `case: ';' before an empty clause list`). The
 test is on the token's **byte**, so the newline the tokenizer spells as a `;`
 token stays legal (task #355's rule); and the guard covers only the **empty**
 slot, so the walk's own verdicts (`case: empty pattern`, `case: missing ')'`) and
-the leading-`;`-before-a-clause leniency of task #300 stay as they are. Pinned in
-`safe/fdshell/tests/case.rs`.
+the leading-`;`-before-a-clause leniency of task #300 stay as they are. The gap
+in front of the `esac` is whitespace, and the block scan splits a run's words on
+spaces **and tabs** — the two bytes of the "Words and quoting" section above —
+so `case x in` + tab + `esac` is the same parse as the spaced spelling, at rc 0
+in both shells (task **#520**). `\v`, `\f` and `\r` break no word there, and bash
+refuses those rows (rc 2, here rc 1). Pinned in `safe/fdshell/tests/case.rs`.
 
 `for ((init; cond; step))` is bash's arithmetic loop: the three clauses are
 evaluated exactly like an `((expr))` command — in the current shell, so the

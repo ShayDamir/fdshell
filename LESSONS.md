@@ -7739,3 +7739,33 @@ quote kinds exit their scope at the first byte, `-1`); the four blast-limit
 rows added to `tests/block_closers.rs::the_rc_1_family_stays_a_parse_error` (a
 quoted body word keeps the closer an argument, both quote kinds — the rc-1-vs-
 bash-2 family unchanged).
+
+## The block scan's run splits its words on a space or a tab (task #520)
+
+`comment/depth_delta.rs`'s word unit is the tokenizer's whitespace **minus the
+run-boundary bytes**: a space and a tab. A `;` or a newline is exactly where
+`scan_block` breaks a run, so neither can sit inside one, and neither shared
+predicate can be reused at this arm: `bytes::word_break`'s metacharacters
+(`; | & < > ( )`) are run *content* — the glued cond pair of task #236, the
+glued closer operand of task #413, the clause `)` of tasks #396/#421 — and
+`scan::advance::is_word_break`'s wider whitespace is bash's, which refuses a
+`\v`/`\f`/`\r` break here. Three word-break sets, three owners; the arm names its
+two bytes. The set matters because one word yields **one** score and only
+`word_step` moves `place` (LESSONS: "A run scanner's quote/backtick"), so a
+shape that needs two words — `in` opening the `case` word list, then the closer
+scoring behind it — is unreachable until the run splits.
+
+Kill rows are the **single-byte** rows, one per side of the arm
+(CATCHING_MUTANTS rules 3/8): a byte can be only one of the two comparisons, so
+the `||`→`&&` mutant splits nothing at all and dies on both, while each inverted
+comparison fails its own byte's row. The `<VT>` row is a control, not a kill row
+— no mutation of this arm turns it into a word break — so it is the row that
+breaks if someone "simplifies" the arm to a shared whitespace predicate.
+Pins: `comment/tests.rs::the_run_splits_its_words_on_a_space_or_a_tab` (tab row
+closed, space row closed, `<VT>` row not closed; each of the three kills all
+three mutants, measured by hand) and
+`tests/case.rs::the_tab_spelling_of_the_empty_clause_list_is_the_space_one`
+(every tab spelling of the empty clause list equals its space spelling at bash's
+rc 0; the `\v`/`\f`/`\r` and closer-behind-an-argument rows stay at their
+measured rc 1, and the other blocks' tab-before-closer rows stay as their own
+owners pinned them).
