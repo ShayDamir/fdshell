@@ -914,7 +914,16 @@ expansion is `$`-expansion only, never brace expansion. Rule: a closer search
 is only correct together with the list kind of the block it walks, and every
 scan that ends a block's text — token-level **and** byte-level — has to carry
 the same rule; a rule fixed at one granularity, as #238 learned of its
-append/extension predicate, is a divergence at the other.
+append/extension predicate, is a divergence at the other. And the rule has a
+**seed** half: the byte-level scan's `for` seed (`segment/block/length.rs::list_seed`,
+`Place::Words`) must be the seed of *every* walk that ends a `for` block — the
+token walk carried the list rule as a `scores_at` arm with **no** seed, so the
+first word behind the opener, the grammar's *name* (POSIX #2.9.1), stayed
+syntax and `for done in a; do …` closed the block at a closer-shaped name
+(task **#522**: the walk starts in the seed; pins
+`parse/semi/closing/tests.rs::a_closer_shaped_name_of_a_for_block_is_walked_as_the_name`,
+`parse/for_block/tests.rs::a_closer_shaped_name_of_a_for_clause_is_the_name`,
+`tests/loops.rs::for_clause_without_in_iterates_the_positional_parameters`).
 
 ## Capping the shared line buffer caps the whole multi-line accumulation — and a capped reader must read in chunks
 `repl/line.rs::read_line` appends stdin to the REPL's line buffer. Capping it is a single pre-append check (`buf.len() + take.len() > limit` → bail, same off-by-one convention as `cli::load_script`: exactly `limit` bytes allowed, the next byte fails). Because `repl/run.rs` appends the continuation lines of one logical input to the **same** `buf` in its `while !is_complete` loop, capping inside the read helper bounds the *cumulative* multi-line construct too: an attacker cannot accumulate N×cap bytes through an unterminated `if`/heredoc; the worst case is `cap + 1` (the one `buf.push(b'\n')` in `read_continuation` past the cap before the next `read_line` bails). Same bomb class as the unbounded script loaders (#29) and the unbounded command-substitution capture: every byte-accumulating path gets a `limit` parameter and a pre-append check, with the constant passed in by the caller (no hardcoded constants in the helper). Read stdin in **4 KiB chunks with a persistent position** (`LineReader`, owned by `run`, shared by all `read_line` calls): a chunk can end mid-line, and bytes after a `\n` belong to the *next* line — a pipe has no pushback, so byte-at-a-time was the only stateless option, and it costs one syscall per byte (~5 s for a 64 MiB line on a fast host; past nextest's 10 s slow-timeout in the nix sandbox, where the suite must stay green). Testing a capped reader end-to-end: write exactly `cap + 1` bytes in 4 KiB chunks — no 64 MiB allocation in the test process (nextest caps each test binary's VA at 128 MB), and since the child consumes every byte before bailing, the final write can never hit EPIPE after the child exits. The exact-boundary test (a line of exactly `cap` must be accepted) cannot use a command line: **the child inherits the test's 128 MB VA rlimit**, so a 64 MiB line can never finish in the child (line buffer + script copy alone fill the cap — it SIGABRTs in `to_vec`), and a "command not found" report for a 64 MiB name would be 134 MB of stderr. Use a `cap`-byte **comment line** (a no-op once accepted) and assert only the *absence* of the size-limit error — under a `>=`/`==` mutant the child bails on the cap-th byte with the error and the test fails.
@@ -7023,15 +7032,15 @@ runs the `do` word (bash rc 2).
 
 The keyword-name family rides the scan's existing rule that nothing behind `for`
 scores (task #306): `for in;`, `for fi;`, `for do;`, `for then;` name the variable
-and iterate the parameters at bash parity. The one member that does not is the
-block's **own** closer — the closing-keyword walk walks the token list from index 1,
-so a name written `done` scores as the closer and another module answers; all
-spellings are pinned at today's message, task #522 owns the decision.
+and iterate the parameters at bash parity — and task **#522** completed the family:
+the block's **own** closer written as the name is the name too, because the
+closing-keyword walk starts in the word list's seed, so `for done;`, `for done do`
+and `for done in a;` all run at bash parity (the rule is the #273 entry).
 
 Pins: `parse/for_block/tests.rs::a_clause_without_in_has_no_words_and_the_default_flag`,
 `parse/for_block/tests.rs::a_word_where_the_optional_in_belongs_stays_the_heads_error`,
 `parse/for_block/tests.rs::the_in_form_still_distinguishes_an_empty_list`,
-`parse/for_block/tests.rs::the_closer_shaped_name_is_pinned_at_its_current_message`,
+`parse/for_block/tests.rs::a_closer_shaped_name_of_a_for_clause_is_the_name`,
 `parse/for_block/tests.rs::a_second_do_behind_the_empty_newline_list_is_body_data`,
 `parse/semi/preceded/tests.rs::semi_or_empty_admits_the_first_slot_behind_the_clause_word`,
 `parse/for_block/tests.rs::an_operator_shaped_name_of_a_wordless_clause_stays_the_name`,

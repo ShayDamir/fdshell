@@ -258,6 +258,13 @@ mismatch consumes the block's only closer the line is fdshell's own parse error
 `'while' is missing its closing 'done'` (rc 1, POSIX rc 2). Write the closer
 that matches the block; never put a foreign closing keyword in a body.
 
+The rule reads the grammar's **slots**: POSIX #2.9.1 puts a **name** behind
+`for`, and the name slot is never a closer — even when it is spelled as the
+block's own closer (task **#522**): `for done in a; do echo "$done"; done` and
+the wordless clause print `[a]` at bash parity, `done` bound as the name. Pins:
+`parse/semi/closing/tests.rs` (parse level),
+`tests/loops.rs::for_clause_without_in_iterates_the_positional_parameters`.
+
 A **fully quoted** operator word is never an operator — the gate every fdshell
 redirect parser opens with, the `&>` family included: `echo '&>f'` prints `&>f`
 and opens nothing, `echo hi '&>' f` prints `hi &> f` and opens nothing, and

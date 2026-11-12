@@ -1278,9 +1278,10 @@ needs no terminator: `if`, `while` and `until` still need theirs in front of
 fdshell's parse error (bash rc 2). The empty list right beside it is a **different** row —
 `for name in; do` iterates zero times — so the parse keeps the two apart as a
 field of the block. A keyword written in the name slot is the name, and bash
-iterates the parameters there too (`for in; do`, `for fi; do`, `for then; do`);
-only the block's **own** closer stays fdshell's parse error, bash rc 0
-(task #522).
+iterates the parameters there too (`for in; do`, `for fi; do`, `for then; do`) —
+the block's **own** closer included (task **#522**): `for done; do`,
+`for done do`, `for done in a; do` all run at bash parity, the name is `done`
+and the word list keeps its words.
 
 A block's **closing keyword** needs a command-list terminator in front of it —
 POSIX #2.9's `;` (a newline is one) or the plain `&` — with the one exception
