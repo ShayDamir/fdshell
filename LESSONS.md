@@ -6706,12 +6706,15 @@ arms; bash continues after its rc-1 error, fdshell aborts — the task #179 fami
 `bash -c 'help unset'` states it outright — and the predicate that picks the
 namespace must consult **exactly** the stores the delete path owns, no narrower
 and no wider. `unset_var`'s footprint is the string table, the export attribute,
-the inherited `environ` row *and* the single-name `IFS` sync; the last of those is
-a field, not a map entry, so a predicate built from the three maps answers "not a
-variable" for a bare `IFS` in a clean environment and removes a function named
-`IFS` that bash keeps. The `IFS` clause in `state/functions.rs::is_variable` is
-therefore load-bearing, not decorative, and the row that catches its removal is
-the one where the name lives in the function store only.
+the inherited `environ` row *and* the single-name `IFS` sync — but that last one is
+a **mirror** of the entry, not a store, so it answers nothing in
+`state/functions.rs::is_variable`. `IFS` is a variable **while a store holds it**,
+and since task #388 the startup seed is what holds it; the standalone `IFS` clause
+this predicate carried from task #386 (written before the seed existed) answered
+"variable" for a name no store has any more, and so **kept** a function on the
+second `unset IFS` that bash removes. The row where the name lives in the function
+store only is bash's parity row, not a caught removal, and the state-dependence is
+pinned from both sides — seed present, seed gone.
 
 The same rule at pinning granularity: the priority is only observable from a name
 that lives in **two** stores at once, so a single-store pin decides nothing about
@@ -6731,11 +6734,13 @@ Pins: `state/tests.rs`
 `the_export_attribute_is_a_variable_so_the_function_stays`,
 `the_inherited_environment_is_a_variable_so_the_function_stays`,
 `ifs_is_a_variable_so_a_function_named_ifs_stays`,
+`once_no_store_holds_ifs_the_function_goes_too`,
 `an_unbound_name_leaves_both_stores_alone`) and `tests/unset.rs`
 (`a_bare_unset_names_a_variable_first_and_a_function_second`,
 `a_function_removal_outlives_the_frame_that_performed_it`,
 `a_positional_name_is_not_a_variable_so_the_function_goes`,
-`a_function_named_ifs_survives_unset_ifs`), plus
+`a_function_named_ifs_survives_unset_ifs`,
+`a_second_unset_ifs_reaches_the_function_store`), plus
 `src/tests/run.rs::unset_reaches_the_function_store_through_the_dispatch_arm`
 for the dispatch arm.
 

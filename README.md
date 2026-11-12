@@ -817,9 +817,12 @@ exits 0, which is what bash does too.
 The name namespaces follow bash's no-option rule: **variable first, function
 second**. A name that is also a function keeps its function — the variable is
 what this reaches first — and a name that is not a variable removes a function of
-that name, so `f(){ :; }; unset f; f` runs nothing. An unbound name stays the same
-silent no-op. The operand is never an option here: `-f` and `-v` are read as names
-(bash's `unset -f`, `-v` and `-x` rows are documented in
+that name, so `f(){ :; }; unset f; f` runs nothing. A name counts as a variable
+**while a store holds it**: `IFS` does, because the shell seeds it at startup, so
+the first `unset IFS` leaves a function named `IFS` alone and a second one removes
+it — bash too. An unbound name stays the same silent no-op. The operand is never
+an option here: `-f` and `-v` are read as names (bash's `unset -f`, `-v` and `-x`
+rows are documented in
 [POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md) by task #387). The rule is pinned
 in `tests/unset.rs::a_bare_unset_names_a_variable_first_and_a_function_second`.
 

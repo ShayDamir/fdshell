@@ -23,7 +23,17 @@
 //! f(){ :; }; unset f; f   bash `command not found` rc 127   fdshell the call fails, rc 1
 //!                           (no variable of that name, so the function goes — parity
 //!                           in shape, the rc-1-vs-127 family)
+//! IFS(){ echo F; }; unset IFS; IFS
+//!                           bash `F` rc 0                        fdshell `F` rc 0
+//!                           (a store holds `IFS`, so the variable branch is taken)
+//! IFS(){ echo F; }; unset IFS; unset IFS; IFS
+//!                           bash `IFS: command not found` rc 127   fdshell the call fails, rc 1
+//!                           (no store holds `IFS` any more — the "if that fails" half,
+//!                           the rc-1-vs-127 family again)
 //! ```
+//!
+//! The two `IFS` rows were measured with the ambient `IFS` removed (`env -u IFS`),
+//! and they are what the `IFS` pins below spell out as `NO_IFS`.
 //!
 //! `-v` and `-f` stay **name-shaped** here (task #386): the keyword has no option
 //! surface, so `unset -v v` unsets `v` because `-v` names nothing, and `unset -f f`
@@ -88,6 +98,11 @@ fn run_env(env: &[(&str, &str)], script: &str) -> (String, String, i32) {
         output.status.code().unwrap_or(-1),
     )
 }
+
+/// The `IFS` pins below spell the child environment out (the shape of
+/// `tests/ifs_startup.rs`): the rows are exactly the ones an ambient `IFS` moves,
+/// so none of them may rely on the harness's. `"\0"` **removes** the key.
+const NO_IFS: &[(&str, &str)] = &[("IFS", "\0")];
 
 /// A per-test scratch dir, removed on drop (the sweep-safe shape of
 /// `tests/cd_expand.rs::Scratch`).
@@ -390,12 +405,47 @@ fn a_positional_name_is_not_a_variable_so_the_function_goes() {
 }
 
 /// A function named `IFS` **survives** `unset IFS`: `IFS` is a variable for
-/// `unset` — the single-name split-set sync is part of the footprint the delete
-/// path owns (task #386, measured in both shells) — so the variable branch is
-/// taken and the function store is untouched.
+/// `unset` **while a store holds it**, and at this point the startup seed
+/// (task #388) is what holds it — so the variable branch is taken and the function
+/// store is untouched (task #386, measured in both shells). The pin below is the
+/// half where no store holds the name any more.
 #[test]
 fn a_function_named_ifs_survives_unset_ifs() {
     let (out, err, code) = run("IFS(){ builtin echo F; }; unset IFS; IFS");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "F\n", "bash measures the same");
+}
+
+/// The **second** `unset IFS` — with no store holding the name since the first took
+/// the seed away — is where bash's "and if that fails, tries to unset a function"
+/// applies, and the function goes (task #512, the header's two `IFS` rows). A name
+/// a store holds stays the variable's own: the `IFS=,` row and the single-unset row
+/// both leave the function running. Every row runs with the ambient `IFS` removed,
+/// and the failing call lands on fdshell's shell-wide rc 1 (the rc-1-vs-127 family).
+#[test]
+fn a_second_unset_ifs_reaches_the_function_store() {
+    let (out, err, code) = run_env(NO_IFS, "IFS=,; IFS(){ builtin echo F; }; unset IFS; IFS");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "F\n",
+        "the assignment is a store entry, so the function stays"
+    );
+
+    let (out, err, code) = run_env(NO_IFS, "IFS(){ builtin echo F; }; unset IFS; IFS");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "F\n", "the startup seed is the store entry here");
+
+    let (out, err, code) = run_env(
+        NO_IFS,
+        "IFS(){ builtin echo F; }; unset IFS; unset IFS; IFS",
+    );
+    assert_eq!(
+        code, 1,
+        "the call of the removed function fails: stderr={err:?}"
+    );
+    assert!(
+        out.is_empty(),
+        "no output from the removed function: stdout={out:?}"
+    );
+    assert!(err.contains("not found"), "stderr={err:?}");
 }

@@ -161,11 +161,12 @@ fn the_inherited_environment_is_a_variable_so_the_function_stays() {
     assert!(state.functions.contains_key(&name));
 }
 
-/// `IFS` is a variable for `unset` too — the single-name sync is part of the
-/// predicate, so a function named `IFS` survives `unset IFS` (bash, measured).
-/// The startup seed puts the name in `strings`, so the map half of the predicate
-/// reaches it here; the explicit `IFS` clause is what answers on a **second**
-/// `unset IFS`, after the seed itself is gone (task #512).
+/// `IFS` is a variable for `unset` **while a store holds it** — the startup seed
+/// (task #388) puts the name in `strings`, so the store half of the predicate
+/// answers here, the variable branch is taken and a function named `IFS` survives
+/// `unset IFS` (bash, measured, task #386). The `ifs` field is the branch's
+/// evidence: the sync ran, so the predicate did answer through a store. The sibling
+/// pin below is the other half — no store holds the name any more.
 #[test]
 fn ifs_is_a_variable_so_a_function_named_ifs_stays() {
     let mut state = ShellState::new();
@@ -179,6 +180,38 @@ fn ifs_is_a_variable_so_a_function_named_ifs_stays() {
         "the IFS sync ran, so the variable branch was taken"
     );
     assert!(state.functions.contains_key(&name));
+}
+
+/// The state-dependent half of the same rule (task #512, measured in both shells):
+/// the first `unset IFS` leaves the function alone, and the **second** — with no
+/// store holding the name since the first took the seed away — removes it, because
+/// that is where bash's "and if that fails, tries to unset a function" applies.
+/// The `ifs` marker is a **branch probe**: `unset_var`'s single-name sync is the
+/// only thing that moves the field, so a marker that survives proves the function
+/// branch ran (a resurrected unconditional `IFS` clause is caught here). In the real
+/// shell the field and the store entry agree, so this exact pairing — a non-default
+/// marker with no entry behind it — is synthetic.
+#[test]
+fn once_no_store_holds_ifs_the_function_goes_too() {
+    let mut state = ShellState::new();
+    let name = ShortCStr::from(c"IFS");
+    with_function(&mut state, &name);
+    state.unset_name(&name);
+    assert!(!state.strings.contains_key(&name), "the seed is gone");
+    assert!(
+        state.functions.contains_key(&name),
+        "the seed was the variable, so the function stays"
+    );
+    state.ifs = ShortCStr::from(c",");
+    state.unset_name(&name);
+    assert!(
+        !state.functions.contains_key(&name),
+        "bash removes the function on the second unset"
+    );
+    assert!(
+        state.ifs.eq_bytes(b","),
+        "the field keeps the marker: no sync on the function branch"
+    );
 }
 
 /// A name in neither store is a silent no-op in both directions: no removal, no
