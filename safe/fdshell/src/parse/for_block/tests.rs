@@ -516,8 +516,8 @@ fn word_for(line: &[u8]) -> ForBlock {
 /// spelling — POSIX's `newline_list` may be **empty** behind the name (task
 /// #521, `for i do …` runs at bash rc 0) — and the keyword-name family (`in`,
 /// `fi`, `do`, `then`) are **names** here: the scan parks every word behind
-/// `for` and never scores it. The family's `done` member is the block's own
-/// closer, pinned separately below.
+/// `for` and never scores it — the family's `done` member, the block's own
+/// closer, included (task #522, pinned below).
 #[test]
 fn a_clause_without_in_has_no_words_and_the_default_flag() {
     for (line, name) in [
@@ -579,32 +579,33 @@ fn the_in_form_still_distinguishes_an_empty_list() {
     assert_eq!(fb.body.data, c"echo a".into());
 }
 
-/// The name slot of a clause with no `in` is still walked by the closing-keyword
-/// walk, so a name written as the block's **own** closer answers with the walk's
-/// message (`semi/preceded.rs`) and not with `[a]` as bash does at rc 0; the `in`
-/// spelling of the same name lands in `parse/block_tail/word.rs`. Task #522 owns
-/// that decision; all three spellings are pinned at today's message meanwhile, so
-/// none can drift silently — the glued one moved with task #521's empty-
-/// `newline_list` arm (`for done do …` now reads the word behind the closer, so
-/// the block-tail word rule answers). The rest of the keyword-name family (`in`,
-/// `fi`, `do`, `then`) is bash parity and is pinned above and in `tests/loops.rs`.
+/// The block's **own** closer written in the name slot is the **name**, like the
+/// rest of the keyword-name family (`in`, `fi`, `do`, `then`) — POSIX #2.9.1
+/// puts a *name* behind `for`, and the closing walk is seeded in the word list
+/// (task #522, `semi/closing/walk.rs`), so no word behind the opener — the name
+/// slot included — is ever scored as the closer. All three spellings parse:
+/// the name is `done`, the body is `echo x`, and the word-list facts keep their
+/// shapes — the `in` row has the word `a` and the flag `false`, the wordless
+/// and the glued rows (tasks #416/#521) have an empty list and the flag `true`.
+/// Bash 5.3.9 runs every row at rc 0; the end-to-end pins are in
+/// `tests/loops.rs`.
 #[test]
-fn the_closer_shaped_name_is_pinned_at_its_current_message() {
-    assert_eq!(
-        parse_err(b"for done; do echo x; done"),
-        "expected ';' before 'done'",
-        "bash prints x, rc 0 (task #522)"
-    );
-    assert_eq!(
-        parse_err(b"for done do echo x; done"),
-        "'done' must be followed by a separator (';', a newline, '&', '|') — unexpected word",
-        "bash prints x, rc 0 (task #522)"
-    );
-    assert_eq!(
-        parse_err(b"for done in a; do echo x; done"),
-        "'done' must be followed by a separator (';', a newline, '&', '|') — unexpected word",
-        "bash prints x, rc 0 (task #522)"
-    );
+fn a_closer_shaped_name_of_a_for_clause_is_the_name() {
+    let fb = word_for(b"for done in a; do echo x; done");
+    assert!(fb.var.eq_bytes(b"done"));
+    assert_eq!(fb.words, vec![c"a".into()]);
+    assert!(!fb.words_default_to_positional);
+    assert_eq!(fb.body.data, c"echo x".into());
+    let fb = word_for(b"for done; do echo x; done");
+    assert!(fb.var.eq_bytes(b"done"));
+    assert!(fb.words.is_empty());
+    assert!(fb.words_default_to_positional);
+    assert_eq!(fb.body.data, c"echo x".into());
+    let fb = word_for(b"for done do echo x; done");
+    assert!(fb.var.eq_bytes(b"done"));
+    assert!(fb.words.is_empty());
+    assert!(fb.words_default_to_positional);
+    assert_eq!(fb.body.data, c"echo x".into());
 }
 
 /// The word at `anchor` — the **name** word of a wordless clause — is the only

@@ -2579,9 +2579,10 @@ fn c_style_for_a_brace_body_on_the_next_line_is_a_divergence() {
 /// through no positionals). `for in; do`, `for fi;`,
 /// `for do;` and `for then;` are keyword names in the **name** slot — bash reads
 /// them as the name and iterates the parameters (the scan never scores a word
-/// behind `for`); the family's `done` member is the block's own closer and is
-/// task #522's, pinned at its current message in `parse/for_block/tests.rs`. The
-/// function-scope row is the parameters of the **call**, not the shell's.
+/// behind `for`), and the family is complete: the `done` member, the block's
+/// **own** closer, is the name too (task **#522** — the walk starts in the word
+/// list), every spelling, the `in` list included. The function-scope row is the
+/// parameters of the **call**, not the shell's.
 #[test]
 fn for_clause_without_in_iterates_the_positional_parameters() {
     for (script, want) in [
@@ -2624,6 +2625,31 @@ fn for_clause_without_in_iterates_the_positional_parameters() {
         (
             "set -- a; for i do printf \"[%s]\\n\" \"$i\" | cat; done",
             "[a]\n",
+        ),
+        // The family's `done` member (task #522): the block's own closer, read
+        // as the name in every spelling — bash's measured parity.
+        ("set -- a; for done; do echo \"[$done]\"; done", "[a]\n"),
+        ("set -- a; for done do echo \"[$done]\"; done", "[a]\n"),
+        (
+            "set -- a; for done in a; do echo \"[$done]\"; done",
+            "[a]\n",
+        ),
+        ("set -- a; for done in a; do echo x; done", "x\n"),
+        (
+            "set -- a b; for done in a b; do printf \"[%s]\\n\" \"$done\"; done",
+            "[a]\n[b]\n",
+        ),
+        (
+            "set -- a; for done in a; do echo \"[$done]\"; done; echo rc=$?",
+            "[a]\nrc=0\n",
+        ),
+        (
+            "set -- a; for done in a; do for x in 1; do echo \"[$done]\"; done; done",
+            "[a]\n",
+        ),
+        (
+            "set -- ; for done in a; do echo x; done; echo rc=$?",
+            "x\nrc=0\n",
         ),
     ] {
         let (out, err, code) = run(script);

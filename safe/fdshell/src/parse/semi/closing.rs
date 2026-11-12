@@ -4,7 +4,10 @@
 //! command-position rule (task #236) and the `case`/`for` word-list rule (task
 //! #273, [`List`]); the word rules it reads live in [`word`], and the walk they
 //! feed in [`walk`] — shared with the `case` clause walk (task #418), whose only
-//! difference is its stop predicate.
+//! difference is its stop predicate. [`List`] decides the walk's **seed** place
+//! as well as its word rule (task #522): a `for` walk starts inside the word
+//! list, the seed the byte-level scan already gives the run, so every word
+//! behind the opener — the name slot included — is list data.
 
 mod walk;
 mod word;

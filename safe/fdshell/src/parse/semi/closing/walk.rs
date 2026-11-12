@@ -15,9 +15,14 @@
 //! which never walks this loop. `start` is the first token the walk reads, so the
 //! closing search keeps skipping its opener word (token 0) while an arm walk
 //! reads its own first token: it can itself be an opener (`a) case b in …`).
+//! `list` seeds the **place** too (task #522): a `for` walk starts in
+//! [`Place::Words`] — the seed the byte-level scan already gives the run
+//! ([`crate::segment::block`]'s `list_seed`, task #306) — so every word behind
+//! the opener, the **name** slot included, is list data; the other walks start
+//! in command position as always.
 
 use super::Token;
-use super::word::{List, glue_at, next_word, scores_at, structure_flags};
+use super::word::{List, glue_at, next_word, scores_at, seed_place, structure_flags};
 use crate::keywords::{Closer, Glue, Pairing, Place, after, pair_payload, scores, word_place};
 
 /// Walk `tokens` from `start` and answer the first index at which `stop` accepts
@@ -42,7 +47,7 @@ pub(crate) fn walk_until(
         }
         None => 0,
     };
-    let mut place = Place::Command;
+    let mut place: Place = seed_place(list);
     // The here-doc structure words, asked once per walk (the walk is O(n)): an
     // operator's delimiter word and a word of a terminator line never score
     // (task #432) — `brace_expand/protect` protects the same set for the same

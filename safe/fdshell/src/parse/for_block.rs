@@ -89,8 +89,11 @@ pub(crate) fn tokens_to_for(
     // `done`: the tokens past it are body data, not block structure (task #273,
     // `semi::up_to_closing`). The `in` list is walked as `List::Words`, so a
     // closer-shaped word of the word list (`for x in done; do …; done`) is a
-    // word, not the closer; the walk is seeded with `Closer::Done`, the closer a
-    // `for` requires, so a `fi`/`esac` written in the body is a word too (#309).
+    // word, not the closer — and `List::Words` seeds the walk in the list
+    // itself, so the **name** slot is list data too: `for done in a; do …`
+    // names the variable `done` (task #522). The walk is seeded with
+    // `Closer::Done`, the closer a `for` requires, so a `fi`/`esac` written in
+    // the body is a word too (#309).
     let expected_done = ParseError::ExpectedDone;
     let closed = up_to_closing(tokens, line, Closer::Done, List::Words, expected_done)?;
     // The closing `done` is the truncated slice's last token.

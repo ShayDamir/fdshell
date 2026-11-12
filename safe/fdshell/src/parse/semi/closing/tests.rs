@@ -153,6 +153,9 @@ fn word_lists_are_walked_as_words() {
         ),
         (b"for x in a; do echo x; done".as_slice(), Some(9), None),
     ];
+    // The `Words` column is decided by the walk's **seed** since task #522
+    // (`seed_place`), not by an arm of `scores_at`: the same answers, read at
+    // the place the list rule owns.
     for (line, plain, case) in cases {
         let t = toks(line);
         assert_eq!(closing_keyword_index(&t, line), plain, "{line:?}");
@@ -183,6 +186,36 @@ fn word_lists_are_walked_as_words() {
         "{line:?}: {}",
         t.len()
     );
+}
+
+/// Task #522: the byte-level scan seeds a `for` run in [`Place::Words`] so a
+/// closer-shaped word of the list stays a word (task #306), and the token walk
+/// now starts in that seed too — so **every** word behind the opener is list
+/// data, the name slot included: POSIX #2.9.1 puts a *name* there, and a
+/// closer-shaped name never closes the block. The `plain` column is the walk
+/// without the seed (the mutation [`seed_place`] defends): it stops at the name
+/// word itself. Every row is bash parity — bash 5.3.9 runs the loop (`[a]`/`x`,
+/// rc 0), pinned end-to-end in `tests/loops.rs`; the e2e twins of the glued and
+/// the `;` spellings are tasks #521/#416's.
+#[test]
+fn a_closer_shaped_name_of_a_for_block_is_walked_as_the_name() {
+    for (line, plain, words) in [
+        (
+            b"for done in a; do echo x; done".as_slice(),
+            Some(1),
+            Some(9),
+        ),
+        (b"for done; do echo x; done".as_slice(), Some(1), Some(7)),
+        (b"for done do echo x; done".as_slice(), Some(1), Some(6)),
+    ] {
+        let t = toks(line);
+        assert_eq!(closing_keyword_index(&t, line), plain, "{line:?}");
+        assert_eq!(
+            super::list_closing_keyword_index(&t, line, Closer::Done, List::Words),
+            words,
+            "{line:?}"
+        );
+    }
 }
 
 /// Task #301's scan-side arm: a closer in command position restarts command

@@ -2,7 +2,8 @@
 
 //! The **word** rules the closing-keyword walk reads: how a token's word scores
 //! as a block keyword ([`scores_at`], with the `case`/`for` word-list rule
-//! [`List`]), and what a token's neighbours say about it ([`glue_at`],
+//! [`List`], whose `for` half is the walk's **seed** [`seed_place`], task
+//! #522), and what a token's neighbours say about it ([`glue_at`],
 //! [`next_word`]).
 
 use super::Token;
@@ -13,6 +14,9 @@ use alloc::vec::Vec;
 
 /// How the walk reads a keyword closer written inside a `case`/`for **word
 /// list** ([`Place::Pattern`], task #236): bash reads a word list as words.
+/// [`List::Words`] decides that as the place the walk is **seeded** with
+/// ([`seed_place`], task #522) — the word-list rule of [`scores`], read through
+/// the place, as its module doc says; only the `case` list keeps its own arm.
 #[derive(Clone, Copy)]
 pub(crate) enum List {
     /// Not a word-list walk: [`scores`]' rule unchanged (a closer scores in a
@@ -23,14 +27,31 @@ pub(crate) enum List {
     /// matches the word `done` (task #273).
     Case,
     /// The `for` list: it is closed by `do`, a non-closer, so no closer scores
-    /// there — `for x in done; do echo x; done` iterates over the word `done`.
+    /// there — `for x in done; do echo x; done` iterates over the word `done`,
+    /// and so does the name slot behind `for` (task #522): the list is the
+    /// place the walk starts in, [`seed_place`].
     Words,
 }
 
-/// May `word` be scored as a block keyword at `place`? Outside a word list this
-/// is [`scores`] unchanged; inside one, [`List`] decides. A `case` `esac` that a
-/// pattern's `)` follows is a **pattern word** (`case x in esac) cat <<T;; esac`
-/// is the clause `esac) …`), so only an `esac` no `)` follows terminates a list.
+/// The place the walk starts in — the byte-level scan's seed rule, read by the
+/// token walk for the first time (task #522): the `for` run is seeded in
+/// [`Place::Words`] ([`crate::segment::block`]'s `list_seed`, task #306), so
+/// every word behind the opener — the **name** slot included — is list data,
+/// and a closer-shaped name never closes the block. The plain and `case` walks
+/// keep their command-position seed.
+pub(super) fn seed_place(list: List) -> Place {
+    match list {
+        List::Plain | List::Case => Place::Command,
+        List::Words => Place::Words,
+    }
+}
+
+/// May `word` be scored as a block keyword at `place`? This is [`scores`]
+/// unchanged — its place gate already owns the `for` word list, whose rule the
+/// walk reads through the [`seed_place`] it starts in (task #522) — except for
+/// the `case` list, where [`List`] decides. A `case` `esac` that a pattern's `)`
+/// follows is a **pattern word** (`case x in esac) cat <<T;; esac` is the clause
+/// `esac) …`), so only an `esac` no `)` follows terminates a list.
 pub(crate) fn scores_at(
     word: &[u8],
     line: &[u8],
@@ -43,9 +64,8 @@ pub(crate) fn scores_at(
         return scores(word, line, end, place);
     }
     match list {
-        List::Plain => scores(word, line, end, place),
+        List::Plain | List::Words => scores(word, line, end, place),
         List::Case => word == b"esac" && next != Some(b")"),
-        List::Words => false,
     }
 }
 
