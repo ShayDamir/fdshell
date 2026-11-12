@@ -1,5 +1,7 @@
 //! Block-depth deltas of the keywords in a word run.
 
+// mutants: -C --lib -C --test -C case -- -E 'test(/^comment::/) | binary(case)'
+
 mod word_step;
 
 use crate::bytes::SQUOTE;
@@ -15,15 +17,15 @@ pub(crate) use word_step::word_step;
 /// double quotes, a single-quoted span, backticks, or a `$( )` substitution is
 /// data, not a nested block opener. The quote / backtick / `$( )` handling
 /// follows `ScanState::advance`'s byte classification (a `'…'` span has no
-/// escape pair, a `"` inside a span is data) — with one deliberate difference:
-/// `advance` closes a span at its closing `'`, this scan never does. `bare` is
-/// false while the span is open, so the closing `'` never matches its own arm
-/// and the span stays open for the rest of the run.
+/// escape pair, a `"` inside a span is data) — the toggles included: both quote
+/// arms close their span at the closing byte (task #519), so a completed quoted
+/// word splits like any other word, is scored `0` by the word-start quote gate,
+/// and leaves the place an ordinary word leaves.
 ///
-/// That is safe: the run's tail is data (bash requires a closer keyword to sit
-/// in command-word position, after a separator), the state is run-local (the
-/// `Quotes` value is not returned to the caller) and it only ever suppresses
-/// keyword scoring for the words after the span.
+/// It must: "the run's tail is data" only holds **outside** a word list. Inside
+/// one, task #273's rule keeps command position alive, so a quoted word must
+/// stay word data and put a closer written behind it in argument position. The
+/// state is run-local (the `Quotes` value is not returned to the caller).
 /// A run always starts at substitution depth 0 (separators only exist at
 /// depth 0), so only the caller's quote state is taken as a parameter.
 ///
@@ -75,11 +77,12 @@ pub(crate) fn depth_delta(
     while let Some(&b) = raw.get(i) {
         let bare = !quotes.double && !quotes.single && !in_backtick;
         let mut step = 1usize;
-        if b == SQUOTE && bare {
-            // A `'…'` span is one literal word: its bytes are data and its
-            // spaces are no split, so a keyword written in it never scores.
+        if b == SQUOTE {
+            // A `'…'` span is one word: its spaces are no split, its closing
+            // `'` closes it, and the word gate is what keeps a keyword written
+            // inside it out of the score — exactly the `"` arm below, and
+            // `ScanState::advance` (task #519).
             quotes.single = !quotes.single;
-            frag_quoted = true;
         } else if b == crate::bytes::QUOTE {
             quotes.double = !quotes.double;
         } else if bare && b == b'$' && raw.get(i + 1) == Some(&b'(') {

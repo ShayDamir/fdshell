@@ -268,7 +268,7 @@ The `time_prefix_len`/`one_prefix_len` pair is the same species in *length* form
 ## A run scanner's quote/backtick/`$( )` arms are killable only from a direct `depth_delta` pin
 Task #308 cleared six survivors in `comment/depth_delta.rs`: the two `&&` of `bare = !quotes.double && !quotes.single && !in_backtick`, the `!` of each quote toggle (`quotes.single = !quotes.single`, `quotes.double = !quotes.double`), the `$(` arm's second `&&`, and the backtick arm's `bare != in_backtick`. Every scan-level shape the suite had for these arms is *blind* to them, because it puts the closer in **argument** position (`echo 'q' done`, `if a; then echo $(echo for); fi`): task #236's command-position rule scores a closer behind a command word `0` under **both** builds, so what the arm decides never reaches an assertion.
 
-The kill lever is the run's own state, reachable only from a direct `depth_delta` call: seed `quotes`/`in_backtick` (that is what sets `frag_quoted` at the run start) and put the closer in command position **behind a split**. A *quoted* fragment is skipped at a split **without** calling `word_step`, and `word_step` is the only thing that moves `place`, so `place` stays at the run's seed (`Place::Command`) and the word behind the split scores. Pinned that way: `comment/tests.rs::a_quoted_run_start_keeps_a_later_word_out_of_the_score` (both `bare` `&&`), `a_quoted_run_exits_its_scope_at_the_closer_byte` (the `"` toggle, and the backtick arm's `!=`), `a_span_opened_in_a_run_swallows_the_closer_behind_it` (the `'` toggle), `a_glued_open_paren_is_word_data_not_a_substitution` (the `$(` arm's `&&`, with `$(fi` as the measured non-kill control). All six measured by hand in a scratch worktree, `-1`/`+1` against the pinned `0`/`-1`; the focused `-f safe/fdshell/src/comment/depth_delta.rs --iterate` gate is now clean.
+The kill lever is the run's own state, reachable only from a direct `depth_delta` call: seed `quotes`/`in_backtick` (that is what sets `frag_quoted` at the run start) and put the closer in command position **behind a split**. A *quoted* fragment is skipped at a split **without** calling `word_step`, and `word_step` is the only thing that moves `place`, so `place` stays at the run's seed (`Place::Command`) and the word behind the split scores. Pinned that way: `comment/tests.rs::a_quoted_run_start_keeps_a_later_word_out_of_the_score` (both `bare` `&&`, through the run-start flag skipping the run's first fragment), `a_quoted_run_exits_its_scope_at_the_closer_byte` (the `"` toggle, the `'` toggle — since task #519 the arm is symmetric and its run exits its scope at the closing byte like the other two — and the backtick arm's `!=`), `a_glued_open_paren_is_word_data_not_a_substitution` (the `$(` arm's `&&`, with `$(fi` as the measured non-kill control). All six measured by hand in a scratch worktree, `-1`/`+1` against the pinned `0`/`-1`; the focused `-f safe/fdshell/src/comment/depth_delta.rs --iterate` gate is now clean. `a_span_opened_in_a_run_swallows_the_closer_behind_it` and `span_opened_in_a_run_keeps_the_closer_from_scoring` keep their values but no longer kill the `'` toggle (the kill is the closing-byte test's, task #519): they are documentation pins of the word rule — a completed quoted word is word data (scored `0` by the word gate) and puts the closer behind it in argument position, which is bash's own reason.
 
 Two mechanics from the same measurement. (1) Measure the row values on the **clean** tree before writing them into a doc comment: the plan's trace of `'a fi' done` under the dropped `'` toggle was `-2`, the measured value is `-1` — every fragment before a split carries a quote byte, so it is skipped and only the run's tail fragment is scored. (2) A byte-string row table must bind each row's text as `let raw: &[u8] = b"…";` — an array literal of `&[u8; N]` rows with different `N` does not compile.
 
@@ -7717,3 +7717,25 @@ field's own meaning after `unset IFS` stays pinned by
 `tests/unset.rs::unset_ifs_restores_the_default_split_set` and
 `tests/ifs_startup.rs::unset_ifs_still_unbinds_the_name` — splitting still uses
 the default, only the **name** is gone.
+
+## The block-depth scan closes a `'…'` span at its closing quote (task #519)
+`comment/depth_delta.rs`'s `'` arm is symmetric with its `"` arm and with
+`ScanState::advance`: the closing byte toggles the span shut, the completed
+quoted word splits, is scored `0` by the word gate, and leaves the place an
+ordinary word leaves. The old asymmetry (a `bare` gate so the closing `'` never
+matched its arm and the span kept the rest of the run) leaned on "a run's tail
+is data" — which holds only **outside** a word list. Inside one, task #273's
+rule keeps command position alive (the `in` row puts the rest of the list in
+`Place::Pattern`, and the block's own closer scores there), so a quoted word
+must stay word data and put a closer written behind it in argument position:
+bash takes `case 'x' in esac` at rc 0, and fdshell reported a missing `esac`
+until this task.
+
+Pins: `tests/case.rs::a_single_quoted_case_word_or_pattern_word_keeps_the_block_closed`
+(word slot, pattern slot, empty quote pairs, and the body-carrying controls,
+with bash 5.3.9's measured values); the three closing-byte rows of
+`comment/tests.rs::a_quoted_run_exits_its_scope_at_the_closer_byte` (all three
+quote kinds exit their scope at the first byte, `-1`); the four blast-limit
+rows added to `tests/block_closers.rs::the_rc_1_family_stays_a_parse_error` (a
+quoted body word keeps the closer an argument, both quote kinds — the rc-1-vs-
+bash-2 family unchanged).

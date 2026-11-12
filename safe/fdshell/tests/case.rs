@@ -335,35 +335,55 @@ fn a_semicolon_byte_in_an_empty_clause_list_is_a_parse_error() {
     }
 }
 
-/// Two pre-existing divergences the tables above touch and deliberately do not
-/// fix: a **single-quoted** word in the `case` word or pattern slot (owner task
-/// **#519**) and a **tab** in front of the `esac` of an empty clause list (owner
-/// task **#520**). bash 5.3.9 takes every row at rc 0; fdshell reports its
-/// missing-`esac` message at rc 1 (measured 2026-11-03). The double-quote and the
-/// space spellings are rc 0 in both shells.
+/// A single-quoted word in the `case` word slot or a pattern slot is **word
+/// data** and keeps the block closed (task **#519**): the byte-level
+/// block-depth scan closes a `'…'` span at its closing `'` (the arm is
+/// symmetric with the `"` arm and with `ScanState::advance`), so the completed
+/// word splits, is scored `0` by the word gate, and puts a closer written
+/// behind it in argument position — and a `case` clause may close straight at
+/// `esac` (task #300's accepted leniency, via the word-list rule of #273).
+/// Every row is bash parity, bash 5.3.9 values measured 2026-11-12: the three
+/// fixed rows (were rc 1), the double-quote and plain spellings that were
+/// already green, the empty-quote-pair rows, and the body-carrying controls
+/// with their measured outputs (`m`, nothing, `n`).
 #[test]
-fn the_single_quote_and_tab_divergences_stay_as_measured() {
+fn a_single_quoted_case_word_or_pattern_word_keeps_the_block_closed() {
     for script in [
         "case 'x' in esac",
         "case x in 'y') esac",
         "case 'x' in a) esac",
-        "case x in\tesac",
-    ] {
-        let (out, err, code) = run(script);
-        assert_eq!((out.as_str(), code), ("", 1), "{script}: {err}");
-        assert!(
-            err.contains("missing its closing 'esac'"),
-            "bash rc 0, {script}: {err}"
-        );
-    }
-    for script in [
         r#"case "x" in esac"#,
         r#"case x in "y") esac"#,
-        "case x in  esac",
+        "case x in y) esac",
+        "case '' in esac",
+        "case x in '' ) esac",
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), ("", 0), "{script}: {err}");
     }
+    for (script, want) in [
+        ("case 'x' in *) echo m;; esac", "m\n"),
+        ("case x in 'y') echo m;; esac", ""),
+        ("case x in 'y') echo m;; *) echo n;; esac", "n\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The **tab** in front of the `esac` of an empty clause list stays a measured
+/// divergence (owner task **#520**): bash 5.3.9 takes the row at rc 0; fdshell
+/// reports its missing-`esac` message at rc 1 (measured 2026-11-03). The space
+/// spelling is rc 0 in both shells — the contrast row. The single-quote rows
+/// that shared this test are parity now and live in
+/// [`a_single_quoted_case_word_or_pattern_word_keeps_the_block_closed`].
+#[test]
+fn a_tab_before_the_closer_of_an_empty_clause_list_stays_as_measured() {
+    let (out, err, code) = run("case x in\tesac");
+    assert_eq!((out.as_str(), code), ("", 1), "bash rc 0: {err}");
+    assert!(err.contains("missing its closing 'esac'"), "{err}");
+    let (out, err, code) = run("case x in  esac");
+    assert_eq!((out.as_str(), code), ("", 0), "{err}");
 }
 
 // --- the `case` pattern's own quote mask (task #280) ------------------------

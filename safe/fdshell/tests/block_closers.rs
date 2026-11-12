@@ -331,6 +331,19 @@ fn the_rc_1_family_stays_a_parse_error() {
         "while false; do wait done",
         "'while' is missing its closing 'done'",
     );
+    // Task #519's blast limit: a completed single-quoted body word is word data
+    // (the word gate), so the closer behind it stays an argument — both quote
+    // kinds, all four rows measured unchanged across the fix.
+    err("if true; then 'a' fi", "'if' is missing its closing 'fi'");
+    err("if true; then \"a\" fi", "'if' is missing its closing 'fi'");
+    bounded_err(
+        "while :; do 'a' done",
+        "'while' is missing its closing 'done'",
+    );
+    bounded_err(
+        "while :; do \"a\" done",
+        "'while' is missing its closing 'done'",
+    );
 }
 
 /// Task **#405**'s landing on this file's boundary: a word written *directly*

@@ -557,21 +557,20 @@ fn run_starting_quoted_never_scores_a_keyword() {
     }
 }
 
-/// The `'…'` span opened inside a run stays open for the rest of the run (see
-/// the `depth_delta` doc): the `done` after the span's closing `'` is **not** a
-/// closer — the span swallows the run, which is exactly bash's behaviour for a
-/// closer written in the same run as a preceding quoted word (`if true; then
-/// echo 'q' done` is a syntax error in bash; fdshell reports the block as
-/// unclosed). The pin kills a dropped toggle, which would close the span at
-/// the `'` and score the `done`.
+/// A `'…'` span opened inside a run closes at its closing `'` (task #519), so
+/// the completed quoted word splits like any other word: the word-start quote
+/// gate scores it `0` — word data, never a keyword — and it puts the closer
+/// behind it in **argument** position, so the run scores `0`. That is the same
+/// cause as the unquoted twin below, and it is bash's reason (`if true; then
+/// echo 'q' done` and `if true; then echo q done` are both syntax errors in
+/// bash, rc 2; fdshell reports the block as unclosed). The test keeps the name
+/// it carried as the `'` toggle's kill pin; that kill is
+/// [`a_quoted_run_exits_its_scope_at_the_closer_byte`]'s now (task #519).
 ///
-/// The unquoted twin returns `0` for a **different** cause (task #236): the
+/// The unquoted twin returns `0` for that same position reason (task #236): the
 /// `done` after a split sits in argument position (behind the command word
-/// `echo`), and bash recognizes a closer in command position only —
-/// `if true; then echo q done` is a bash syntax error (rc 2) and fdshell
-/// reports the block as unclosed too. Keep the two causes separable: the
-/// span shape scores 0 *despite* the closer's position, the plain shape
-/// scores 0 because the position is an argument.
+/// `echo`), and bash recognizes a closer in command position only. Keep the
+/// rows' causes stated: both are the word gate + argument position now.
 #[test]
 fn span_opened_in_a_run_keeps_the_closer_from_scoring() {
     let line = b"echo 'q' done";
@@ -586,7 +585,7 @@ fn span_opened_in_a_run_keeps_the_closer_from_scoring() {
             &mut Pairing::new(),
         ),
         0,
-        "the span swallows the rest of the run, so `done` never scores"
+        "the quoted word scores 0 at the word gate and leaves `done` an argument"
     );
     // Without the span the same run scores 0 too, for the *position* reason.
     let line = b"echo q done";
@@ -730,9 +729,13 @@ fn a_seeded_word_list_span_reaches_the_real_closer() {
 }
 
 /// Each caller state keeps a word written **behind** the open scope out of the
-/// score too: `bare` is false for the whole run, so the space is no split and the
-/// one fragment stays `frag_quoted`, which the split test skips (no `word_step`).
-/// This is [`run_starting_quoted_never_scores_a_keyword`] extended to a run with a
+/// score too: the run's first byte closes the caller's scope (all three arms
+/// close it — task #519 made the `'` arm symmetric with the `"` arm, and the
+/// backtick arm always entered from `bare != in_backtick`), the word's own
+/// closing pair reopens its scope before the space, so the space is no split
+/// and the run stays one `frag_quoted` fragment — the **run-start** flag is
+/// what skips it (no `word_step`) at the run's end. This is
+/// [`run_starting_quoted_never_scores_a_keyword`] extended to a run with a
 /// word after the scope — that pin's one-word run never reaches a split and is
 /// therefore blind to `bare`.
 ///
@@ -778,24 +781,18 @@ fn a_quoted_run_start_keeps_a_later_word_out_of_the_score() {
     }
 }
 
-/// A run whose **first** byte is its scope's closing byte exits the scope: the `"`
-/// arm is not gated by `bare`, and the backtick arm is entered from
-/// `bare != in_backtick`. The scope ends, the space behind it splits, and the
-/// closer scores `-1` at the run's seed [`Place::Command`] — the split skips the
-/// quoted fragment without moving `place`.
+/// A run whose **first** byte is its scope's closing byte exits the scope: neither
+/// quote arm is gated by `bare` (task #519 made the `'` arm symmetric with the `"`
+/// arm), and the backtick arm is entered from `bare != in_backtick`. The scope
+/// ends, the space behind it splits, and the closer scores `-1` at the run's seed
+/// [`Place::Command`] — the split skips the quoted fragment without moving `place`.
 ///
-/// Kills the two state-freezing mutants: deleting the `!` of
-/// `quotes.double = !quotes.double` leaves the double quote at the caller's value
-/// (row 1 measured `0`), and `bare != in_backtick` → `bare == in_backtick` never
-/// enters or exits the backtick scope (row 2 measured `0`) — in both, no split ever
-/// happens and the run is one quoted fragment.
-///
-/// Row 3 documents the asymmetry the `depth_delta` doc states: a `'…'` span never
-/// closes here, because `bare` is false while the span is open and its closing `'`
-/// is gated by `bare`, so the run stays quoted and scores `0`. It is a contrast
-/// row, not a toggle kill — the measured `-1` it takes under the two `bare`
-/// conjunctions is the same split that [`a_quoted_run_start_keeps_a_later_word_out_of_the_score`]
-/// rows pin.
+/// Kills the three state-freezing mutants: deleting the `!` of each toggle leaves
+/// the quote at the caller's value — row 1 (`"`) and row 3 (`'`) each measure `0`
+/// under their mutant — and `bare != in_backtick` → `bare == in_backtick` never
+/// enters or exits the backtick scope (row 2 measured `0`) — in each, no split ever
+/// happens and the run is one quoted fragment. The two `bare` conjunctions stay
+/// pinned by [`a_quoted_run_start_keeps_a_later_word_out_of_the_score`].
 #[test]
 fn a_quoted_run_exits_its_scope_at_the_closer_byte() {
     let mid_span = Quotes {
@@ -829,8 +826,8 @@ fn a_quoted_run_exits_its_scope_at_the_closer_byte() {
             span_closer,
             mid_span,
             false,
-            0,
-            "a `'…'` span never closes, so its run stays quoted",
+            -1,
+            "the `'` closes the caller's span, like the other two",
         ),
     ] {
         assert_eq!(
@@ -849,25 +846,29 @@ fn a_quoted_run_exits_its_scope_at_the_closer_byte() {
     }
 }
 
-/// A `'…'` span opened **inside** a run swallows every closer behind it (the
-/// `depth_delta` doc: this scan never closes a span, since `bare` is false while it
-/// is open). Both rows start unquoted, so a split is possible in principle — the
-/// toggle is what prevents it. This is
-/// [`span_opened_in_a_run_keeps_the_closer_from_scoring`]'s pair: there the closer
-/// sits behind a command word (argument position, `0` under both builds), here it
-/// sits in command position, so the span is the only thing keeping it out.
+/// A `'…'` span opened **inside** a run closes at its closing `'` (task #519),
+/// so the quoted word splits at the space behind it: the word-start quote gate
+/// scores the word `0` — it is word data — and the closer written after it
+/// lands in argument position, so both rows score `0`. This is
+/// [`span_opened_in_a_run_keeps_the_closer_from_scoring`]'s pair: there the
+/// closer sits behind a command word, here the quoted word itself takes the
+/// command position (the run start) and the closer behind it scores `0`.
 ///
-/// Kills the dropped `!` of `quotes.single = !quotes.single` (the `'` toggle
-/// becomes the identity, so a span never opens): every space splits, each fragment
-/// before a split carries a quote byte and is skipped with `place` left at the seed,
-/// and the closer behind it scores — measured `-1` on both rows where these are
-/// `0`. The same rows measure `-1` under the two `bare`-conjunction mutants.
+/// The test used to kill the dropped `!` of `quotes.single = !quotes.single`
+/// (the toggle becoming the identity, so a span never opened). On the fixed
+/// machine that mutant answers `0` for both these rows as well — every
+/// fragment goes through the word gate and leaves `place` at argument position
+/// — and the toggle kill is now
+/// [`a_quoted_run_exits_its_scope_at_the_closer_byte`]'s (task #519).
 #[test]
 fn a_span_opened_in_a_run_swallows_the_closer_behind_it() {
     let opened: &[u8] = b"'a' fi";
     let around_closer: &[u8] = b"'a fi' done";
     for (raw, what) in [
-        (opened, "a span opened and left open swallows the closer"),
+        (
+            opened,
+            "the closed span's word is scored 0 by the word gate",
+        ),
         (
             around_closer,
             "the span around a closer swallows the word behind it",
