@@ -71,8 +71,9 @@ pub(crate) fn percent_subst(
     Ok(())
 }
 
-/// Write `name`'s fd value to `out` (export cache first, then the shell's
-/// fd variables, cached on first use); `false` when `name` is not set.
+/// Write `name`'s fd value to `out` (export cache first, then the shell's fd
+/// variables — the cache memoises **forked-child** dups, see the branch below);
+/// `false` when `name` is not set.
 fn write_fd(
     name: &ShortCStr,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
@@ -86,6 +87,18 @@ fn write_fd(
     let Some(src) = state.fds.get(name) else {
         return Ok(false);
     };
+    // The export `dup` belongs to the after-`fork`, pre-`exec` window (STYLE
+    // §5.6), so only a process that `fork()` produced creates one. In the process
+    // that owns the fd variables no `exec` follows the expansion, so a `dup` there
+    // would only leak — one descriptor per evaluation, toward `EMFILE`, CLOEXEC-
+    // clear so every later `exec` inherits it — and two evaluations of one word
+    // would render different text: render the fd variable's own number.
+    // `shell_pid` is the startup `getpid()` (`$$`, `state/ctor.rs`), so it differs
+    // from `getpid()` exactly in a forked child.
+    if state.shell_pid == sys::env::getpid() {
+        core::write!(out, "{}", src.fd).change_context(ResolveError::Never)?;
+        return Ok(true);
+    }
     let owned = src.fd.export().change_context(ResolveError::RefNotFound)?;
     core::write!(out, "{}", owned).change_context(ResolveError::Never)?;
     cache.insert(name.clone(), owned);

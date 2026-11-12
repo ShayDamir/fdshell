@@ -27,6 +27,27 @@ fn fdvar(fd: sys::LocalFd) -> FdVar {
     }
 }
 
+/// Run `f` in a forked child (the shape `wait/tests.rs` uses): the child exits 0
+/// on success or a sentinel on a panic — its own harness would otherwise catch
+/// the unwind and exit 0, masking the failure — and the parent re-panics on any
+/// nonzero status. `sys::exit` (raw `_exit`) so the child skips atexit handlers.
+fn in_child(f: impl FnOnce()) {
+    let (_, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
+    match pidfd_opt {
+        None => {
+            let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_ok();
+            sys::exit(if ok { 0 } else { 100 });
+        }
+        Some(pidfd) => {
+            let status = pidfd.wait_pidfd().unwrap();
+            match status {
+                sys::siginfo::WaitStatus::Exited(0) => {}
+                other => panic!("test child failed: {}", other.exit_code()),
+            }
+        }
+    }
+}
+
 fn is_(value: &'static core::ffi::CStr) -> ImportedStr {
     ImportedStr::shell(value.into())
 }
@@ -1846,6 +1867,7 @@ fn percent_double_percent_with_bound_fd_substitutes_the_second_name() {
     // `%o`). Task #252 owns the quoting gate that would fix it.
     let cell = ForkCell::new(ShellState::new());
     let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    let fd = dev_null.as_raw();
     cell.borrow_mut()
         .unwrap()
         .fds
@@ -1854,7 +1876,6 @@ fn percent_double_percent_with_bound_fd_substitutes_the_second_name() {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
     let (res, _) = substitute_arg(&arg, &[], &[], &mut cache, &cell).unwrap();
     let bytes = res.as_bytes().unwrap().to_vec();
-    let fd = cache.get(&ShortCStr::from(c"o")).unwrap().as_raw();
     assert_eq!(bytes, format!("%{fd}").as_bytes());
 }
 
@@ -1897,24 +1918,102 @@ fn percent_fd_cache_hit_returns_same_value() {
 
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
 
-    // First call — should lookup FD and cache it
+    // First call — renders the fd variable's own number (this is the process
+    // that owns the fd table, so no `dup` and nothing cached; task #503)
     let arg1 = ShortCStr::from(c"%testfd");
     let (res1, _) = substitute_arg(&arg1, &[], &[], &mut cache, &cell).unwrap();
 
-    // Second call — should hit cache and return same value
+    // Second call — same number, so the test's equality rows still hold
     let arg2 = ShortCStr::from(c"%testfd");
     let (res2, _) = substitute_arg(&arg2, &[], &[], &mut cache, &cell).unwrap();
     assert_eq!(res1.as_bytes().unwrap(), res2.as_bytes().unwrap());
 
-    // Third call with surrounding text — still hits cache
+    // Third call with surrounding text — the same number again
     let arg3 = ShortCStr::from(c"prefix-%testfd-suffix");
     let (res3, _) = substitute_arg(&arg3, &[], &[], &mut cache, &cell).unwrap();
     let fd_str = alloc::string::String::from_utf8_lossy(res1.as_bytes().unwrap());
     let expected = format!("prefix-{fd_str}-suffix");
     assert_eq!(res3.as_bytes().unwrap(), expected.as_bytes());
 
-    // Verify cache contains the exported FD
-    assert!(cache.contains_key(&ShortCStr::from(c"testfd")));
+    // The cache is the forked child's; in this process it stays empty because
+    // no export `dup` was created (the `dup` is what the leak rode on).
+    assert!(cache.is_empty());
+}
+
+/// In the process that owns the fd variables, `%name` renders the fd variable's
+/// **own** number and opens no descriptor (task #503): `dup`/`ExportedFd`
+/// belongs to the after-fork, pre-`exec` window (STYLE §5.6), so a parent-side
+/// `dup` leaked one descriptor per evaluation — unbounded toward `EMFILE` — and
+/// every later `exec` inherited it.
+#[test]
+fn the_shell_process_renders_the_fd_variable_s_own_number() {
+    let cell = ForkCell::new(ShellState::new());
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    let own = dev_null.as_raw();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"testfd"), fdvar(dev_null));
+
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let arg = ShortCStr::from(c"%testfd");
+    let (res, _) = substitute_arg(&arg, &[], &[], &mut cache, &cell).unwrap();
+
+    assert_eq!(res.as_bytes().unwrap(), format!("{own}").as_bytes());
+    assert!(cache.is_empty(), "no descriptor was created to memoise");
+}
+
+/// The bug's minimal test at the substitution layer: two evaluations of one
+/// `%fd` word — each with a fresh cache, as separate assignments have — must
+/// give byte-identical text (task #503).
+#[test]
+fn two_evaluations_of_one_percent_word_agree() {
+    let cell = ForkCell::new(ShellState::new());
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    let own = dev_null.as_raw();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"rd"), fdvar(dev_null));
+
+    let arg = ShortCStr::from(c"x %rd");
+    let mut cache_a: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let mut cache_b: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    let (a, _) = substitute_arg(&arg, &[], &[], &mut cache_a, &cell).unwrap();
+    let (b, _) = substitute_arg(&arg, &[], &[], &mut cache_b, &cell).unwrap();
+
+    assert_eq!(a.as_bytes().unwrap(), b.as_bytes().unwrap());
+    assert_eq!(a.as_bytes().unwrap(), format!("x {own}").as_bytes());
+    assert!(cache_a.is_empty() && cache_b.is_empty());
+}
+
+/// The other side of the new guard: a `fork()`ed child still renders a fresh
+/// `dup` and caches it — that number is what survives the child's `exec`
+/// (STYLE §5.6, README "Passing file descriptors to a subprocess"). The state is
+/// built in the **parent**, so the child's `state.shell_pid` is the parent's pid
+/// and it takes the forked branch (task #503).
+#[test]
+fn in_a_forked_child_the_name_still_names_a_dup() {
+    let cell = ForkCell::new(ShellState::new());
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    let own = dev_null.as_raw();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"testfd"), fdvar(dev_null));
+
+    in_child(|| {
+        let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+        let arg = ShortCStr::from(c"%testfd");
+        let (res, _) = substitute_arg(&arg, &[], &[], &mut cache, &cell).unwrap();
+        let text = core::str::from_utf8(res.as_bytes().unwrap()).unwrap();
+        assert_ne!(
+            text.parse::<i32>().unwrap(),
+            own,
+            "a forked child names a fresh dup, not the fd variable's own number"
+        );
+        assert!(cache.contains_key(&ShortCStr::from(c"testfd")));
+    });
 }
 
 #[test]

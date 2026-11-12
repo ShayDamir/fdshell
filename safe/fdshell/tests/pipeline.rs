@@ -1045,3 +1045,45 @@ fn a_line_initial_operator_behind_a_pipe_keeps_the_pipes_report() {
         );
     }
 }
+
+/// A shell-side evaluation of `%name` hands **no** descriptor to the next
+/// `exec`'s child (task #503): the export `dup` belongs to the after-fork,
+/// pre-`exec` window (STYLE §5.6), so in the shell itself the fd variable's own
+/// number is rendered — a CLOEXEC descriptor, so nothing crosses `exec`. The
+/// control is the same script without the `%` evaluation; the harness's
+/// inherited pipes are identical in both runs, so the fd-number listings are
+/// comparable (`self_pipe_targets`/`own_pipes` state why inode numbers are not).
+#[test]
+fn a_shell_side_fd_evaluation_is_not_inherited_by_an_exec() {
+    let dir = Scratch::new();
+    let control = run(
+        &dir,
+        "builtin pipe %rd>%rd %wr>%wr; sh -c 'ls -1 /proc/self/fd'",
+    );
+    let evaluated = run(
+        &dir,
+        "builtin pipe %rd>%rd %wr>%wr; v=\"look %rd\"; sh -c 'ls -1 /proc/self/fd'",
+    );
+    assert_eq!(
+        control.status.code(),
+        Some(0),
+        "stderr={:?}",
+        control.stderr
+    );
+    assert_eq!(
+        evaluated.status.code(),
+        Some(0),
+        "stderr={:?}",
+        evaluated.stderr
+    );
+    let control_listing = str::from_utf8(&control.stdout).unwrap().to_string();
+    let listing = str::from_utf8(&evaluated.stdout).unwrap().to_string();
+    assert!(
+        control_listing.contains("1\n") && control_listing.contains("2\n"),
+        "the control child listed no captured pipes: {control_listing:?}"
+    );
+    assert_eq!(
+        listing, control_listing,
+        "the `%fd` evaluation handed an extra descriptor to the exec'd child"
+    );
+}

@@ -74,6 +74,17 @@ Redirections are applied with `dup2()` between `fork()` and `exec()`;
 arguments are substituted with the number returned by `dup()` in the same
 window.
 
+Both the `dup()` and the `dup2()` run in the **forked child**, and that window is
+their whole purpose: the descriptor they create is not close-on-exec, so it
+survives the child's `exec()` and the child owns it. Where no `fork()` precedes
+the expansion there is nothing to hand over, so in the shell process itself —
+assignments, `for`/`case` words, `set --`, heredocs, here-strings, `local`, and
+`exec`/`become`, which `exec()`s without a `fork()` — `%name` expands to the fd
+variable's **own** number and no descriptor is created: two evaluations of one
+word render the same text, the shell's fd table does not grow, and a command that
+is handed such a number as an argument receives the number only — the fd
+variable's own descriptor is close-on-exec and does not cross an `exec()`.
+
 ### Receiving file descriptors from a subprocess
 
 fdshell creates an anonymous UNIX socket for each child, passed through the

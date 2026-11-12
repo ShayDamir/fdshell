@@ -188,3 +188,36 @@ fn dup_var_redirect_missing_var_is_actionable() {
     assert_ne!(code, 0);
     assert!(err.contains("fd variable"), "stderr={err:?}");
 }
+
+/// `exec` replaces the shell **without** a fork, so the fd variable's number it
+/// carries names the shell's own (CLOEXEC) descriptor and the exec'd image keeps
+/// **no** descriptor for it (task #503, LESSONS: "An export dup is only ever
+/// created in a forked child"): the export `dup` is the after-fork, pre-`exec`
+/// window's, so the number the shell renders for `v="%rd"` — the report's minimal
+/// surface — is the number `exec` passes on, and nothing is handed over. The
+/// control is the same script with a plain word: identical fd listing.
+#[test]
+fn exec_hands_over_no_descriptor_for_a_shell_side_fd_number() {
+    let (rendered, err, code) = run("builtin pipe %rd>%rd %wr>%wr; v=\"%rd\"; echo \"$v\"");
+    assert_eq!((code, err.as_str()), (0, ""), "stdout={rendered:?}");
+    let number = rendered.trim_end().to_string();
+
+    let script = "builtin pipe %rd>%rd %wr>%wr; v=\"%s\"; \
+                  exec sh -c 'echo ARG=[$0]; ls -1 /proc/self/fd' \"$v\"";
+    let (out, err, code) = run(&script.replace("%s", "%rd"));
+    assert_eq!(code, 0, "stderr={err}");
+    let (control, err, code) = run(&script.replace("%s", "x"));
+    assert_eq!((code, err.as_str()), (0, ""), "stdout={control:?}");
+
+    let mut lines = out.lines();
+    let mut control_lines = control.lines();
+    assert_eq!(lines.next(), Some(format!("ARG=[{number}]").as_str()));
+    assert_eq!(control_lines.next(), Some("ARG=[x]"));
+    let listing: Vec<&str> = lines.collect();
+    assert!(!listing.is_empty(), "the exec'd image listed nothing");
+    assert_eq!(
+        listing,
+        control_lines.collect::<Vec<&str>>(),
+        "the exec'd image gained a descriptor"
+    );
+}

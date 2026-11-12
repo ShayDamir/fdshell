@@ -7616,3 +7616,45 @@ and the owner-named boundaries (the `;`-byte family pinned at its owners' values
 — #300/#415/#423/#424 — #367's report, #496/#524's span gate, #492's region and
 merge rows; the REPL keeps its own completeness pins). It stays this way because
 a condition is **never re-scanned** (LESSONS: "A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)") — bash's reading would need a second split-time validator in the run layer, which that entry refuses — while the newline **behind** an operator is the scan's alone (LESSONS: "A `;` token is a newline in disguise: the body-slice rule must read the token's byte (task #355)"), which the verbatim slice simply inherits.
+
+## An export dup is only ever created in a forked child (task #503)
+
+`%name` renders the fd variable's **own** number in the process that owns the fd
+table; the `dup` into `ExportedFd` belongs to the after-`fork`, pre-`exec` window
+(STYLE §5.6). The guard is process identity: `state.shell_pid` is the startup
+`getpid()` (`$$`, `state/ctor.rs`), so it equals `getpid()` exactly in the process
+that built the state — the shell — and a `fork()`ed child takes the `dup` branch.
+POSIX_COMPATIBILITY.md's `%`-namespace row already documented the answer
+("`%name` expands to the number of the descriptor bound to `name`"); the code
+matches it now.
+
+Populating the export cache **in the shell** was the bug. `dup` does not inherit
+`FD_CLOEXEC`, so a parent-side dup was CLOEXEC-clear — exactly what `ExportedFd`
+means — and every later `exec` inherited it, so an unrelated subprocess gained
+read/write access to a shell-private pipe (captured output, SCM_RIGHTS traffic).
+Nothing closed the dup either: the per-call cache's drop does not close an
+`ExportedFd`, so each evaluation leaked one descriptor, unbounded toward `EMFILE`
+(4000 assignments drove the numbers from 4 to 4005), and two evaluations of one
+word rendered different text — `a="x %rd"` then `b="x %rd"` answered `x 4` and
+`x 6`. Every parent-side surface leaked: assignments, `for`/`case` words,
+`set --`, heredoc bodies, here-strings, function `local`, `eval`, `source`, word 0
+and the word-list paths. The forked paths (`builtin`-call args with a redirection,
+`$(…)` args) are the design and are unchanged.
+
+Two consequences are user-visible. A rendered number now names the fd
+**variable's** descriptor, so `unset %name` invalidates a number printed earlier —
+the leak used to keep it alive. And `exec`/`become` replace the shell **without** a
+fork, so they hand over no descriptor: the word they carry is the variable's own
+number, that descriptor is CLOEXEC, and the exec'd image keeps nothing (the pre-fix
+child gained `4 -> pipe:[…]`); README "Passing file descriptors to a subprocess"
+states the window rule.
+
+Pins: `substitute/tests.rs::the_shell_process_renders_the_fd_variable_s_own_number`,
+`substitute/tests.rs::two_evaluations_of_one_percent_word_agree`,
+`substitute/tests.rs::in_a_forked_child_the_name_still_names_a_dup` (both sides of
+the guard — a test process is un-forked so it takes the shell-side branch, hence
+that pin builds its state in the parent and asserts in the child),
+`tests/run.rs::a_shell_side_percent_evaluation_opens_no_descriptor`,
+`tests/pipeline.rs::a_shell_side_fd_evaluation_is_not_inherited_by_an_exec`
+(compare fd-number listings, not inode numbers), and
+`tests/fddup.rs::exec_hands_over_no_descriptor_for_a_shell_side_fd_number`.

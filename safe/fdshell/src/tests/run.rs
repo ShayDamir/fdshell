@@ -2145,6 +2145,31 @@ fn array_unset_closes_all_entries() {
     assert!(state.fds.contains_key(&ShortCStr::from(c"src")));
 }
 
+/// A shell-side evaluation of `%name` opens **no** descriptor (task #503): the
+/// export `dup` belongs to the after-fork, pre-`exec` window, so two evaluations
+/// of the same word render the fd variable's own number and leave the fd table
+/// untouched. Before the fix each evaluation leaked a fresh dup — the count grew
+/// by one per evaluation, toward `EMFILE`.
+#[test]
+fn a_shell_side_percent_evaluation_opens_no_descriptor() {
+    let cell = make_cell();
+    insert_fd_var(&cell, b"src");
+    let own = {
+        let state = borrow_state(&cell);
+        state.fds.get(&ShortCStr::from(c"src")).unwrap().fd.as_raw()
+    };
+    run_one(b"x=%src", &cell).unwrap();
+    let before = std::fs::read_dir("/proc/self/fd").unwrap().count();
+    run_one(b"y=%src", &cell).unwrap();
+    let after = std::fs::read_dir("/proc/self/fd").unwrap().count();
+    assert_eq!(after, before, "the second evaluation opened a descriptor");
+    let state = borrow_state(&cell);
+    let x = state.var_value(&ShortCStr::from(c"x")).unwrap();
+    let y = state.var_value(&ShortCStr::from(c"y")).unwrap();
+    assert_eq!(x, y);
+    assert_eq!(x.as_bytes().unwrap(), format!("{own}").as_bytes());
+}
+
 /// `unset NAME` (no `%`) takes the name out of **every** store that holds it:
 /// the string table, the export attribute, and the inherited `environ` row —
 /// the row task #287 recorded as "not expressible" (task #290). Dropping the
