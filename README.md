@@ -1268,10 +1268,14 @@ parity, the last the surviving divergence (pinned as measured). A missing `in` s
 `for i 1 2` is `expected 'in'`, bash rc 2.
 
 The `in word-list` of a `for` clause is **optional** (POSIX #2.9.1), and a clause
-without it — `for name; do …`, or the same clause with a newline before `do` —
-iterates the **positional parameters**: one word per parameter, verbatim (no IFS
+without it — `for name; do …`, `for name` + newline `do`, or the same clause with
+the `newline_list` slot left **empty**, `for name do …` — iterates the
+**positional parameters**: one word per parameter, verbatim (no IFS
 split, no pathname expansion), exactly the words `"$@"` expands to, and no word
-at all when none are set. The empty list right beside it is a **different** row —
+at all when none are set. The glued spelling is the only clause keyword that
+needs no terminator: `if`, `while` and `until` still need theirs in front of
+`then`/`do` (bash rc 2), and a **word** in that slot — `for name "do" …` — stays
+fdshell's parse error (bash rc 2). The empty list right beside it is a **different** row —
 `for name in; do` iterates zero times — so the parse keeps the two apart as a
 field of the block. A keyword written in the name slot is the name, and bash
 iterates the parameters there too (`for in; do`, `for fi; do`, `for then; do`);

@@ -296,3 +296,50 @@ fn a_needle_at_token_zero_has_no_predecessor() {
         None
     );
 }
+
+/// [`Term::SemiOrEmpty`] (task #521): a `for` clause **with no word list** may
+/// leave POSIX #2.9.1's `newline_list` empty, and bash runs `for i do …` at
+/// rc 0 — so the needle keyword standing in the **first slot behind `start`**
+/// needs no terminator. Both sides are pinned: the other two term sets still
+/// refuse that row (the variant is load-bearing), the `;` row still works under
+/// the variant, a keyword deeper than the first slot still needs its `;` (bash
+/// rc 2 — the arm is scoped to the first slot), and a quoted `"do"` word behind
+/// the clause word is no keyword. The needle **at** `start` is not behind the
+/// clause word either: the first slot is `start + 1`.
+#[test]
+fn semi_or_empty_admits_the_first_slot_behind_the_clause_word() {
+    let find = |line: &[u8], start: usize, needle: &[u8], term: Term| {
+        find_preceded_by(&tokenize(line).unwrap(), start, needle, line, term)
+    };
+    assert_eq!(
+        find(b"for i do :; done", 1, b"do", Term::SemiOrEmpty),
+        Some(2),
+        "the empty newline_list"
+    );
+    assert_eq!(
+        find(b"for i do :; done", 1, b"do", Term::Semi),
+        None,
+        "the variant is load-bearing"
+    );
+    assert_eq!(find(b"for i do :; done", 1, b"do", Term::SemiAmp), None);
+    assert_eq!(
+        find(b"for i 1 2; do :; done", 1, b"do", Term::SemiOrEmpty),
+        Some(5),
+        "the `;` row still works"
+    );
+    assert_eq!(
+        find(b"for i in a b do :; done", 2, b"do", Term::SemiOrEmpty),
+        None,
+        "not the first slot -> bash rc 2"
+    );
+    assert_eq!(
+        find(b"for i \"do\" do :; done", 1, b"do", Term::SemiOrEmpty),
+        None,
+        "a quoted word is no keyword"
+    );
+    assert_eq!(
+        find(b"for do :; done", 1, b"do", Term::SemiOrEmpty),
+        None,
+        "the needle at `start` is not in the first slot behind it"
+    );
+}

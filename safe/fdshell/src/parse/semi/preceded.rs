@@ -23,6 +23,11 @@ pub(crate) enum Term {
     /// `;` and the plain `&`: a compound list (`if`/`while`/`until` clause
     /// keywords, task #354).
     SemiAmp,
+    /// `;`, **or the first slot behind the clause word**: POSIX #2.9.1's
+    /// `newline_list` of a `for` clause with no word list is optional, and bash
+    /// accepts it empty (task #521: `for i do …` runs at rc 0). Only the keyword
+    /// standing at `start + 1` may skip the terminator.
+    SemiOrEmpty,
 }
 
 /// The closing keyword of every block form, as a possible **predecessor** of
@@ -111,6 +116,7 @@ fn precedes(tok: &Token, term: Term) -> bool {
     match term {
         Term::Semi => tok.span_word(b";"),
         Term::SemiAmp => tok.is_list_terminator(),
+        Term::SemiOrEmpty => tok.span_word(b";"),
     }
 }
 
@@ -127,7 +133,8 @@ pub(crate) fn find_preceded_by(
 ) -> Option<usize> {
     for (i, tok) in tokens.iter().enumerate().skip(start) {
         let preceded = i > 0 && tokens.get(i - 1).is_some_and(|tok| precedes(tok, term));
-        if keyword_word(tok, line, needle) && preceded {
+        let empty_list = matches!(term, Term::SemiOrEmpty) && i == start + 1;
+        if keyword_word(tok, line, needle) && (preceded || empty_list) {
             return Some(i);
         }
     }

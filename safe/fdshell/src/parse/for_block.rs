@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::for_block::/)'
+
 pub(crate) mod arith;
 mod head;
 mod words;
@@ -51,16 +53,25 @@ pub(crate) fn tokens_to_for(
     let (var, in_pos) = head::head(tokens, line)?;
     // The anchor the `do` search and the word list are measured from: the `in`
     // token index, or the name index when the clause has no `in` (task #416) —
-    // the slot behind it then holds nothing but the clause terminator, so
-    // `trim_semi` yields the empty list (the invariant `head.rs` guards).
+    // the slot behind it then holds nothing but the clause terminator (or the
+    // empty `newline_list`'s `do`, task #521), so `trim_semi` yields the empty
+    // list (the invariant `head.rs` guards).
     let anchor = in_pos.unwrap_or(1);
 
     // The `for` word list takes no list terminator **and** no operator word it
     // does not own: its `do` is searched with `;` alone, and an operator word in
     // the list is rejected below (`for i in 1 & do`, `for i in 1 & ; do`,
-    // `for i in 1 && ; do`, `for i in 1 | ; do` are bash syntax errors).
+    // `for i in 1 && ; do`, `for i in 1 | ; do` are bash syntax errors). Only
+    // the **wordless** clause may leave POSIX #2.9.1's `newline_list` empty
+    // before the `do` — bash runs `for i do …` at rc 0 (task #521) — so that
+    // form alone searches with `SemiOrEmpty`.
+    let term = if in_pos.is_some() {
+        Term::Semi
+    } else {
+        Term::SemiOrEmpty
+    };
     let do_idx =
-        find_preceded_by(tokens, anchor, b"do", line, Term::Semi).ok_or(ParseError::ExpectedDo)?;
+        find_preceded_by(tokens, anchor, b"do", line, term).ok_or(ParseError::ExpectedDo)?;
 
     // An operator word is the async/cond/pipeline operator, not a word: bash's word
     // list ends at it and its `do`-expectation fails there (task #360 lands the plain

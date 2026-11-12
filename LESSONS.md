@@ -6990,19 +6990,19 @@ POSIX_COMPATIBILITY's newline paragraph state the rule.
 
 POSIX #2.9.1 writes the `for` clause as `for name [in compound-list] [newline_list]
 do …`, and bash implements the brackets: a clause with no `in` iterates the
-**positional parameters** — one word per parameter, verbatim, exactly the words
-`"$@"` expands to, and **no word at all** when none are set (measured 2026-11-03
-against bash 5.3.9). The empty list written right next to it, `for name in; do`,
-iterates **zero** times, and that neighbour is what makes the rule: both rows reach
+**positional parameters** — one word per parameter, verbatim, the words
+`"$@"` expands to, and **no word at all** when none are set (measured against
+bash 5.3.9). The empty list written right next to it, `for name in; do`,
+iterates **zero** times — that neighbour is what makes the rule: both rows reach
 the run layer with an empty `words`, so the distinction cannot live in the word
 list. The parse carries it as a field of the block
 (`parse/for_block.rs::words_default_to_positional`, read by
 `for_run.rs::positional_words`), per LESSONS: "A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)".
 
-Synthesizing a `"$@"` word into the parse tree was rejected: it fabricates a word
-with a fabricated per-byte mask and span list — the invention #269/#321/#336 keep
-honest for words that *are* in the source text — for a word no script ever wrote,
-and every word-form pin would then assert data nobody typed. The run arm is one
+Synthesizing a `"$@"` word into the parse tree was rejected: it invents a word
+with an invented per-byte mask and span list — the invention #269/#321/#336 keep
+honest for words that *are* in the source text — for a word no script wrote,
+every word-form pin would then assert data nobody typed. The run arm is one
 clause: clone the deque **out** of the cell, so no borrow is held across the body
 run (LESSONS: "Never hold a ForkCell borrow across a recursive call that re-borrows").
 
@@ -7012,26 +7012,35 @@ gate-order doctrine): a clause with no `in` is `for name` only when the slot beh
 the name holds the clause terminator — the same span-gated `;` test
 `parse/semi/preceded.rs`'s `Term::Semi` arm makes — so the newline spelling before
 `do` is the same clause, and every **word** there (`for i 1 2`, `for i "in"`,
-`for i &`, a quoted `";"`) stays `ExpectedIn`. `for i do …`, with no terminator at
-all, is task #521's row.
+`for i &`, a quoted `";"`, a quoted `"do"`) stays `ExpectedIn`. Task #521's half: POSIX's `newline_list` behind a wordless clause's name is
+**optional** and bash accepts it **empty** (`for i do …` runs at rc 0), so the
+head's gate accepts the clause keyword `do` there and the caller searches with
+`Term::SemiOrEmpty`, which admits the needle **only** in the first slot behind the
+clause word. Each half keeps its own span/keyword gate; the arm
+is variant-gated, so the `if`/`while`/`until`/`case` rows of the shared search are
+untouched. A **second** `do` behind the empty slot is body data: the row parses and the run layer
+runs the `do` word (bash rc 2).
 
 The keyword-name family rides the scan's existing rule that nothing behind `for`
 scores (task #306): `for in;`, `for fi;`, `for do;`, `for then;` name the variable
-and iterate the parameters, at bash parity. The one member that does not is the
+and iterate the parameters at bash parity. The one member that does not is the
 block's **own** closer — the closing-keyword walk walks the token list from index 1,
-so a name written `done` scores as the closer and another module answers; both
-spellings are pinned at their current message and task #522 owns the decision.
+so a name written `done` scores as the closer and another module answers; all
+spellings are pinned at today's message, task #522 owns the decision.
 
 Pins: `parse/for_block/tests.rs::a_clause_without_in_has_no_words_and_the_default_flag`,
 `parse/for_block/tests.rs::a_word_where_the_optional_in_belongs_stays_the_heads_error`,
 `parse/for_block/tests.rs::the_in_form_still_distinguishes_an_empty_list`,
 `parse/for_block/tests.rs::the_closer_shaped_name_is_pinned_at_its_current_message`,
+`parse/for_block/tests.rs::a_second_do_behind_the_empty_newline_list_is_body_data`,
+`parse/semi/preceded/tests.rs::semi_or_empty_admits_the_first_slot_behind_the_clause_word`,
+`parse/for_block/tests.rs::an_operator_shaped_name_of_a_wordless_clause_stays_the_name`,
 `for_run/tests.rs::a_for_clause_without_in_takes_the_positional_parameters` and its
 four neighbours (`for_run/tests.rs::an_empty_in_list_still_iterates_zero_times` is
-the flag's `false` side and the mutation killer for a flag flipped either way), and
+the flag's `false` side and the kill for a flipped flag), and
 `tests/loops.rs::for_clause_without_in_iterates_the_positional_parameters` with
 `tests/loops.rs::the_default_for_list_is_quoted_dollar_at`. README
-"Conditionals and loops" states the rule for users.
+"Conditionals and loops" states the rule.
 
 ## Data-driven descents ride one shared depth cap (`depth.rs`)
 

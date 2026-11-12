@@ -2573,7 +2573,10 @@ fn c_style_for_a_brace_body_on_the_next_line_is_a_divergence() {
 /// clause without it as the positional parameters — the same words `"$@"` expands
 /// to. Measured 2026-11-03 against bash 5.3.9 and this build: nothing printed with
 /// no positionals (the empty deque is **no word**), `[a] [b]` with two, and the
-/// newline spelling of the terminator is the same clause. `for in; do`, `for fi;`,
+/// newline spelling of the terminator is the same clause — as is the glued `do`
+/// spelling with the `newline_list` left **empty** (task #521: `for i do …` runs at
+/// rc 0, one row per parameter, a pipeline body included, and zero iterations
+/// through no positionals). `for in; do`, `for fi;`,
 /// `for do;` and `for then;` are keyword names in the **name** slot — bash reads
 /// them as the name and iterates the parameters (the scan never scores a word
 /// behind `for`); the family's `done` member is the block's own closer and is
@@ -2609,6 +2612,19 @@ fn for_clause_without_in_iterates_the_positional_parameters() {
             "[a]\n",
         ),
         ("set -- a b; for i; do :; done; echo rc=$?", "rc=0\n"),
+        (
+            "set -- a; for i do printf \"[%s]\\n\" \"$i\"; done",
+            "[a]\n",
+        ),
+        (
+            "set -- a b; for i do printf \"[%s]\\n\" \"$i\"; done",
+            "[a]\n[b]\n",
+        ),
+        ("set -- ; for i do echo a; done; echo rc=$?", "rc=0\n"),
+        (
+            "set -- a; for i do printf \"[%s]\\n\" \"$i\" | cat; done",
+            "[a]\n",
+        ),
     ] {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
