@@ -1,3 +1,5 @@
+// mutants: -C --test -C set_cmd -- -E 'binary(set_cmd)'
+
 //! Bare `set`: `$1..` (raw values) followed by `NAME=value` lines for all
 //! string variables and exports, sorted by name. bash (measured 5.3.9) lists
 //! only variables and functions, and no positional parameters at all —
@@ -21,13 +23,6 @@ pub fn list_vars(cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
         out.push(b'\n');
     }
     let mut names: Vec<&ShortCStr> = state.strings.keys().collect();
-    let ifs: ShortCStr = c"IFS".into();
-    // The listed value is the live split set. The startup seed normally puts
-    // `IFS` in `strings`, so this push is reached only once the name is unbound
-    // — after `unset IFS`, where bash lists nothing (task #511).
-    if !names.iter().any(|n| n.eq_bytes(b"IFS")) {
-        names.push(&ifs);
-    }
     for name in state.exports.keys() {
         let bytes = name.as_bytes().change_context(CmdError::Resolve)?;
         if !names.iter().any(|n| n.eq_bytes(bytes)) {
@@ -36,17 +31,13 @@ pub fn list_vars(cell: &ForkCell<ShellState>) -> Result<(), Report<CmdError>> {
     }
     super::sort_by_bytes(&mut names);
     for name in names {
-        let value = if name.eq_bytes(b"IFS") {
-            state.ifs.clone()
-        } else {
-            state
-                .strings
-                .get(name)
-                .or_else(|| state.exports.get(name))
-                .ok_or(CmdError::Never)?
-                .value
-                .clone()
-        };
+        let value = state
+            .strings
+            .get(name)
+            .or_else(|| state.exports.get(name))
+            .ok_or(CmdError::Never)?
+            .value
+            .clone();
         out.extend_from_slice(name.as_bytes().change_context(CmdError::Resolve)?);
         out.push(b'=');
         out.extend_from_slice(value.as_bytes().change_context(CmdError::Resolve)?);

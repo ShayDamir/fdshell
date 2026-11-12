@@ -77,6 +77,18 @@ fn set_lists_ifs_exactly_once() {
     let (out, err, code) = run("IFS=z; set");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out.lines().collect::<Vec<_>>(), ["IFS=z", "_="]);
+    // Unbound: listed **zero** times. The startup seed made the general store
+    // path the whole listing, so the unbound state lists nothing (task #511) —
+    // bash 5.3.9 measures the same (measured 2026-11-12 on this branch:
+    // `env -u IFS bash -c 'unset IFS; set'` prints no `IFS=` row and the `_`
+    // row `_=IFS`, the tracker left by the `unset` command).
+    let (out, err, code) = run("unset IFS; set");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "_=IFS\n", "bash measures the same");
+    assert!(
+        !out.lines().any(|l| l.starts_with("IFS=")),
+        "stdout={out:?}"
+    );
 }
 
 #[test]

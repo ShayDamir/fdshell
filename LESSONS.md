@@ -7658,3 +7658,32 @@ that pin builds its state in the parent and asserts in the child),
 `tests/pipeline.rs::a_shell_side_fd_evaluation_is_not_inherited_by_an_exec`
 (compare fd-number listings, not inode numbers), and
 `tests/fddup.rs::exec_hands_over_no_descriptor_for_a_shell_side_fd_number`.
+
+## A listing reads the store that owns the value; a sync mirror must not resurrect a name (task #511)
+
+`set`'s variable listing reads `state.strings` then `state.exports` — the stores
+that **own** the values — and a name absent from both is not listed, as bash
+lists only bound names (measured 5.3.9: `unset IFS; set` prints no `IFS=` row).
+`state.ifs` is the **split-set field**, kept in sync by `set_var`
+(`state/setters.rs`) so field splitting keeps the default set after `unset IFS`;
+it is one mechanism's state, not a store entry, and must not feed a
+name-answering surface (listing, expansion, child environment) on its own.
+Cross-ref LESSONS: "Scoped `NAME=value cmd` assigns must apply" and
+LESSONS: "A save/restore frame must carry `strings`, `exports` and `IFS` together".
+
+Before task #388's startup seed, `IFS` had no store entry, so `set_list/vars.rs`
+had an injection: push the name when no store lists it and print it from the
+field. The seed made that injection reachable **only** at the unbound state —
+where it answered the other way than bash — while the startup row stayed the
+accepted formatting divergence (bash `IFS=$' \t\n'`, fdshell the raw bytes).
+Deleting the injection and the value special-case gives bash's answer on both
+rows: while the name is bound, `set_var`, the prefix restore and the local frame
+keep stores and field identical, and `unset_var` removes the name from **every**
+store, so nothing is left to list.
+
+Pins: `tests/set_cmd.rs::set_lists_ifs_exactly_once` (bound → once, unbound →
+zero) with the file's exact-output rows (sorted order, exports, dedup); the
+field's own meaning after `unset IFS` stays pinned by
+`tests/unset.rs::unset_ifs_restores_the_default_split_set` and
+`tests/ifs_startup.rs::unset_ifs_still_unbinds_the_name` — splitting still uses
+the default, only the **name** is gone.
