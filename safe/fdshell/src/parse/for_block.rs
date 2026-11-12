@@ -70,8 +70,16 @@ pub(crate) fn tokens_to_for(
     } else {
         Term::SemiOrEmpty
     };
-    let do_idx =
-        find_preceded_by(tokens, anchor, b"do", line, term).ok_or(ParseError::ExpectedDo)?;
+    // The seed pair of the shared clause walk, the same pair `up_to_closing`
+    // below gets (tasks #556/#558): the `for` builds on the word-list rule, so a
+    // closer-shaped word of the list is word data, and a `do` written inside a
+    // nested block belongs to that block. The search runs on the **raw** token
+    // list, so the seed is also what keeps a needle past this block's `done`
+    // (here-doc body data, the tail of the statement) out of the answer.
+    let seed = Some(Closer::Done);
+    let list = List::Words;
+    let do_idx = find_preceded_by(tokens, anchor, b"do", line, term, seed, list)
+        .ok_or(ParseError::ExpectedDo)?;
 
     // An operator word is the async/cond/pipeline operator, not a word: bash's word
     // list ends at it and its `do`-expectation fails there (task #360 lands the plain

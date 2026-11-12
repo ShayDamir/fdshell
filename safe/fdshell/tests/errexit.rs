@@ -580,10 +580,12 @@ fn the_gate_spans_a_joined_list() {
 /// words", "part of the command list immediately following a `while` or `until`
 /// keyword") covers **everything executed inside** the test, so it reaches a compound
 /// written there: the condition exemption is the execution-context flag (task #348's
-/// mechanism) wrapped around the condition's run (task #491). Rows 1-5 and 7 are bash's
-/// values, measured 2026-11-11; the last row is fdshell's measured value with bash's
-/// beside it — a `for` block as a loop condition is fdshell's parse error, not an
-/// errexit row, and its owner is task **#556**.
+/// mechanism) wrapped around the condition's run (task #491). Every row is bash's
+/// value, measured 2026-11-11/12. The last one is a `for` block in a **loop**
+/// condition: it only parses since the clause-keyword search answers the keyword at
+/// the builder's own level — the nested `for`'s `do` belongs to the nested block
+/// (`parse/semi/preceded.rs`, chore #544 / task **#556`) — and the row then needs the
+/// exemption like every other compound written in a condition.
 #[test]
 fn the_condition_exemption_reaches_a_compound_written_in_it() {
     assert_rows(&[
@@ -617,12 +619,12 @@ fn the_condition_exemption_reaches_a_compound_written_in_it() {
             "rc=0\n",
             0,
         ),
-        // fdshell (pinned, owner #556): parse error `expected 'do'`, rc 1. bash:
-        // `rc=0`, rc 0. Not an errexit row — it stops fdshell with `set -e` removed too.
+        // The `for` block in a loop condition runs as the test, so its failing
+        // `false` is exempt and the loop exits 0 (bash, re-measured 2026-11-12).
         (
             "set -e; while for x in 1; do false; done; do :; done; echo rc=$?",
-            "",
-            1,
+            "rc=0\n",
+            0,
         ),
     ]);
 }

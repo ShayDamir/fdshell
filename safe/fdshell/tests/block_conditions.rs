@@ -179,6 +179,99 @@ fn bash_parity_forms_stay_green() {
     }
 }
 
+/// A **block** written in a condition slot is the test itself. The clause-keyword
+/// search must then answer the builder's own keyword and skip the one written inside
+/// the nested block (`parse/semi/preceded.rs` rides the shared walk for exactly this;
+/// chore #544 kills tasks **#558** and **#556**, whose rows are here). Before the
+/// change each row was a parse error — `missing 'fi'` for the `if` family,
+/// `expected 'do'` for the loop family — so every row below is the change's own
+/// regression pin. Measured against bash 5.3.9 on 2026-11-12 (stdin `/dev/null`),
+/// fdshell answers the same; the `for` word list ends with `false` and the loop
+/// therefore runs zero iterations, which is bash's `tail` at rc 0.
+#[test]
+fn a_block_written_in_a_condition_slot_is_the_test() {
+    let cases: [(&str, &str); 6] = [
+        // #558: a nested `if` in an `if`/`elif` condition slot. The inner block's
+        // own status is the condition's: `true` takes the outer `then`, and so does
+        // `false` with no arm run (bash's status 0).
+        (
+            "if if true; then :; fi; then echo y; else echo n; fi",
+            "y\n",
+        ),
+        (
+            "if if false; then :; fi; then echo y; else echo n; fi",
+            "y\n",
+        ),
+        (
+            "if false; then :; elif if true; then :; fi; then echo y; else echo n; fi",
+            "y\n",
+        ),
+        // #556: a `for` (word list, arithmetic) in a loop condition slot. The nested
+        // `for`'s `do` is the nested block's; the loop's own is the one it follows.
+        (
+            "while for x in 1; do false; done; do :; break; done; echo tail",
+            "tail\n",
+        ),
+        (
+            "until for x in 1; do false; done; do :; break; done; echo tail",
+            "tail\n",
+        ),
+        (
+            "while for ((i=0;i<1;i++)); do false; done; do :; break; done; echo tail",
+            "tail\n",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "`{script}` stderr: {err}");
+    }
+}
+
+/// The cross-table's other cells, measured both sides (bash 5.3.9, 2026-11-12): a
+/// nested block in a condition slot that does **not** carry the parent's needle
+/// keyword — a `for`/`{ …; }`/`case`/`while`/`until` in an `if` condition (no `then`
+/// inside), an `if`/`case`/`{ …; }` in a loop condition (no `do` inside). A flat scan
+/// happened to be right there and the depth arm leaves all of them alone; they are the
+/// control side of the change, and each is a parity row of the two killed tasks'
+/// tables.
+#[test]
+fn a_nested_block_that_does_not_carry_the_needle_stays_at_parity() {
+    let cases: [(&str, &str); 8] = [
+        // A loop condition: none of these nested blocks carries a `do`.
+        ("while { false; }; do :; break; done; echo tail", "tail\n"),
+        (
+            "while case 1 in 1) false;; esac; do :; break; done; echo tail",
+            "tail\n",
+        ),
+        (
+            "while if true; then false; fi; do echo body; break; done; echo tail",
+            "tail\n",
+        ),
+        // An `if` condition: none of these carries a `then`.
+        (
+            "if for x in 1; do false; done; then :; else echo y; fi",
+            "y\n",
+        ),
+        ("if { false; }; then :; else echo y; fi", "y\n"),
+        (
+            "if case 1 in 1) false;; esac; then :; else echo y; fi",
+            "y\n",
+        ),
+        (
+            "if while false; do break; done; then echo y; else echo n; fi",
+            "y\n",
+        ),
+        (
+            "if until false; do break; done; then echo y; else echo n; fi",
+            "y\n",
+        ),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "`{script}` stderr: {err}");
+    }
+}
+
 /// The shapes the rule must **not** reject: a cond-list with an empty **last
 /// part** is a non-empty condition — `while : &` stays in fdshell's documented
 /// leniency family (bash stops at rc 2 there). A `for` word list and the arith

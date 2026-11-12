@@ -4512,6 +4512,28 @@ closer's *kind*. All measured against bash.
     `parse/case_clause/stray/tests.rs::the_window_test_reads_the_region_it_now_spans`,
     `tests/case.rs::a_nested_block_in_an_arm_keeps_its_semi_semi`,
     `parse/semi/closing/tests.rs::closing_index_walks_the_block_depth`.
+11. **A clause keyword is the builder's own *at the builder's level*** (chore
+    #544, kills #556/#558): the "what may precede a clause keyword" search
+    (`parse/semi/preceded.rs::find_preceded_by`) is a consumer of that same walk,
+    with the `;;` walk's stop test — `depth == seed` — and the seed pair each
+    caller already feeds its own `up_to_closing` (`for` keeps `List::Words`, the
+    others `List::Plain`). A needle keyword written *inside* a nested block belongs
+    to that block, so the builder takes the outer one: `if if true; then :; fi;
+    then echo y; fi` answers the **outer** `then`, `while for x in 1; do false;
+    done; do :; break; done` the loop's own `do`. The cross-table has one broken
+    cell per parent and it is the cell where the nested child **carries the
+    parent's needle** — a nested `if` inside an `if`/`elif` condition (`then`), a
+    nested `for` inside a loop condition (`do`); every other pair was parity, which
+    is why the flat scan it replaces looked right. Past the caller's closer the walk
+    is back at the top level, so the **seed** half is what refuses a needle written
+    there, and `for_block` — which searches the raw list *before* its
+    `up_to_closing` — is the caller that reads it.
+    Pins `parse/semi/preceded/tests.rs::a_needle_inside_a_nested_block_belongs_to_that_block`
+    (both kills, their flat controls and the seed pair on one input),
+    `tests/block_conditions.rs::a_block_written_in_a_condition_slot_is_the_test`
+    (the killed rows at bash's values) and
+    `tests/block_conditions.rs::a_nested_block_that_does_not_carry_the_needle_stays_at_parity`
+    (the parity cells).
 
 Pins: `cond/boundary/block/tests.rs::in_block_words_follow_the_clause_rule`,
 

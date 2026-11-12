@@ -4157,7 +4157,15 @@ fn find_preceded_by_semi_start_zero_no_match() {
         },
     ];
     assert_eq!(
-        super::semi::find_preceded_by(&tokens, 0, b"echo", line, super::semi::Term::Semi),
+        super::semi::find_preceded_by(
+            &tokens,
+            0,
+            b"echo",
+            line,
+            super::semi::Term::Semi,
+            None,
+            super::semi::List::Plain
+        ),
         None
     );
 }
@@ -4200,7 +4208,15 @@ fn find_preceded_by_semi_skips_to_start() {
         },
     ];
     assert_eq!(
-        super::semi::find_preceded_by(&tokens, 2, b"done", line, super::semi::Term::Semi),
+        super::semi::find_preceded_by(
+            &tokens,
+            2,
+            b"done",
+            line,
+            super::semi::Term::Semi,
+            None,
+            super::semi::List::Plain
+        ),
         Some(3)
     );
 }

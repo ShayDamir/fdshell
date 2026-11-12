@@ -41,11 +41,18 @@ pub(crate) fn tokens_to_if(
     let redirects =
         crate::parse::block_tail::redirects(b"fi", tokens.get(fi_idx..).unwrap_or(&[]), text)?;
 
+    // The seed pair of the shared clause walk (tasks #556/#558): the closer of
+    // the block this builder is inside, and its word-list rule. A clause keyword
+    // written inside a nested block belongs to that block, so all four searches
+    // below answer only the keyword at the builder's own level.
+    let seed = Some(Closer::Fi);
+    let list = List::Plain;
+
     // An `if`/`elif` condition is a compound list: `then` may sit behind the
     // plain `&` as behind a `;` (task #354), and that `&` is the condition's
     // background-job flag, computed by `condition::condition` (task #356).
-    let first_then =
-        find_preceded_by(closed, 1, b"then", line, Term::SemiAmp).ok_or(ParseError::MissingThen)?;
+    let first_then = find_preceded_by(closed, 1, b"then", line, Term::SemiAmp, seed, list)
+        .ok_or(ParseError::MissingThen)?;
 
     let cond = condition(closed, text, first_then, line)?;
 
@@ -59,13 +66,15 @@ pub(crate) fn tokens_to_if(
 
     let mut elif_pairs: Vec<(usize, usize)> = Vec::new();
     let mut pos = first_then;
-    while let Some(elif_idx) = find_preceded_by(closed, pos, b"elif", line, Term::SemiAmp) {
-        let then_idx = find_preceded_by(closed, elif_idx, b"then", line, Term::SemiAmp)
+    while let Some(elif_idx) =
+        find_preceded_by(closed, pos, b"elif", line, Term::SemiAmp, seed, list)
+    {
+        let then_idx = find_preceded_by(closed, elif_idx, b"then", line, Term::SemiAmp, seed, list)
             .ok_or(ParseError::MissingThenAfterElif)?;
         elif_pairs.push((elif_idx, then_idx));
         pos = then_idx;
     }
-    let else_idx = find_preceded_by(closed, pos, b"else", line, Term::SemiAmp);
+    let else_idx = find_preceded_by(closed, pos, b"else", line, Term::SemiAmp, seed, list);
 
     let first_end = match elif_pairs.first() {
         Some(&(ei, _)) => ei,

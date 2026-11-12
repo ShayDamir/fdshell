@@ -12,6 +12,8 @@
 
 use super::Token;
 use crate::error::parse::ParseError;
+use crate::keywords::Closer;
+use crate::parse::semi::{List, walk_until};
 use crate::parse::word_quoted::keyword_word;
 use error_stack::{Report, ensure};
 
@@ -124,21 +126,35 @@ fn precedes(tok: &Token, term: Term) -> bool {
 /// `start`: `needle` is a keyword only when it carries no quote byte
 /// ([`keyword_word`], task #247), so a quoted `then`/`do`/`else` is a command
 /// word and the block reports its own missing keyword (bash: a syntax error).
+///
+/// The search rides the shared [`walk_until`] — [`super::semisemi::first_stray`]
+/// is its twin — so it answers `needle` **at the caller's own level** only: a
+/// clause keyword written inside a nested block belongs to that block, and the
+/// builder takes the outer one (tasks #556/#558: `if if true; then :; fi; then …`
+/// answers the outer `then`, `while for x in 1; do false; done; do …` the outer
+/// `do`). `seed`/`list` are the walk's seed pair — the closer of the block the
+/// caller is already inside, and its word-list rule — so the walk starts at the
+/// depth the caller walks (`for` keeps [`List::Words`], the other callers
+/// [`List::Plain`]). `None` seeds the top level, where every flat input already
+/// sits; the depth arm moves nothing there.
 pub(crate) fn find_preceded_by(
     tokens: &[Token],
     start: usize,
     needle: &[u8],
     line: &[u8],
     term: Term,
+    seed: Option<Closer>,
+    list: List,
 ) -> Option<usize> {
-    for (i, tok) in tokens.iter().enumerate().skip(start) {
-        let preceded = i > 0 && tokens.get(i - 1).is_some_and(|tok| precedes(tok, term));
+    walk_until(tokens, line, seed, list, start, &|i, depth, walk_seed| {
+        let own_level = depth == walk_seed;
+        let is_needle = tokens
+            .get(i)
+            .is_some_and(|tok| keyword_word(tok, line, needle));
+        let preceded = i > 0 && tokens.get(i - 1).is_some_and(|prev| precedes(prev, term));
         let empty_list = matches!(term, Term::SemiOrEmpty) && i == start + 1;
-        if keyword_word(tok, line, needle) && (preceded || empty_list) {
-            return Some(i);
-        }
-    }
-    None
+        own_level && is_needle && (preceded || empty_list)
+    })
 }
 
 #[cfg(test)]

@@ -10,7 +10,15 @@ use alloc::string::ToString;
 #[test]
 fn preceded_by_semi_needs_an_unquoted_keyword_word() {
     let find = |line: &[u8], start: usize, needle: &[u8]| {
-        find_preceded_by(&tokenize(line).unwrap(), start, needle, line, Term::Semi)
+        find_preceded_by(
+            &tokenize(line).unwrap(),
+            start,
+            needle,
+            line,
+            Term::Semi,
+            None,
+            List::Plain,
+        )
     };
     assert_eq!(find(b"if true; then echo a; fi", 1, b"then"), Some(3));
     assert_eq!(find(b"if true; 'then' echo a; fi", 1, b"then"), None);
@@ -30,7 +38,15 @@ fn preceded_by_semi_needs_an_unquoted_keyword_word() {
 #[test]
 fn the_amp_is_a_list_terminator_for_a_compound_list_only() {
     let find = |line: &[u8], start: usize, needle: &[u8], term: Term| {
-        find_preceded_by(&tokenize(line).unwrap(), start, needle, line, term)
+        find_preceded_by(
+            &tokenize(line).unwrap(),
+            start,
+            needle,
+            line,
+            term,
+            None,
+            List::Plain,
+        )
     };
     assert_eq!(
         find(b"if true & then echo x; fi", 1, b"then", Term::SemiAmp),
@@ -81,7 +97,9 @@ fn a_quoted_clause_keyword_behind_the_amp_is_no_keyword() {
             1,
             b"then",
             b"if true & 'then' echo x; fi",
-            Term::SemiAmp
+            Term::SemiAmp,
+            None,
+            List::Plain,
         ),
         None
     );
@@ -219,7 +237,15 @@ fn ensure_before_closer_reports_the_predicate_failure() {
 #[test]
 fn a_quoted_terminator_word_terminates_no_list() {
     let find = |line: &[u8], term: Term| {
-        find_preceded_by(&tokenize(line).unwrap(), 1, b"then", line, term)
+        find_preceded_by(
+            &tokenize(line).unwrap(),
+            1,
+            b"then",
+            line,
+            term,
+            None,
+            List::Plain,
+        )
     };
     // The real terminator finds the keyword; the quoted words do not, in either
     // term set.
@@ -292,8 +318,125 @@ fn a_quoted_terminator_word_terminates_no_list() {
 fn a_needle_at_token_zero_has_no_predecessor() {
     let line = b"then x";
     assert_eq!(
-        find_preceded_by(&tokenize(line).unwrap(), 0, b"then", line, Term::Semi),
+        find_preceded_by(
+            &tokenize(line).unwrap(),
+            0,
+            b"then",
+            line,
+            Term::Semi,
+            None,
+            List::Plain
+        ),
         None
+    );
+}
+
+/// The depth arm of the shared walk (chore #544, kills #556/#558): a `needle`
+/// written **inside a nested block** belongs to that block, so the search answers
+/// only the keyword at its own level. Each row set is the parse-level twin of one
+/// kill — a nested `if` in an `if` condition (its `then` is the nested block's) and
+/// a `for` in a loop condition (its `do` is the nested block's) — with the row whose
+/// **only** needle is the nested one (the search finds nothing: the nested keyword
+/// is not this builder's), and a flat control whose answer the depth arm cannot
+/// move. Together the three shapes decide every direction of the depth test: the
+/// kill rows are what a flat scan gets wrong (it returns the inner keyword), and
+/// the flat controls are what the depth arm must leave alone. The last pair measures
+/// the **seed** half of the walk's seed pair on one input: past the caller's closer
+/// the walk is at the top level again, and only the builder's own seed refuses a
+/// needle there.
+#[test]
+fn a_needle_inside_a_nested_block_belongs_to_that_block() {
+    let find = |line: &[u8], start: usize, needle: &[u8], seed: Option<Closer>| {
+        find_preceded_by(
+            &tokenize(line).unwrap(),
+            start,
+            needle,
+            line,
+            Term::SemiAmp,
+            seed,
+            List::Plain,
+        )
+    };
+    // #558's kill: the inner `then` is the nested `if`'s; the builder's own is the
+    // answer (`if_block.rs` searches with its own closer, `Closer::Fi`).
+    assert_eq!(
+        find(
+            b"if if true; then :; fi; then echo y; fi",
+            1,
+            b"then",
+            Some(Closer::Fi)
+        ),
+        Some(9),
+        "the outer `then`, not the nested `if`'s"
+    );
+    assert_eq!(
+        find(b"if if true; then :; fi; fi", 1, b"then", Some(Closer::Fi)),
+        None,
+        "a search whose only needle is inside the nested block finds nothing"
+    );
+    assert_eq!(
+        find(b"if true; then echo y; fi", 1, b"then", Some(Closer::Fi)),
+        Some(3),
+        "flat control: the depth arm cannot move a top-level needle"
+    );
+    // #556's kill: the nested `for`'s `do` is its own; the loop's is the answer.
+    assert_eq!(
+        find(
+            b"while for x in 1; do false; done; do :; break; done",
+            1,
+            b"do",
+            Some(Closer::Done)
+        ),
+        Some(11),
+        "the loop's `do`, not the nested `for`'s"
+    );
+    assert_eq!(
+        find(
+            b"while for x in 1; do false; done; done",
+            1,
+            b"do",
+            Some(Closer::Done)
+        ),
+        None,
+        "a search whose only needle is inside the nested block finds nothing"
+    );
+    assert_eq!(
+        find(b"while :; do :; break; done", 1, b"do", Some(Closer::Done)),
+        Some(3),
+        "flat control: the depth arm cannot move a top-level needle"
+    );
+    // The seed half of the pair, measured on one input: `for_block` searches the
+    // **raw** token list (its search runs before its own `up_to_closing`), the one
+    // production window that reaches tokens past this block's `done`. There the walk
+    // is back at the top level, so the builder's own seed is what refuses a needle
+    // written past the closer; the top-level seed answers it. Both rows read the same
+    // needle, the same start and the same word-list rule — only the seed moves.
+    let past_the_closer = b"for x in 1; \"do\" :; done; do echo tail; done";
+    assert_eq!(
+        find_preceded_by(
+            &tokenize(past_the_closer).unwrap(),
+            2,
+            b"do",
+            past_the_closer,
+            Term::SemiAmp,
+            Some(Closer::Done),
+            List::Words,
+        ),
+        None,
+        "past the closer the walk is no longer at the builder's seed"
+    );
+    assert_eq!(
+        find_preceded_by(
+            &tokenize(past_the_closer).unwrap(),
+            2,
+            b"do",
+            past_the_closer,
+            Term::SemiAmp,
+            None,
+            List::Words,
+        ),
+        Some(10),
+        "the top-level seed answers the past-the-closer needle"
     );
 }
 
@@ -309,7 +452,15 @@ fn a_needle_at_token_zero_has_no_predecessor() {
 #[test]
 fn semi_or_empty_admits_the_first_slot_behind_the_clause_word() {
     let find = |line: &[u8], start: usize, needle: &[u8], term: Term| {
-        find_preceded_by(&tokenize(line).unwrap(), start, needle, line, term)
+        find_preceded_by(
+            &tokenize(line).unwrap(),
+            start,
+            needle,
+            line,
+            term,
+            None,
+            List::Plain,
+        )
     };
     assert_eq!(
         find(b"for i do :; done", 1, b"do", Term::SemiOrEmpty),

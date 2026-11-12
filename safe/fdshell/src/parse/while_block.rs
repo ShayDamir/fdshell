@@ -67,8 +67,14 @@ pub(crate) fn tokens_to_loop(
     // reachable index — a `>= 2` guard there can never fire (task #299 deleted
     // the dead one: it let `while ; do` through, LESSONS "redundant boundary
     // ±1"). The emptiness test is on the **trimmed** slice, below.
-    let do_idx =
-        find_preceded_by(closed, 1, b"do", line, Term::SemiAmp).ok_or(ParseError::ExpectedDo)?;
+    // The seed pair of the shared clause walk (tasks #556/#558): the closer of
+    // the loop this builder is inside, and its word-list rule. A `do` written
+    // inside a nested block — `while for x in 1; do false; done; do :; done` —
+    // belongs to that block, so the search answers the loop's own `do`.
+    let seed = Some(Closer::Done);
+    let list = List::Plain;
+    let do_idx = find_preceded_by(closed, 1, b"do", line, Term::SemiAmp, seed, list)
+        .ok_or(ParseError::ExpectedDo)?;
 
     let cond_slice = closed.get(1..do_idx).ok_or(ParseError::ExpectedDo)?;
     // An empty condition (`while ; do`, `while & do`, `until ; do`: bash rc 2)
