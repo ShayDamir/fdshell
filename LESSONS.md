@@ -5924,11 +5924,14 @@ renderer's, so both halves land. A statement whose own command or builtin runs t
 *that* status — bash's `local x=$(false)` and `export x=$(false)` rows stay 0.
 
 **An assignment statement never reaches `command_word::expand`**, so the per-command
-scratch reset needs a per-statement twin at the top of the statement dispatcher;
-without it the slot a bare assignment reads is stale from an earlier command and bash's
-`echo a $(false); x=1; echo rc=$?` → `rc=0` turns into 1 (the row is the reset's kill
-test). Pins: `tests/cmd_subst.rs::a_command_substitution_updates_the_exit_status` (the
-family, every row bash-measured), `cmd_subst/tests.rs::the_reap_records_the_substitution_status`,
+scratch reset needs a per-statement twin at the top of the statement dispatcher. Only a
+substitution the **parent** ran can leak into the next statement — an
+argument-position one is reaped by the child that launches the command, into the child's
+own copy of the state — so the reset's kill tests are the parent-side shapes:
+`x=$(false); y=1; echo rc=$?` → `rc=0` (both spellings) and the omitted-name arm's
+`$(false); x=1; echo rc=$?` → `rc=0`; delete the reset and both answer 1. Pins:
+`tests/cmd_subst.rs::a_command_substitution_updates_the_exit_status` (the family, every
+row bash-measured), `cmd_subst/tests.rs::the_reap_records_the_substitution_status`,
 `state/tests.rs::the_word_scratch_is_per_command`, `tests/last_arg.rs` (the `$_` half)
 and `src/tests/run.rs::the_substitution_scratch_is_per_statement`. The `&` row cannot
 move here — a backgrounded **assignment** runs foreground (owners **#352**, **#353**),

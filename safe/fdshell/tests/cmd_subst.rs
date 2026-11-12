@@ -534,8 +534,11 @@ fn the_omitted_command_name_reports_the_last_substitution_status() {
 /// (`cmd_subst::run_and_capture`, the one path both `$( … )` and `` ` … ` `` share)
 /// records the status, so the argument-position rows answer from it, and an
 /// assignment statement — which never reaches `command_word::expand` — answers from
-/// the slot its **own** expansion filled, hence the per-statement reset the
-/// `echo a $(false); x=1` and `false; x=1` rows pin.
+/// the slot its **own** expansion filled. Only a substitution the **parent** ran
+/// reaches that slot (an argument substitution is reaped by the child that launches
+/// the command), so the per-statement reset is pinned by the parent-side rows
+/// `x=$(false); y=1` and `$(false); x=1`; the `echo a $(false); x=1` and `false; x=1`
+/// rows are the parity half of the same rule.
 ///
 /// A statement whose own command (or builtin) runs takes that command's status, so
 /// the `local`/`export` rows stay 0; the `read before the substitution` row shows
@@ -570,6 +573,8 @@ fn a_command_substitution_updates_the_exit_status() {
         ("for i in 1; do x=$(false); done; echo rc=$?", "rc=1\n", 0),
         ("false; x=1; echo rc=$?", "rc=0\n", 0),
         ("echo a $(false); x=1; echo rc=$?", "a\nrc=0\n", 0),
+        ("x=$(false); y=1; echo rc=$?", "rc=0\n", 0),
+        ("$(false); x=1; echo rc=$?", "rc=0\n", 0),
         ("false; a=(x); echo rc=$?", "rc=0\n", 0),
         ("f(){ local x=$(false); echo rc=$?; }; f", "rc=0\n", 0),
         ("export x=$(false); echo rc=$?", "rc=0\n", 0),

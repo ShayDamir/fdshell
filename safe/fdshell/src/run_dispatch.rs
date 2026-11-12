@@ -21,8 +21,9 @@ pub(crate) fn run_simple(
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     // The per-statement twin of `command_word::expand`'s scratch reset: an
     // assignment statement never reaches that pass, so the slot it reads must be
-    // the one its **own** expansion filled (task #533 — bash answers 0 for
-    // `echo a $(false); x=1; echo rc=$?`).
+    // the one its **own** expansion filled — 0 when it performed none (task #533,
+    // bash's `x=$(false); y=1; echo rc=$?` → `rc=0`). An argument substitution runs
+    // in the child that launches the command, so only a parent-side one can leak.
     cell.borrow_mut()
         .change_context(CmdError::Never)?
         .last_substitution = None;

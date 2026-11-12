@@ -700,18 +700,24 @@ fn a_failing_substitution_in_an_array_assignment_decides_the_status() {
     ));
 }
 
-/// The per-statement reset of the scratch slot is load-bearing here: the
-/// substitution ran for the **previous** statement, so this assignment performed
-/// none and completes with 0 (bash's `echo a $(false); x=1; echo rc=$?` → `rc=0`).
-/// Deleting the reset turns this row into `rc=1`.
+/// The per-statement reset of the scratch slot is load-bearing here, and only a
+/// shape where the **parent** ran the substitution can show it: the substitution
+/// belongs to the *previous* statement, so this assignment performed none and
+/// completes with 0 (bash's `x=$(false); y=1; echo rc=$?` → `rc=0`, and the same
+/// through the backtick spelling and the omitted-name arm). Deleting the reset turns
+/// every row into `Exited(1)`. An argument-position substitution runs in the *child*
+/// that launches the command, so it never fills the parent's slot — that row is the
+/// e2e pin, not this one.
 #[test]
 fn the_substitution_scratch_is_per_statement() {
-    let cell = make_cell();
-    run_script(b"builtin echo a $(false); x=1", &cell).unwrap();
-    assert!(matches!(
-        borrow_state(&cell).last_status,
-        WaitStatus::Exited(0)
-    ));
+    for script in ["x=$(false); y=1", "x=`false`; y=1", "$(false); x=1"] {
+        let cell = make_cell();
+        run_script(script.as_bytes(), &cell).unwrap();
+        assert!(
+            matches!(borrow_state(&cell).last_status, WaitStatus::Exited(0)),
+            "{script}: no substitution ran for the last statement"
+        );
+    }
 }
 
 #[test]
