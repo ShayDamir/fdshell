@@ -148,6 +148,27 @@ fn a_gap_that_breaks_the_run_stays_a_parse_error() {
     }
 }
 
+/// A `#` comment row standing in the gap is not one of the run's terminator tokens,
+/// yet bash runs the loop (measured `a a` rc 0 on every row — task #518). The rule
+/// lives in the byte layer (`keywords/kind/arith_for`): the tokenizer drops the
+/// comment row, so this walk never sees it and needs no arm of its own — which is
+/// exactly why the `do`-body rows of the same family already worked. The `;` slot
+/// stays **before** the comment arm, and that order is what keeps the
+/// comment-**before**-`;` row in the test above rejecting (bash rc 2). The body
+/// keyword spelling makes no difference: both bodies share this one rule.
+#[test]
+fn a_comment_row_in_the_gap_is_bash_parity() {
+    for line in [
+        b"for ((i=0;i<2;i++)) ;\n# c\ndo echo a; done".as_slice(),
+        b"for ((i=0;i<2;i++)) ;\ndo\n# c\necho a\ndone".as_slice(),
+        b"for ((i=0;i<2;i++)) ;\n# c\n{ echo a; }".as_slice(),
+        b"for ((i=0;i<2;i++))\n# c\n{ echo a; }".as_slice(),
+        b"for ((i=0;i<2;i++)) ;\n# c\n# d\n{ echo a; }".as_slice(),
+    ] {
+        assert_eq!(arith_for(line).body.data, c"echo a".into(), "{line:?}");
+    }
+}
+
 /// A clause written empty is `None`: bash runs `for ((;;))` as the
 /// empty-init/true-cond/no-step loop, spaced spelling included.
 #[test]

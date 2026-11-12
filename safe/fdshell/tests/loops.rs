@@ -1890,7 +1890,10 @@ fn c_style_for_in_a_group_with_a_redirect() {
 /// terminators: at most one real `;` byte, then any run of newlines (task
 /// **#400**). Every row measured against `bash -c` (5.3.9) — bash runs them all
 /// at rc 0, and so does fdshell. The `{ …; }` row is task **#394**'s body shape
-/// behind the same run: one rule answers both bodies.
+/// behind the same run: one rule answers both bodies. The last four rows are task
+/// **#518**'s comment row in the same gap — bash runs it too, so the run's
+/// terminator set is *not* the whole rule (the byte rule owns the comment arm);
+/// both body spellings and the glued head are pinned here.
 #[test]
 fn c_style_for_a_terminator_run_before_the_body_matches_bash() {
     for (script, want) in [
@@ -1898,16 +1901,81 @@ fn c_style_for_a_terminator_run_before_the_body_matches_bash() {
         ("for ((i=0;i<2;i++))\n\ndo echo a; done", "a\na\n"),
         ("for ((i=0;i<2;i++)) ;\n\ndo echo a; done", "a\na\n"),
         ("for ((i=0;i<2;i++)) ;\n{ echo a; }", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\n# c\ndo echo a; done", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\n# c\n{ echo a; }", "a\na\n"),
+        ("for ((i=0;i<2;i++))\n# c\n{ echo a; }", "a\na\n"),
+        ("for((i=0;i<2;i++)) ;\n# c\n{ echo a; }", "a\na\n"),
     ] {
         let (out, err, rc) = run(script);
         assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
     }
 }
 
+/// Every spelling of the gap comment row, each measured against `bash -c` (5.3.9,
+/// which runs every row here at rc 0): the comment on the head's own row, a glued
+/// `#`, two comment rows, a quote / backtick / brace **inside** the comment text,
+/// the `;` and the comment sharing a row, and the loop written inside an `if`. The
+/// comment text that hides a brace is the row that needs the brace search to be
+/// comment-aware, since a byte scanner must not read a brace written in comment text
+/// as the body's opener (LESSONS); its definer twin `f()` + `# c {` + `{ echo a; }` +
+/// `f` shares that one helper and is pinned at
+/// `brace/tests.rs::a_comment_row_hides_a_brace_written_in_its_text`. The `echo tail`
+/// row shows the loop is still one statement to the parser. The cond-prefixed spelling
+/// is the family's one accepted divergence, pinned in the test below.
+#[test]
+fn c_style_for_every_spelling_of_a_gap_comment_matches_bash() {
+    for (script, want) in [
+        ("for ((i=0;i<2;i++)) # c\n{ echo a; }", "a\na\n"),
+        ("for ((i=0;i<2;i++))# c\n{ echo a; }", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\n# c\n# d\n{ echo a; }", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\n# \"c\n{ echo a; }", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\n# `c\n{ echo a; }", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\n# c {\n{ echo a; }", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ; # c\n{ echo a; }", "a\na\n"),
+        (
+            "for ((i=0;i<2;i++)) ;\n# c\n{ echo a; }\necho tail",
+            "a\na\ntail\n",
+        ),
+        (
+            "if true; then\nfor ((i=0;i<2;i++)) ;\n# c\n{ echo a; }\nfi",
+            "a\na\n",
+        ),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The cond-prefixed row is this family's one **accepted divergence** (task **#518**):
+/// bash runs `true && for ((…)) ;` + `# c` + `{ echo a; }` as `a a` at rc 0 (measured,
+/// bash 5.3.9), fdshell reports a parse error at rc 1 — pinned with bash's value beside
+/// fdshell's. The byte rule now claims the run (this task's arm) and the cond parse has
+/// no comment arm of its own, because the tokenizer's comment drop serves a
+/// *statement*, never a cond part. Proof it is the cond path and not the comment: the
+/// neighbouring row with **no** comment at all is a parse error too, on `master` as
+/// here. The cond-path arm is its own task; both rows are pinned so the pair stays
+/// visible.
+#[test]
+fn c_style_for_a_gap_comment_in_a_cond_list_is_an_accepted_divergence() {
+    for script in [
+        "true && for ((i=0;i<2;i++)) ;\n# c\n{ echo a; }",
+        "true && for ((i=0;i<2;i++)) ;\n{ echo a; }",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: {err}");
+        assert!(err.contains("parse error"), "{script}: {err}");
+    }
+}
+
 /// Everything bash rejects, fdshell rejects too (bash rc 2, fdshell rc 1 — the
 /// repo-wide parse-error convention): a clause count that is not three, a word
 /// between `))` and `do`, a redirection there, the `;;`/`; ;` spellings, a pipe,
-/// and an empty `do` body. Nothing runs, so stdout stays empty.
+/// and an empty `do` body. Nothing runs, so stdout stays empty. The last five rows
+/// are task **#518**'s comment spellings that are *not* a comment row — the
+/// comment-**before**-the-`;` row (the byte rule's slot order is what keeps it
+/// rejecting), a **quoted** `"#"` row, an escaped `\#`, a `#` glued to a word, and a
+/// comment that swallows the body's brace. Each is pinned with bash's measured rc 2
+/// beside it.
 #[test]
 fn c_style_for_rejects_bash_rejects() {
     for script in [
@@ -1929,6 +1997,11 @@ fn c_style_for_rejects_bash_rejects() {
         "for ((i=0;i<2;i++)) ;\n; do :; done",
         "for ((i=0;i<2;i++)) & do :; done",
         "for ((i=0;i<2;i++)) ;& do :; done",
+        "for ((i=0;i<2;i++))\n# c\n; { echo a; }",
+        "for ((i=0;i<2;i++)) ;\n\"#\"\n{ echo a; }",
+        "for ((i=0;i<2;i++)) ;\n\\#c\n{ echo a; }",
+        "for ((i=0;i<2;i++)) ;\nx# c\n{ echo a; }",
+        "for ((i=0;i<2;i++)) ;\n#c { echo a; }",
     ] {
         let (out, err, rc) = run(script);
         assert_eq!((out.as_str(), rc), ("", 1), "{script}: {err}");
