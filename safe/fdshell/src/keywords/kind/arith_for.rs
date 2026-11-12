@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C loops -- -E 'test(/^keywords::kind::arith_for::/) | test(/^parse::for_block::/) | binary(loops)'
+
 //! The **arithmetic-`for` head** at the byte level (task #394): the `for`
 //! keyword word and the `(( … ))` region written behind it. The recognition
 //! table's row and the segment scan's run tests ask the same question from two
@@ -5,6 +7,7 @@
 //! head — so they share this one byte rule.
 
 use crate::paren_scan;
+use crate::scan::{Boundary, ScanState, boundary, comment_end};
 use crate::segment::group::opens_at;
 
 /// The region's opening pair, measured from the bytes so nothing here is a
@@ -58,18 +61,51 @@ pub(crate) fn opens_a_block(run: &[u8], line: &[u8], start: usize) -> bool {
 }
 
 /// The group opener standing behind the region at `at`: the single `;` the parse
-/// layer's tail rule allows as the head's separator, the whitespace around it, and
-/// the opener. `)) ;; {` and `)) ; ; {` have two separators, so they answer `false`
-/// and keep their parse errors, as bash's rc-2 pair does.
+/// layer's tail rule allows as the head's separator, any interleaving of whitespace
+/// runs and comment rows, and the opener. `)) ;; {` and `)) ; ; {` have two
+/// separators, so they answer `false` and keep their parse errors, as bash's rc-2
+/// pair does. The `;` slot sits **before** the comment rows, and that order is
+/// load-bearing: bash rc 2 rows like `))` + `# c` + `; { …; }` (the comment
+/// **behind** the `;`) answer `false` exactly because the slot is spent before the
+/// first comment row (task #518). [`gap_end`] consumes every whitespace run it walks,
+/// so its answer is exactly where the opener has to stand — no skip of its own here
+/// (one would be an operator over a length that is always zero).
 fn opener_behind(text: &[u8], at: usize) -> bool {
+    opens_at(text, gap_end(text, at))
+}
+
+/// The gap the byte rule allows between the head and its opener: whitespace, the
+/// single `;` slot, and any interleaving of whitespace runs and comment rows — the
+/// end of what the walk consumes, so [`is_run_head`] can ask for it to have eaten
+/// the whole run, and [`opener_behind`] asks it to end on an opener (task #518).
+fn gap_end(text: &[u8], at: usize) -> usize {
     let at = at + ws_len(text.get(at..).unwrap_or(b""));
     let at = at + usize::from(text.get(at) == Some(&b';'));
-    opens_at(text, at + ws_len(text.get(at..).unwrap_or(b"")))
+    comment_rows(text, at + ws_len(text.get(at..).unwrap_or(b"")))
+}
+
+/// Any run of whitespace runs and `#` comment rows at `at` — the gap rows a comment
+/// may insert between the `;` slot and the opener (task #518, bash runs them). The
+/// comment test is the shared [`boundary`] gate (a bare word-start `#`, outside
+/// quotes, backticks and regions), so a quoted `"#"` row, an escaped `\#` and a `#`
+/// glued to a word stay ordinary rows and keep their parse errors; a fresh state is
+/// right because the region has closed before the gap. The skip is the shared
+/// [`comment_end`], landing **on** the newline that ends the comment (its sibling
+/// `skip_comment` lands past it), so this walk's own whitespace step consumes the
+/// newline and tests the next row.
+fn comment_rows(text: &[u8], mut at: usize) -> usize {
+    let state = ScanState::new();
+    while boundary(text, at, &state) == Boundary::Comment {
+        at = comment_end(text, at);
+        at += ws_len(text.get(at..).unwrap_or(b""));
+    }
+    at
 }
 
 /// The run test the group branch and the span start share: the whole of `text` is
-/// the head — the `for` keyword word and its region, nothing else — so the `{` the
-/// caller is looking at is the body of *this* construct. It is the `time [-p]`
+/// the head — the `for` keyword word and its region, nothing but the gap the byte
+/// rule allows (task #518) — so the `{` the caller is looking at is the body of
+/// *this* construct. It is the `time [-p]`
 /// prefix's twin: the head sits inside the span so the parse layer sees one
 /// statement, and the block branch that opens it is `segment::block`'s arm, never
 /// the `opener_closer` fallback (task #394).
@@ -77,7 +113,7 @@ pub(crate) fn is_run_head(text: &[u8]) -> bool {
     let Some(rest) = text.strip_prefix(FOR) else {
         return false;
     };
-    region_end(rest).is_some_and(|past| past == rest.len())
+    region_end(rest).is_some_and(|past| gap_end(rest, past) == rest.len())
 }
 
 #[cfg(test)]

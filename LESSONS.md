@@ -710,6 +710,31 @@ pipe behind the body (`unexpected pipe`), the loop behind a pipe (`group is miss
 closing brace`), a here-doc in the body, a trailing `&` — bash runs all four, fdshell
 reports the group's own error, pinned in `safe/fdshell/tests/loops.rs`.
 
+Task **#518** gave that byte rule its **comment arm**: a `#` row standing in the gap
+between the region and the body keyword runs the loop for bash (`a a`, rc 0, measured on
+every spelling), and the arm belongs in `keywords/kind/arith_for.rs` alone *for a
+statement* — the tokenizer drops the comment row before the parse walk
+(`parse/for_block/arith/tail.rs`) ever sees it, which is why the `do`-body spellings of
+the same family already worked with no code anywhere. The arm is the shared
+`scan::boundary` gate (`Boundary::Comment`) plus `comment_end`, which lands **on** the
+newline that ends the comment, and its position is load-bearing: the one `;` slot stays
+**before** the comment rows, because that order is what keeps bash's rc-2 family
+rejecting — the comment-**before**-`;` row, the quoted `"#"` row, the escaped `\#`, the
+`#` glued to a word, and the comment that swallows the body's brace. The brace search
+`brace.rs::brace_block_behind_a_head` needed the same arm: a brace written *inside*
+comment text is not the body's opener (byte scanners are blind to comments), and the pair
+that differs only in whether the comment's text carries a brace is the detector — bash
+runs the definer twin `f()` + `# c {` + `{ echo a; }` + `f` as `a`. Pinned at
+`keywords/kind/arith_for/tests.rs`, `brace/tests.rs::a_comment_row_hides_a_brace_written_in_its_text`,
+`parse/for_block/tests.rs::a_comment_row_in_the_gap_is_bash_parity` and
+`safe/fdshell/tests/loops.rs::c_style_for_every_spelling_of_a_gap_comment_matches_bash`.
+**The cond path is the one accepted divergence** (bash `a a` rc 0, fdshell rc 1, pinned at
+`safe/fdshell/tests/loops.rs::c_style_for_a_gap_comment_in_a_cond_list_is_an_accepted_divergence`):
+a comment row in a *cond part's* gap is not hidden by the tokenizer, so claiming the run
+at the byte rule needs an arm of the cond path's own — and the proof that it is the cond
+path, not the comment, is that the neighbouring `true &&` row with **no** comment was
+already a parse error before this task.
+
 Filed, measured, do not re-open blind: **#395** the spaced step `i ++` is
 **parity** on both spellings (`i ++`/`++ i`, `i --`/`-- i`), pinned by
 `safe/fdshell/tests/loops.rs::c_style_for_a_spaced_step_matches_bash` and by

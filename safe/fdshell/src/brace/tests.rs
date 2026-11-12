@@ -47,6 +47,23 @@ fn comment_runs_to_end_and_leaves_block_unclosed() {
     assert!(r.is_some_and(|(_, closed)| !closed));
 }
 
+/// A comment row **in front of** the body's `{` is opaque to the opener search (task
+/// **#518**): a brace written inside comment text is not the body's opener, so the
+/// opener is the real group behind it and the block closes — bash runs
+/// `f()` + `# c {` + `{ echo a; }` + `f` as `a` at rc 0 (measured). The two rows below
+/// differ only in whether the comment's text carries a brace, and that pair is the
+/// detector: the plain comment row already closed here on the naive byte search, the
+/// one with a brace in its text came back open. The arithmetic-`for` twin
+/// `)) ;` + `# c {` + `{ echo a; }` reaches this same helper (pinned at
+/// `tests/loops.rs::c_style_for_every_spelling_of_a_gap_comment_matches_bash`).
+#[test]
+fn a_comment_row_hides_a_brace_written_in_its_text() {
+    let plain = b"f()\n# c\n{ echo a; }";
+    assert_eq!(scan(plain), Some((plain.len(), true)));
+    let brace_in_comment = b"f()\n# c {\n{ echo a; }";
+    assert_eq!(scan(brace_in_comment), Some((brace_in_comment.len(), true)));
+}
+
 #[test]
 fn non_function_is_rejected() {
     assert_eq!(scan(b"plain command"), None);

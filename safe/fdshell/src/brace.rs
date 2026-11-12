@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C group -C --test -C loops -- -E 'test(/^brace::/) | binary(group) | binary(loops)'
+
 use crate::keywords::{function_def_name, opens_a_block};
 use crate::scan::{Boundary, Quotes, boundary, heredoc, skip_comment};
 
@@ -32,15 +34,38 @@ pub(crate) fn scan_arith_for_block(
 /// text starts at ([`scan_brace_block`]'s scan) — one body for the definer arm and
 /// the arithmetic-`for` arm, so the two cannot drift.
 fn brace_block_behind_a_head(line: &[u8], start: usize, quotes: Quotes) -> (usize, bool) {
-    let brace = line
-        .get(start..)
-        .and_then(|s| s.iter().position(|&b| b == b'{'))
-        .map(|p| start + p)
-        .unwrap_or(line.len());
+    let brace = brace_opener(line, start, quotes);
     let mut quotes = quotes;
     let (close_pos, closed) = scan_brace_block(line, brace + 1, &mut quotes);
     let end = line.len().min(close_pos + 1);
     (end, closed)
+}
+
+/// The first `{` at or after `start`: the definer arm's naive byte search, with
+/// the one arm comments are opaque to byte scanners (task #518) — the shared
+/// walk's gate and advance, so a comment row is skipped whole and a brace written
+/// in comment text is not the body's opener. Bytes that are not a gated comment
+/// row land exactly where the naive search landed. The end of the walk is the
+/// range's own `is_empty`, not a `<` bound: the bound only re-probed a position no
+/// search in the body can match, so it was a shield for a `<`→`<=` mutant no test
+/// can see (CATCHING_MUTANTS rule 18).
+fn brace_opener(line: &[u8], start: usize, quotes: Quotes) -> usize {
+    let mut state = quotes.scan_state();
+    let mut i = start;
+    loop {
+        if (i..line.len()).is_empty() {
+            break;
+        }
+        if line.get(i) == Some(&b'{') {
+            return i;
+        }
+        if boundary(line, i, &state) == Boundary::Comment {
+            i = skip_comment(line, i);
+            continue;
+        }
+        i = state.advance(line, i);
+    }
+    line.len()
 }
 
 /// Scan forward from `i` (just after an opening `{`) to the matching `}`,

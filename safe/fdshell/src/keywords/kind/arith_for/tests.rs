@@ -30,6 +30,50 @@ fn the_row_fires_only_for_a_region_followed_by_an_opener() {
     // end does not: it is word data, as bash prints `a` and `{` there.
     assert!(opens_a_group(b"for ((i=0;i<2;i++)) {", 3));
     assert!(!opens_a_group(b"for ((i=0;i<2;i++)) echo {", 3));
+    // Task #518: whitespace runs and comment rows interleave in the gap (bash
+    // runs them). The comment test is the shared gate, so the must-stay-false
+    // rows (the parse layer's) answer false here too.
+    assert!(opens_a_group(b"for ((i=0;i<2;i++)) ;\n# c\n{ echo a; }", 3));
+    assert!(opens_a_group(b"for ((i=0;i<2;i++))\n# c\n{ echo a; }", 3));
+    assert!(opens_a_group(b"for ((i=0;i<2;i++)) # c\n{ echo a; }", 3));
+    assert!(opens_a_group(b"for ((i=0;i<2;i++))# c\n{ echo a; }", 3));
+    assert!(opens_a_group(
+        b"for ((i=0;i<2;i++)) ;\n# c\n# d\n{ echo a; }",
+        3
+    ));
+    assert!(opens_a_group(
+        b"for ((i=0;i<2;i++)) ;\n# \"c\n{ echo a; }",
+        3
+    ));
+    assert!(opens_a_group(
+        b"for ((i=0;i<2;i++)) ;\n# `c\n{ echo a; }",
+        3
+    ));
+    assert!(opens_a_group(
+        b"for ((i=0;i<2;i++)) ;\n# c {\n{ echo a; }",
+        3
+    ));
+    assert!(opens_a_group(b"for ((i=0;i<2;i++)) ; # c\n{ echo a; }", 3));
+    // The bash rc-2 pair: the `;` slot sits before the comment arm (load-bearing),
+    // and the gate's word-start rule keeps quoted, escaped and glued-`#` rows
+    // ordinary word rows.
+    assert!(!opens_a_group(
+        b"for ((i=0;i<2;i++))\n# c\n; { echo a; }",
+        3
+    ));
+    assert!(!opens_a_group(
+        b"for ((i=0;i<2;i++)) ;\n\"#\"\n{ echo a; }",
+        3
+    ));
+    assert!(!opens_a_group(
+        b"for ((i=0;i<2;i++)) ;\n\\#c\n{ echo a; }",
+        3
+    ));
+    assert!(!opens_a_group(
+        b"for ((i=0;i<2;i++)) ;\nx# c\n{ echo a; }",
+        3
+    ));
+    assert!(!opens_a_group(b"for ((i=0;i<2;i++)) ;\n#c { echo a; }", 3));
 }
 
 /// The run gate's question, from the whole run and the line behind it (task #394):
@@ -95,6 +139,29 @@ fn the_run_gate_takes_only_a_head_whose_body_is_a_group() {
         b"for ((i=0;i<2;i++)) echo {",
         0
     ));
+    // Task #518: the gate's run with comment rows in the gap (bash runs them;
+    // both entry points must agree — "one byte rule answers both sides of it").
+    assert!(opens_a_block(
+        b"for ((i=0;i<2;i++)) ;".as_slice(),
+        b"for ((i=0;i<2;i++)) ;\n# c\n{ echo a; }",
+        0
+    ));
+    assert!(opens_a_block(
+        b"for ((i=0;i<2;i++))".as_slice(),
+        b"for ((i=0;i<2;i++))\n# c\n{ echo a; }",
+        0
+    ));
+    // Bash's rc-2 rows stay rejecting at the gate too.
+    assert!(!opens_a_block(
+        b"for ((i=0;i<2;i++))".as_slice(),
+        b"for ((i=0;i<2;i++))\n# c\n; { echo a; }",
+        0
+    ));
+    assert!(!opens_a_block(
+        b"for ((i=0;i<2;i++)) ;".as_slice(),
+        b"for ((i=0;i<2;i++)) ;\n\"#\"\n{ echo a; }",
+        0
+    ));
 }
 
 /// The run test the group branch and the span start share, called when the caller is
@@ -103,11 +170,17 @@ fn the_run_gate_takes_only_a_head_whose_body_is_a_group() {
 fn the_run_test_wants_the_head_and_nothing_else() {
     assert!(is_run_head(b"for ((i=0;i<2;i++))"));
     assert!(is_run_head(b"for ((i = 0; i < 2; i ++ ))"));
-    // Text past the region is body, not head.
+    // Text past the region is body, not head — except the gap the byte rule
+    // allows (task #518): the single `;` slot and comment rows, which the walk
+    // consumes, so a run of head + slot is still the head and nothing else.
     assert!(!is_run_head(b"for ((i=0;i<2;i++)) {"));
     assert!(!is_run_head(b"for ((i=0;i<2;i++)) }"));
     assert!(!is_run_head(b"for ((i=0;i<2;i++)) echo a"));
-    assert!(!is_run_head(b"for ((i=0;i<2;i++)) ;"));
+    assert!(is_run_head(b"for ((i=0;i<2;i++)) ;"));
+    // Task #518 (measured bash `a a` rc 0 for `for ((…)) ;` + `# c` + `{ …; }`):
+    // a run of head + slot + comment row is the head with its gap consumed.
+    assert!(is_run_head(b"for ((i=0;i<2;i++)) ;\n# c"));
+    assert!(is_run_head(b"for ((i=0;i<2;i++))\n# c"));
     // The glued head (task #396) rows with the spaced one; a word that is not
     // this construct does not.
     assert!(is_run_head(b"for((i=0;i<2;i++))"));
