@@ -990,8 +990,9 @@ Every layer that scans multi-line bytes must jump from the heredoc command
 line past its last delimiter line, or the body corrupts statement splitting
 (`segment.rs`), cond-list splitting (`cond.rs::next_boundary`), block keyword
 depth (`comment.rs::scan_block`), and brace depth
-(`brace.rs::scan_brace_block`) — four call sites, all fed by the one shared
-helper `scan::heredoc::skip`/`skip_region`. A body's bytes never fold into the
+(`brace/block.rs::scan_brace_block`) — four call sites, all fed by the one
+shared helper `scan::heredoc::skip`/`skip_region`. A body's bytes never fold
+into the
 caller's quote/substitution state — a body legitimately carries unbalanced
 `'`, `"`, backticks and `$( … )`. The same helper feeds the tokenizer:
 `token::tokenize_statement` blanks the `body_regions` spans in a copy before
@@ -10697,7 +10698,7 @@ those apply to every word, scored or not (LESSONS:
 
 The rule lives at both granularities the brace machinery has, once each:
 
-- **Byte scan** (`brace.rs`, shared by the definer and group spans): a
+- **Byte scan** (`brace/block.rs`, shared by the definer and group spans): a
 here-doc
   operator's word — the operator bytes **plus** its operand word — is one
 unit,
