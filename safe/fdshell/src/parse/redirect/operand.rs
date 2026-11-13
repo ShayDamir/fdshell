@@ -84,7 +84,10 @@ fn attached_operand(t: &ShortCStr, mask: &[MaskBit]) -> Option<usize> {
     // word is no redirect at all, so it has no operand.
     token_fd(&prefix, mask, dir)?;
     let after_op_len = after_op.len();
-    let dup = after_op.starts_with(b"&") && !quoted_bytes(mask, op_pos + 1, op_pos + 2);
+    // The window's start operand can never matter: the byte at `op_pos` is
+    // provably unquoted — this helper's own gate above returns `None` for a
+    // quoted operator byte — so the window is widened to the provable bound.
+    let dup = after_op.starts_with(b"&") && !quoted_bytes(mask, op_pos, op_pos + 2);
     let off = if dup {
         op_pos + 2
     } else {
@@ -113,13 +116,12 @@ fn is_bare_operator(t: &ShortCStr, mask: &[MaskBit]) -> bool {
     if !bare::is_bare(t) || quoted_bytes(mask, t.len() - op.len(), t.len()) {
         return false;
     }
-    let dir = if op.eq_bytes(b"<") || op.eq_bytes(b"<>") {
-        b'<'
-    } else {
-        b'>'
-    };
+    // `token_fd`'s Some/None answer never depends on `dir`: it consults `dir`
+    // only for an empty prefix, where both directions answer `Some`, so the
+    // direction is written as the literal it always evaluates through. Pins:
+    // the bare-family rows of the operand table.
     t.get(..t.len() - op.len())
-        .is_some_and(|prefix| token_fd(&prefix, mask, dir).is_some())
+        .is_some_and(|prefix| token_fd(&prefix, mask, b'>').is_some())
 }
 
 /// A bare `&>` / `&>>` operator token (`bg_redirect`'s bare arm): the operator

@@ -3,41 +3,8 @@
 # the proof that makes it equivalent. Remove an entry as soon as the site
 # changes; a stale proof is a new finding, not a licence.
 
-# Task #534 resolved the last two records: `parse/case_block.rs`'s `in_idx + 1`
-# guard start is now a method call (`in_idx.saturating_add(1)`), so the site the
-# `+`→`*` proof named is gone from `--list` (rules 22/24), and
-# `intercept/timeout_cmd.rs`'s `delete match arm CmdError::Never` is killed by
-# `intercept/timeout_cmd/tests.rs::a_held_shared_borrow_answers_the_never_arm`,
-# which feeds the helper the held shared borrow the *script* path cannot (rule 19).
-
-# Task #551's gate run disproved the `parse/word_quoted.rs:99:28`
-# `replace && with || in is_the_word` record: the mutant is now CAUGHT, so the
-# entry is gone. Its proof was a program-path claim ("no token reaching
-# `is_the_word` through `operator_word` separates them") — CATCHING_MUTANTS rule
-# 19's shape — and `word_quoted/tests.rs::an_equal_word_that_is_no_separator_shape_is_not_the_word`
-# (task #549's pin) feeds the helper a `b"x"` word that is no row of `THE_SET`,
-# where the two spellings part. Measured in the run: the mutation landed and that
-# row failed. The eight records below were re-verified by the same run.
-
-[[allow]]
-file = "safe/fdshell/src/segment/line.rs"
-line = 40
-column = 33
-mutant = "replace == with != in end_comment"
-reason = """Task #468's gate term. The mutant flips the answer only when the comment ends
-on a real newline (this term true), the next line opens with `&` (async_ahead
-true) and the line claims nothing (skip None); every other input reaches the
-same decision through the other conjuncts (nl == line.len() forces
-async_ahead false; a claiming line forces the gate false, where both answers
-suppress the deferral). On exactly those inputs the two outcomes converge at
-segment granularity: flush-on-the-comment-line and flush-at-the-`&`-mark emit
-the same runs in the same order with the same background flag, because
-split.rs's mark retargets the last flushed statement whenever the deferral path
-would mark the buffered run (end_comment keeps a flushed run a `&` target). The
-pinned rows at those shapes (`echo a # note` + a line-opening `&` in
-tests/heredoc.rs, the deferral table in segment/bg/tests.rs) keep their values
-under the mutant, so no test inside the map's `test(/^segment::/)` filter can
-kill it."""
+# Tasks #534, #551 and #540 resolved the records their commits name: each site
+# is now killed by a named test or gone from `--list`; git keeps the proofs.
 
 [[allow]]
 file = "safe/fdshell/src/parse/for_block/arith/region.rs"
@@ -62,53 +29,6 @@ starts exactly at the body-token range's end; regions lie inside their range, so
 that shape means an empty range, where `regions.first()` already answered
 `None`. The `parse/group_block` map (lib and its pinned rows) is green under the
 mutant: no test in the map's filter can kill it."""
-
-[[allow]]
-file = "safe/fdshell/src/parse/redirect/operand.rs"
-line = 87
-column = 72
-mutant = "replace + with * in attached_operand"
-reason = """Task #549's gate term. The mask window this site reads starts at the operator
-byte, which is never quoted for a word that reaches here (fd-word recognition
-requires the operator bytes unquoted), so both spellings answer the same for
-every reachable input. The new operand-table rows (fd-word shapes pinned in
-`parse/redirect/operand/tests.rs`) keep their values under the mutant and the
-full operand map is green: no test in the map's filter can kill it."""
-
-[[allow]]
-file = "safe/fdshell/src/parse/redirect/operand.rs"
-line = 91
-column = 42
-mutant = "replace + with * in attached_operand"
-reason = """Task #549's gate term. Same shape as the 87:72 entry: the one mask byte the
-slice offsets by is the operator start, never quoted on inputs the pipeline
-delivers, so `redirect_op` sees the same answer both ways; the operand map
-(lib and bins) is green under the mutant. The table rows that discriminate the
-sibling sites (`87:84`, `113:56`) keep their values here."""
-
-[[allow]]
-file = "safe/fdshell/src/parse/redirect/operand.rs"
-line = 116
-column = 36
-mutant = "replace || with && in is_bare_operator"
-reason = """Task #549's gate term. The two spellings differ only for fd-words whose
-operator is `<` or `<>` alone; the operand map's filter (unit tests and the
-pinned binaries) contains no fd-`<` shape — fd-word rows all carry `>&` — so the
-mutant's changed `dir` branch is never reached. The full operand map is green
-under it: no test in the map's filter can kill it."""
-
-[[allow]]
-file = "safe/fdshell/src/parse/redirect/operand.rs"
-line = 132
-column = 23
-mutant = "replace && with || in is_bare_bg_operator"
-reason = """Task #549's gate term. Disagreement needs exactly one operand true. Both
-true is the pinned row; left-only (word exactly the operator, operator quoted)
-cannot happen — a fully-quoted word is never an operator word; right-only (word
-longer than the operator, operator unquoted) needs a `&>`-prefix word with an
-operand, and every such row in the map answers through the `Some` arm before
-this guard changes the verdict. The full operand map is green under the mutant:
-no test in the map's filter can kill it."""
 
 [[allow]]
 file = "safe/fdshell/src/brace_expand.rs"

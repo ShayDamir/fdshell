@@ -127,6 +127,16 @@ fn operand_offset_is_the_operand_region_of_the_token() {
         ("cat 2>'q'{a,b}", 1, Some("'q'{a,b}")),
         ("cat 2\">\" {a,b}", 2, None),
         ("echo x &>x{a,b}", 2, Some("x{a,b}")),
+        // A quoted operand whose first byte is an operator-continuation byte:
+        // the `redirect_op` quote gate decides the arm, so the mask slice from
+        // the operand's first byte is load-bearing. The unquoted neighbours pin
+        // the other side of the gate (rules 3/8).
+        ("cat >\">x\"", 1, Some("\">x\"")),
+        ("cat >\"|x\"", 1, Some("\"|x\"")),
+        ("cat <\">x\"", 1, Some("\">x\"")),
+        ("cat >>x", 1, Some("x")),
+        ("cat >x", 1, Some("x")),
+        ("cat <>x", 1, Some("x")),
     ] {
         assert_eq!(region(line, i).as_deref(), want, "{line:?} token {i}");
     }
@@ -158,6 +168,11 @@ fn the_operand_slice_is_the_operand_the_parser_derives() {
         ("cat <> f", 1, 2),
         ("cat >| f", 1, 2),
         ("cat 2> f", 1, 2),
+        // The gate shapes of the main table's quoted rows, mirrored here so the
+        // two owners agree on each spelling's operand.
+        ("cat >>x", 1, 1),
+        ("cat >x", 1, 1),
+        ("cat <>x", 1, 1),
         ("cat < f", 1, 2),
         ("echo x &> f", 2, 3),
         ("echo x &>> f", 2, 3),
@@ -184,6 +199,10 @@ fn an_operandless_word_has_no_operand_offset() {
     for (line, i) in [
         ("echo x &>&p", 2),
         ("echo x &>|&p", 2),
+        // A pidvar word followed by a word: the pidvar word claims no operand of
+        // its own, so the word after it (read here) answers `None` too.
+        ("echo x &>&p y", 3),
+        ("echo x &>|&p y", 3),
         ("echo x &> f", 2),
         ("echo x &>> f", 2),
         ("echo x \"&>\"{a,b}", 2),

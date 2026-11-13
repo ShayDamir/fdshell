@@ -37,9 +37,9 @@ pub(super) fn end_comment(book: &mut Book<'_>, line: &[u8]) {
     // The flush window ends at the comment's own newline, so the comment's
     // bytes are never read as operators.
     let nl = scan::comment_end(line, book.i);
-    let deferred = line.get(nl) == Some(&b'\n')
-        && bg::async_ahead(line, nl)
-        && heredoc::skip(line, book.line_start, nl).is_none();
+    // `async_ahead` only answers true when `nl` sits on a real newline, so the
+    // equality conjunct it used to carry is implied and deleted (rule 3).
+    let deferred = bg::async_ahead(line, nl) && heredoc::skip(line, book.line_start, nl).is_none();
     book.i = nl;
     // `skip_comment` is the newline's successor: the next physical line's
     // start, the address of a line that claims no region at all.
