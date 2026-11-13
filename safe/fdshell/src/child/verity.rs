@@ -10,6 +10,8 @@
 //! descriptor / Merkle tree / signature of a verity file as hex rows; a
 //! non-verity file is a genuine error (the errno is the exit code).
 
+// mutants: -C --lib -C --test -C verity -- -E 'test(/^child::verity::/) | binary(verity)'
+
 mod config;
 mod dump;
 mod dump_read;
@@ -19,9 +21,7 @@ mod parse;
 
 use builtins::error::BuiltinError;
 use error_stack::{Report, ResultExt};
-use sys::{LocalFd, ShortCStr};
-
-use crate::state::ShellState;
+use sys::LocalFd;
 
 use super::Ctx;
 
@@ -30,16 +30,19 @@ const DEFAULT_BLOCK_SIZE: u32 = 4096;
 
 pub(super) fn handle_verity(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let cfg = parse::verity_parse(ctx.refs, ctx.args)?;
-    let fd = resolve(&cfg.var, ctx.state)?;
+    let var = ctx
+        .state
+        .fd_var(&cfg.var)
+        .ok_or(BuiltinError::FdVarNotFound)?;
     if let Some(spec) = &cfg.dump {
-        return dump_read::dump_metadata(fd, spec);
+        return dump_read::dump_metadata(&var.fd, spec);
     }
     if cfg.enable {
-        enable(fd, cfg.algo)?;
+        enable(&var.fd, cfg.algo)?;
         return Ok(0);
     }
     // `MEASURE`: `ENODATA` means "not a verity file" (a normal outcome), not a fault.
-    let digest = match fd.measure_verity() {
+    let digest = match var.fd.measure_verity() {
         Ok(d) => Some(d),
         Err(e) if e.errno() == sys::errno::ENODATA => None,
         Err(e) => return Err(syscall_err(e)),
@@ -72,14 +75,6 @@ fn syscall_err(e: sys::SyscallError) -> Report<BuiltinError> {
         Err(r) => r,
         Ok(()) => Report::new(BuiltinError::Never),
     }
-}
-
-fn resolve<'a>(
-    var: &ShortCStr,
-    state: &'a ShellState,
-) -> Result<&'a LocalFd, Report<BuiltinError>> {
-    let found = state.fds.get(var).ok_or(BuiltinError::FdVarNotFound)?;
-    Ok(&found.fd)
 }
 
 #[cfg(test)]

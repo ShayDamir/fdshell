@@ -5,6 +5,8 @@
 //! the CWD). Each name is printed on its own line, read straight from
 //! `getdents64(2)` so the walk never re-resolves a path.
 
+// mutants: -C --lib -C --test -C ls -- -E 'test(/^child::ls::/) | binary(ls)'
+
 mod parse;
 
 use crate::state::ShellState;
@@ -17,7 +19,10 @@ use super::Ctx;
 
 pub(super) fn handle_ls(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     match parse::ls_parse(ctx.refs, ctx.args)? {
-        parse::Target::Fd { var } => list(resolve(&var, ctx.state)?),
+        parse::Target::Fd { var } => {
+            let fd = ctx.state.fd_var(&var).ok_or(BuiltinError::FdVarNotFound)?;
+            list(&fd.fd)
+        }
         parse::Target::Path { path, dir } => {
             let dirfd = dirfd(dir.as_ref(), ctx.state)?;
             let how = OpenHow::new(sys::fcntl::O_DIRECTORY as u64, 0);
@@ -50,14 +55,6 @@ fn dirfd<'a>(
             Ok(found.fd.at())
         }
     }
-}
-
-fn resolve<'a>(
-    var: &ShortCStr,
-    state: &'a ShellState,
-) -> Result<&'a LocalFd, Report<BuiltinError>> {
-    let found = state.fds.get(var).ok_or(BuiltinError::FdVarNotFound)?;
-    Ok(&found.fd)
 }
 
 #[cfg(test)]

@@ -2,9 +2,13 @@
 //! (`%name`) and an fd array element (`%arr[k]`), each owning a descriptor
 //! with its provenance trace.
 
+// mutants: -C --lib -- -E 'test(/^state::fds::/)'
+
 use sys::LocalFd;
 use sys::ShortCStr;
 use sys::Trace;
+
+use super::ShellState;
 
 /// An fd variable: an owned descriptor together with its provenance trace.
 pub struct FdVar {
@@ -19,3 +23,14 @@ pub struct FdArrayEntry {
     pub source: ShortCStr,
     pub trace: Trace,
 }
+
+impl ShellState {
+    /// The fd variable `%name` holds, `None` when it is unset. The read half of
+    /// [`ShellState::set_fd_var`]; callers map `None` to their own error.
+    pub(crate) fn fd_var(&self, name: &ShortCStr) -> Option<&FdVar> {
+        self.fds.get(name)
+    }
+}
+
+#[cfg(test)]
+mod tests;

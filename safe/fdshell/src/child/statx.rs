@@ -6,6 +6,8 @@
 //! the exact file the handle points at, never a path. Prints one line:
 //! `kind=.. size=.. mode=.. ino=.. dev=MAJ:MIN mtime=..`.
 
+// mutants: -C --lib -C --test -C statx -- -E 'test(/^child::statx::/) | binary(statx)'
+
 mod emit;
 mod parse;
 
@@ -28,8 +30,8 @@ pub(super) fn handle_statx(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
             sys::statx::statx(dirfd, path, flags(nofollow, false))
         }
         parse::Target::Fd { var, nofollow } => {
-            let fd = resolve(&var, ctx.state)?;
-            sys::statx::statx(fd.at(), c"", flags(nofollow, true))
+            let fd = ctx.state.fd_var(&var).ok_or(BuiltinError::FdVarNotFound)?;
+            sys::statx::statx(fd.fd.at(), c"", flags(nofollow, true))
         }
     }
     .change_context(BuiltinError::Syscall)?;
@@ -60,14 +62,6 @@ fn dirfd<'a>(
             Ok(found.fd.at())
         }
     }
-}
-
-fn resolve<'a>(
-    var: &ShortCStr,
-    state: &'a ShellState,
-) -> Result<&'a sys::LocalFd, Report<BuiltinError>> {
-    let found = state.fds.get(var).ok_or(BuiltinError::FdVarNotFound)?;
-    Ok(&found.fd)
 }
 
 #[cfg(test)]

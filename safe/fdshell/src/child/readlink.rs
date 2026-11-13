@@ -6,6 +6,8 @@
 //! via an empty path, so the result reflects the exact link the handle
 //! points at. Prints the target and a newline.
 
+// mutants: -C --lib -C --test -C readlink -- -E 'test(/^child::readlink::/) | binary(readlink)'
+
 mod parse;
 
 use crate::state::ShellState;
@@ -21,7 +23,10 @@ const BUF: usize = 4096;
 pub(super) fn handle_readlink(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let (dirfd, path) = match parse::readlink_parse(ctx.refs, ctx.args)? {
         parse::Target::Path { path, dir } => (dirfd(dir.as_ref(), ctx.state)?, path),
-        parse::Target::Fd { var } => (resolve(&var, ctx.state)?.at(), c""),
+        parse::Target::Fd { var } => {
+            let fd = ctx.state.fd_var(&var).ok_or(BuiltinError::FdVarNotFound)?;
+            (fd.fd.at(), c"")
+        }
     };
     let mut buf = [0u8; BUF];
     let n = sys::statx::readlinkat(dirfd, path, &mut buf).change_context(BuiltinError::Syscall)?;
@@ -43,14 +48,6 @@ fn dirfd<'a>(
             Ok(found.fd.at())
         }
     }
-}
-
-fn resolve<'a>(
-    var: &ShortCStr,
-    state: &'a ShellState,
-) -> Result<&'a sys::LocalFd, Report<BuiltinError>> {
-    let found = state.fds.get(var).ok_or(BuiltinError::FdVarNotFound)?;
-    Ok(&found.fd)
 }
 
 #[cfg(test)]
