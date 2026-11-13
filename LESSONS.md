@@ -10824,6 +10824,13 @@ mirror case was already inside the type's own module family —
 `extend_from_slice_fallback(this, bytes)` named its first argument `this`, so
 it became a method beside the `push` family it serves.
 
+Same mechanism on the read side: seven `child/` builtins each carried a
+byte-identical `resolve(var: &ShortCStr, state: &ShellState)` whose whole body
+was a lookup in `ShellState`'s own `fds` table, so the getter became
+`ShellState::fd_var(&self, name) -> Option<&FdVar>` in `state/fds.rs` — the
+read half of `set_fd_var`, kept in the module family that owns `FdVar`. The
+error mapping stays with the caller (STYLE §4): each site maps `None` itself.
+
 What cannot cross stays free, and each family's reason is in its own module
 doc — four answers, because that is what the code does.
 **What reads only the domain type's own fields goes onto the type:**
@@ -10837,11 +10844,18 @@ the `parse/word_quoted.rs` family (`keyword_word`, `gated_word`,
 **What the orphan rule blocks stays free for that reason alone:** the
 `&ScriptText` family `parse/cond_bodies.rs` and the `&ShortCStr`/`&[MaskBit]`
 family `parse/redirect.rs` — no `impl ScriptText` or `impl ShortCStr` here may
-take a parse-layer type. **What answers about another module's own data** (a
+take a parse-layer type; and the four `last_status_code` copies over
+`ForkCell<ShellState>` (`child/intercepted.rs`, `child/user_function.rs`,
+`pipeline/child/block.rs`, `run/async_job.rs`) — the `impl` belongs to sys,
+which cannot name `ShellState`, and the copies share only one field read.
+**What answers about another module's own data** (a
 `Term`, a `CommandLine`, the operator parse's offset)
 **or serves exactly one caller** stays free for that reason:
 `parse/semi/preceded.rs`, `parse/block_tail.rs`,
-`parse/command/collect_tail.rs`, `child/printf/spec_helper.rs`.
+`parse/command/collect_tail.rs`, `child/printf/spec_helper.rs`, and the
+two-copy families whose each copy has a single caller, `swap_positional`
+(`function_call.rs`, `intercept/source.rs`) and `write_trace`
+(`child/explain.rs`, `child/fdexplain.rs`).
 **And a method that returns another owner's type or calls that owner's private helper keeps its `impl Token` block in that owner's module**
 — `parse/redirect/path_word.rs`, `parse/redirect/attached.rs`,
 `parse/array_literal/words.rs` — the shape `ShortCStr` already uses inside its
@@ -10851,7 +10865,9 @@ Pins: `tests/shortcstr.rs::span_longer_than_the_string`. The sys crate's own
 test binary is the only scope the gate gives a sys file, so the rows have to
 live there, one per mutation of `end - start > self.len()`: equal span and
 text, a longer span, a non-zero `start` so `-` → `+` changes the answer, and a
-quotient short enough that `-` → `/` changes it too.
+quotient short enough that `-` → `/` changes it too. Getter pins: two rows in
+`state/fds/tests.rs`, one per answer — a name nothing holds answers `None`,
+and a `set_fd_var`-ed name answers `Some` with the descriptor it was given.
 
 ## A probe only counts if the mutation landed and the filter is the map's filter
 
