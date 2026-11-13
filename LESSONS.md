@@ -163,13 +163,20 @@ the source frame (§4.5, one `.change_context()`); the NUL-bookkeeping `Never`
 one line above it stays. A `Never` is truly unreachable only when no script
 can reach its producer.
 
+The class covers the **listing** form too: the destination, not the command
+form, decides, so `hash > /dev/full` answers the same variant on a non-empty
+table. A `Never` whose report the caller drops is not unprintable: bash's rc 1
+where fdshell is silent at rc 0 is the reproduction; the remedy propagates it
+(§4.4).
+
 Pins: the printed-words row
 `tests/cli_args.rs::script_file_with_a_nul_byte_names_the_nul_and_not_an_impossible_state`
 — the rc alone cannot tell these paths apart, every one of them exits 1 —
 beside the in-process variant assert
 `intercept/source/tests.rs::run_source_nul_byte_content_fails`, the printed
-row `tests/hash.rs::hash_name_write_failure_is_reported` (the `/dev/full`
-write probe), and the printed row
+rows `tests/hash.rs::hash_name_write_failure_is_reported` and
+`tests/hash.rs::hash_list_write_failure_is_reported` (the `/dev/full` write
+probes), and the printed row
 `tests/signalfd.rs::signalfd_non_utf8_flag_value_names_the_argument`. Debug
 builds add `at …` source frames to the report, so assert text, never a frame.
 

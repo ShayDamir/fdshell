@@ -609,3 +609,25 @@ fn hash_name_write_failure_is_reported() {
         "the variant's own text: {err:?}"
     );
 }
+
+/// The write-failure class covers the **listing** form too: the destination, not the
+/// command form, decides, so `hash > /dev/full` on a non-empty table answers the same
+/// variant as the row above. The pin form builds the table and prints nothing in both
+/// shells, so the failing write is the listing's own; bash says `hash: write error: No
+/// space left on device` at rc 1 and fdshell says it in its own words at rc 1. The
+/// failing `hash` must be the **last** statement: a statement error surfaced mid-script
+/// is not printed (the task #179 family), and text plus rc are pinned, never a source
+/// frame.
+#[test]
+fn hash_list_write_failure_is_reported() {
+    let (out, err, code) = run_with_path(&format!("hash exec_ok {HELPER}; hash > /dev/full"));
+    assert_eq!(
+        code, 1,
+        "the listing's failed write is reported, not dropped: stderr={err:?}"
+    );
+    assert!(out.is_empty(), "nothing reaches stdout: {out:?}");
+    assert!(
+        err.contains("hash: failed to write to standard output"),
+        "the variant's own text: {err:?}"
+    );
+}

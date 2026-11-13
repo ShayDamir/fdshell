@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C hash -- -E 'test(/^intercept::hash_cmd::/) | binary(hash)'
+
 //! `hash [-rd] [name [path]]` — the command lookup table (bash compat).
 //!
 //! External lookups consult the table before PATH (`exec::resolve_path_str`)
@@ -52,7 +54,7 @@ pub(crate) fn run_hash(
 fn dispatch(fields: &[ShortCStr], state: &mut ShellState) -> Result<i32, Report<CmdError>> {
     let operands = fields.get(1..).unwrap_or(&[]);
     match fields.first() {
-        None => Ok(state.list_hash()),
+        None => state.list_hash(),
         Some(flag) if flag.eq_bytes(b"-r") => Ok(state.remove_hash(operands)),
         Some(flag) if flag.eq_bytes(b"-d") => drop::delete_names(operands, state),
         Some(name) => pin::lookup_or_pin(name, operands, state),
@@ -60,12 +62,15 @@ fn dispatch(fields: &[ShortCStr], state: &mut ShellState) -> Result<i32, Report<
 }
 
 impl ShellState {
-    /// Bare `hash`: one `name<TAB>path` line per entry.
-    fn list_hash(&self) -> i32 {
+    /// Bare `hash`: one `name<TAB>path` line per entry. A failing write to the
+    /// user's stdout is a fact about their environment they can act on (§4.7),
+    /// so it propagates (LESSONS: "A NUL byte is reachable only at the entry
+    /// points that ingest outside bytes").
+    fn list_hash(&self) -> Result<i32, Report<CmdError>> {
         for (name, path) in &self.hash_table {
-            let _ = write_line(name, path);
+            write_line(name, path)?;
         }
-        0
+        Ok(0)
     }
 
     /// `hash -r [name…]`: clear the given entries, or the whole table.
@@ -87,7 +92,9 @@ fn write_line(name: &ShortCStr, path: &ShortCStr) -> Result<(), Report<CmdError>
     let nl: ShortCStr = c"\n".into();
     let line = ShortCStr::concat(&[name, &tab, path, &nl]);
     let bytes = line.as_bytes().change_context(CmdError::Never)?;
-    sys::OUT.write_all(bytes).change_context(CmdError::Never)?;
+    sys::OUT
+        .write_all(bytes)
+        .change_context(CmdError::HashWriteFailed)?;
     Ok(())
 }
 
