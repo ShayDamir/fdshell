@@ -264,12 +264,19 @@ unquoted words. The rule is the same for the whole class: the prefix is a
 parse-level word — it is accepted on the in-process commands whose semantics it can
 carry, and reported as `prefix is not supported` on the ones whose shell state it
 cannot honor. See `POSIX_COMPATIBILITY.md`, "Quoted keywords are command words,
-quoted control keywords are not". `umask` takes `[-p] [mode]`: the bare report
-ends with a newline, and `-p` gives that report its reusable `umask MODE` form —
-only for the no-operand report, since applying a mode prints nothing (bash's
-rule, POSIX's too). A mode is octal; the `0o` prefix is accepted as an fdshell
-extension (bash answers `octal number out of range`), and a second operand is
-reported (`umask takes at most one argument`) where bash ignores it.
+quoted control keywords are not". `umask` takes `[-p] [-S] [mode]`: the bare
+report ends with a newline, and `-p` gives that report its reusable `umask MODE`
+form — only for the no-operand report, since an octal mode prints nothing (bash's
+rule, POSIX's too). A mode whose first byte is a digit is octal, and the `0o`
+prefix is accepted as an fdshell extension (bash answers `octal number out of
+range`); any other mode is the chmod-style symbolic mode POSIX allows — clauses
+`[ugoa]*[+-=][rwxXstugo]*` separated by `,`, applied to the complement of the
+current mask, so `umask u=rwx` allows every bit for the owner and leaves the rest
+of the mask as it is. `-S` reports the mask as `u=…,g=…,o=…`, and after a mode it
+prints the symbolic form of what it wrote — the one place fdshell follows bash,
+because POSIX wants no output for a mask operand. `-p` and `-S` cluster and repeat
+(`-pS`, `-SS`), `--` ends the options and a lone `-` is an operand. A second
+operand is reported (`umask takes at most one argument`) where bash ignores it.
 
 | Command | Description |
 |---|---|

@@ -35,7 +35,7 @@ pub(crate) fn detect(tokens: &[Token]) -> Result<Option<ParsedLine>, Report<Pars
     }
 
     if first.eq_bytes(b"umask") {
-        return detect_keyword::detect_umask(tokens);
+        return detect_keyword::umask::detect(tokens);
     }
 
     detect_keyword::detect_control(tokens)

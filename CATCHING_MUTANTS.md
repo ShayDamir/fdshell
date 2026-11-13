@@ -50,7 +50,12 @@ keeps the reusable proof. A "registry" below means that allowlist.
    for compound guards so `&&`→`||` becomes killable. The same trap sits on
    disjoint *value ranges* — a masked fraction under a shifted nibble — so sum
    those with `+` too, where `+`→`-`/`*` moves the value and an exact-output
-   pin kills it.
+   pin kills it. Measured both ways on task #554: the assign arm of
+   `parse/umask_mode/symbolic.rs` sums two operands the callee's own mask keeps
+   disjoint, so it is written `+` and its mutants die on the exact-mask pins;
+   the `|` inside an *accumulating* loop is the killable one — feed the loop
+   twice with the same bit (`a+rwr`, pinned in
+   `safe/fdshell/src/parse/umask_mode/symbolic/tests.rs`).
 9. **Pin exact state, lists, and cursors.** End-to-end output hides
    index/cursor differences; assert exact token lists, window ends, and cursor
    values. The class-skip bug in rule 1 passed the whole suite because no pin

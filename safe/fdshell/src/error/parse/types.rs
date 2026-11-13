@@ -127,6 +127,12 @@ pub(crate) enum ParseError {
     MissingThenAfterElif,
     /// umask takes at most one argument
     UmaskTakesAtMostOneArgument,
+    /// invalid umask option '{flag}' (expected -p, -S or --)
+    InvalidUmaskOption { flag: sys::ShortCStr },
+    /// invalid umask symbolic mode operator '{op}' (expected '+', '-' or '=')
+    InvalidUmaskSymbolicOperator { op: sys::ShortCStr },
+    /// invalid umask symbolic mode character '{ch}' (expected 'rwxXst' or 'ugo')
+    InvalidUmaskSymbolicCharacter { ch: sys::ShortCStr },
     /// unexpected pipe
     UnexpectedPipe,
     /// capture syntax missing '%' before variable name

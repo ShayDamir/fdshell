@@ -6,6 +6,7 @@ use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
 use crate::mask::MaskBit::Unquoted;
 use crate::mask::tests::runs;
+use crate::parse::umask_mode::UmaskMode;
 use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource};
 use alloc::format;
 use alloc::string::ToString;
@@ -2057,26 +2058,26 @@ fn test_pipe_builtin_not_pipeline() {
 
 #[test]
 fn test_umask_no_args() {
-    let ParsedLine::Umask { mask, .. } = parse(b"umask").unwrap() else {
+    let ParsedLine::Umask { mode, .. } = parse(b"umask").unwrap() else {
         panic!("expected Umask")
     };
-    assert_eq!(mask, None);
+    assert_eq!(mode, None);
 }
 
 #[test]
 fn test_umask_zero_o() {
-    let ParsedLine::Umask { mask, .. } = parse(b"umask 0o077").unwrap() else {
+    let ParsedLine::Umask { mode, .. } = parse(b"umask 0o077").unwrap() else {
         panic!("expected Umask")
     };
-    assert_eq!(mask, Some(0o077));
+    assert_eq!(mode, Some(UmaskMode::Octal(0o077)));
 }
 
 #[test]
 fn test_umask_numeric() {
-    let ParsedLine::Umask { mask, .. } = parse(b"umask 077").unwrap() else {
+    let ParsedLine::Umask { mode, .. } = parse(b"umask 077").unwrap() else {
         panic!("expected Umask")
     };
-    assert_eq!(mask, Some(0o077));
+    assert_eq!(mode, Some(UmaskMode::Octal(0o077)));
 }
 
 /// The quote bytes of the `umask` keyword word are transparent (task #335): the
@@ -2088,27 +2089,27 @@ fn test_umask_numeric() {
 #[test]
 fn test_umask_quoted_keyword_word_is_transparent() {
     for line in [&b"'umask' 022"[..], b"u\"mask\" 022", b"umask 022"] {
-        let ParsedLine::Umask { mask, .. } = parse(line).unwrap() else {
+        let ParsedLine::Umask { mode, .. } = parse(line).unwrap() else {
             panic!("expected Umask for {line:?}")
         };
-        assert_eq!(mask, Some(0o022));
+        assert_eq!(mode, Some(UmaskMode::Octal(0o022)));
     }
 }
 
 #[test]
 fn test_umask_zero() {
-    let ParsedLine::Umask { mask, .. } = parse(b"umask 0o000").unwrap() else {
+    let ParsedLine::Umask { mode, .. } = parse(b"umask 0o000").unwrap() else {
         panic!("expected Umask")
     };
-    assert_eq!(mask, Some(0o000));
+    assert_eq!(mode, Some(UmaskMode::Octal(0o000)));
 }
 
 #[test]
 fn test_umask_max() {
-    let ParsedLine::Umask { mask, .. } = parse(b"umask 0o777").unwrap() else {
+    let ParsedLine::Umask { mode, .. } = parse(b"umask 0o777").unwrap() else {
         panic!("expected Umask")
     };
-    assert_eq!(mask, Some(0o777));
+    assert_eq!(mode, Some(UmaskMode::Octal(0o777)));
 }
 
 #[test]

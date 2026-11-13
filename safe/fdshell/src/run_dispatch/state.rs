@@ -1,6 +1,6 @@
-//! The dispatch arms that only change shell state: the `%fd` assignment, the
-//! function definition and `umask`. The dispatcher in `run_dispatch.rs` keeps the
-//! routing and the bare-assignment bookkeeping its sibling modules call.
+//! The dispatch arms that only change shell state: the `%fd` assignment and the
+//! function definition. The dispatcher in `run_dispatch.rs` keeps the routing and
+//! the bare-assignment bookkeeping its sibling modules call.
 
 // mutants: -C --lib -C --test -C umask -C --test -C last_arg -C --test -C arrays -C --test -C unset -C --test -C loops -C --test -C function_keyword -C --test -C cmd_subst -- -E 'test(/^tests::run::/) | binary(umask) | binary(last_arg) | binary(arrays) | binary(unset) | binary(loops) | binary(function_keyword) | binary(cmd_subst)'
 
@@ -40,28 +40,6 @@ pub(super) fn function_def(
     state
         .functions
         .insert(def.name.clone(), def.body.data.clone());
-    state.set_last_exit(0);
-    Ok(())
-}
-
-/// `umask`: a mode operand is applied silently (bash, and POSIX XCU 2.95 mandate
-/// no output); without one the current mask is printed, in the `umask MODE`
-/// spelling when `-p` asked for it. Either way the run succeeded, so `$?` is 0.
-pub(super) fn umask(
-    mask: &Option<u32>,
-    dash_p: &bool,
-    cell: &ForkCell<ShellState>,
-) -> Result<(), Report<CmdError>> {
-    if let Some(m) = mask {
-        sys::umask::set(*m);
-    } else if *dash_p {
-        let s = alloc::format!("umask {:04o}\n", sys::umask::get());
-        sys::OUT.write_all(s.as_bytes()).ok();
-    } else {
-        let s = alloc::format!("{:04o}\n", sys::umask::get());
-        sys::OUT.write_all(s.as_bytes()).ok();
-    }
-    let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.set_last_exit(0);
     Ok(())
 }

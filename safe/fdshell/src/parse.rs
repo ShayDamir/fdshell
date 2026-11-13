@@ -42,6 +42,7 @@ pub(crate) mod token;
 mod token_pipe;
 mod token_subst;
 mod token_word;
+pub(crate) mod umask_mode;
 pub(crate) mod wait_block;
 pub(crate) mod while_block;
 pub(crate) mod word_quoted;

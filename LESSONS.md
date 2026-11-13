@@ -10984,7 +10984,7 @@ Pins:
 `tests/shopt.rs::expand_aliases_on_by_default`, plus the README "Aliases"
 paragraph.
 
-## POSIX `umask` has no `-p`: it mandates no output when a mode operand is given, so bash's `-p` prints only for the no-operand report
+## POSIX `umask` mandates no output for a mode operand: bash's `-p` prints only for the no-operand report, and fdshell follows bash's `-S`
 
 POSIX `umask` (XCU 2.95) lists `-S` as its only option and says
 "If a mask operand is specified, there shall be no output written to standard output."
@@ -10999,8 +10999,29 @@ undefined; the report catches the typo `umask 022 077`), and the `0o` octal
 prefix stays an fdshell extension (bash answers `octal number out of range`).
 The report's trailing newline is script-visible and pinned in exact bytes:
 `safe/fdshell/tests/umask.rs` and the quotes-family rows
-`safe/fdshell/tests/quotes.rs::a_quoted_umask_applies_the_mask`. Symbolic
-modes and `-S` are a gap, not design (task #554).
+`safe/fdshell/tests/quotes.rs::a_quoted_umask_applies_the_mask`.
+
+The symbolic half is bash's `umask.def` rule, not chmod's (task #554): the mode is
+applied to the **complement** of the mask — `bits` starts at `!mask & 0777`, each
+clause moves it, and the result is complemented back — so a symbolic mode can only
+be evaluated where the live mask is, never in the parser. Inside it: a copy spec (a
+`u`/`g`/`o` letter in the action run) **replaces** the permissions the run had
+accumulated, and it and `X` read the **initial** allowed bits, not the bits an
+earlier clause moved — that is why `u=Xg` and `u=gX` answer differently and why a
+later copy erases an earlier `X`. `s` and `t` add only bits above `0777`, which
+`perm &= who` erases: accepted, doing nothing. The operator is mandatory at the
+start of a clause and after a comma (bash's `%c` of the end of the word prints as
+the empty character, and fdshell's operator error names the same empty name), and
+any letter the action run does not know is the character error — bash's rc 1 for
+both, fdshell's parse error at rc 1.
+
+`-S` prints after a mode operand too — bash prints, POSIX wants silence, and
+fdshell follows bash (recorded in `POSIX_COMPATIBILITY.md`); `-p`'s reusable prefix
+stays on the no-operand line only. Options cluster and repeat (`-pS`, `-SS`) and a
+lone `--` ends them, which is bash's `internal_getopt`; a lone `-` is an **operand**
+— its operator is that `-`, so it is a no-op. Pins:
+`parse/umask_mode/symbolic/tests.rs` (the bash-measured apply and `-S` tables) and
+the rows in `safe/fdshell/tests/umask.rs`.
 
 ## The `builtin`/`command` prefix is a lookup-layer rule: it reaches name lookups, not parse-level keywords (task #473)
 

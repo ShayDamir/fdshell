@@ -104,3 +104,165 @@ fn the_quote_bytes_of_the_keyword_and_of_p_are_transparent() {
         );
     }
 }
+
+/// POSIX XCU 2.95 takes the operand "in the same way as the `mode` operand … for
+/// `chmod`" (task #554), and a symbolic mode is applied to the complement of the
+/// current mask. bash 5.3.9 measures each row below in a fresh child, printing nothing
+/// for a mode operand; every row pins its own initial mask for that reason.
+#[test]
+fn a_symbolic_mode_is_applied_to_the_complement_of_the_mask() {
+    for (script, want) in [
+        ("umask 022; umask u=rwx; umask", "0022\n"),
+        ("umask 022; umask a=rwx; umask", "0000\n"),
+        ("umask 022; umask u=rwx,g=,o=; umask", "0077\n"),
+        ("umask 0; umask g-w; umask", "0020\n"),
+        ("umask 022; umask u=g; umask", "0222\n"),
+        ("umask 022; umask u=rwx,g=r-w+rx; umask", "0022\n"),
+        ("umask 0; umask a-rwx,u=X; umask", "0677\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// `-S` is POSIX's option ("Produce symbolic output"): a letter per bit the mask
+/// leaves clear, the whole line from bash 5.3.9's answer.
+#[test]
+fn s_prints_the_symbolic_form() {
+    for (script, want) in [
+        ("umask 0; umask -S", "u=rwx,g=rwx,o=rwx\n"),
+        ("umask 022; umask -S", "u=rwx,g=rx,o=rx\n"),
+        ("umask 0777; umask -S", "u=,g=,o=\n"),
+        ("umask 0644; umask -S", "u=x,g=wx,o=wx\n"),
+        ("umask 0111; umask -S", "u=rw,g=rw,o=rw\n"),
+        ("umask 0240; umask -S", "u=rx,g=wx,o=rwx\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// `-p` and `-S` together, in either order and in either spelling — bash's
+/// `internal_getopt` takes clusters and repeats, and `-p` puts its reusable prefix in
+/// front of the symbolic line too (`umask -S …`, measured).
+#[test]
+fn p_and_s_report_together() {
+    for script in [
+        "umask 022; umask -p -S",
+        "umask 022; umask -S -p",
+        "umask 022; umask -Sp",
+        "umask 022; umask -pS",
+        "umask 022; umask -p -p -S -S",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            ("umask -S u=rwx,g=rx,o=rx\n", 0),
+            "{script}: stderr={err}"
+        );
+    }
+}
+
+/// Decision D4 of task #554: `-S` with a mode operand prints the symbolic form of the
+/// mask it just wrote — POSIX says a mask operand writes nothing, bash prints, and
+/// fdshell follows bash (`POSIX_COMPATIBILITY.md`). The `-p` prefix stays off that
+/// line, which is the no-operand report's.
+#[test]
+fn s_with_a_mode_operand_prints_the_result() {
+    for (script, want) in [
+        ("umask 022; umask -S 077; umask", "u=rwx,g=,o=\n0077\n"),
+        ("umask 022; umask -S u=rwx", "u=rwx,g=rx,o=rx\n"),
+        ("umask 022; umask -p -S 077", "u=rwx,g=,o=\n"),
+        ("umask 022; umask -S u=rwx,g=,o=", "u=rwx,g=,o=\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// A lone `--` ends the options, so what follows is the operand — and a bare `-` is an
+/// operand too (its operator is that `-`, so it is bash's no-op clause). bash 5.3.9
+/// measured, matching.
+#[test]
+fn the_double_dash_ends_the_options() {
+    for (script, want) in [
+        ("umask 022; umask -- -x; umask", "0133\n"),
+        ("umask 022; umask --; umask", "0022\n0022\n"),
+        ("umask 022; umask -; umask", "0022\n"),
+        ("umask 022; umask -- u=g; umask", "0222\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}
+
+/// An option letter that is not `p` or `S` is reported — bash names the letter and
+/// answers its usage error at rc 2, fdshell names the word at the shell-wide rc 1
+/// (the rc-1-vs-2 family, `POSIX_COMPATIBILITY.md`), with the accepted options named
+/// so the script can be fixed (STYLE §4.7).
+#[test]
+fn an_unknown_option_is_reported() {
+    for (script, want) in [
+        ("umask 022; umask -x", "invalid umask option '-x'"),
+        ("umask 022; umask -Sq", "invalid umask option '-Sq'"),
+        ("umask 022; umask -P", "invalid umask option '-P'"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err}");
+        assert!(err.contains(want), "{script}: stderr={err}");
+    }
+}
+
+/// The symbolic grammar's two errors, at bash's characters: a clause needs an operator
+/// right after its `who` letters (bash's `%c` of the end of the word prints as the
+/// empty one), and an action run ends at a letter it does not know. rc 1 in both shells.
+#[test]
+fn a_bad_symbolic_mode_names_its_character() {
+    for (script, want) in [
+        ("umask u+q", "invalid umask symbolic mode character 'q'"),
+        ("umask u", "invalid umask symbolic mode operator ''"),
+        ("umask u=rwx,", "invalid umask symbolic mode operator ''"),
+        ("umask ub", "invalid umask symbolic mode operator 'b'"),
+        ("umask ,", "invalid umask symbolic mode operator ','"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err}");
+        assert!(err.contains(want), "{script}: stderr={err}");
+    }
+}
+
+/// Task #472's decisions, unchanged: a second operand is fdshell's error where bash
+/// ignores it silently (and a flag after the operand *is* that second operand), and a
+/// digit-first word stays the octal grammar — `8` is the octal error, not a symbolic
+/// clause.
+#[test]
+fn the_operand_policy_of_task_472_stands() {
+    for (script, want) in [
+        ("umask 022 extra", "takes at most one argument"),
+        ("umask 022 -p", "takes at most one argument"),
+        ("umask u=rwx extra", "takes at most one argument"),
+        ("umask u=rwx -S", "takes at most one argument"),
+        ("umask 8", "not a valid octal number"),
+        ("umask 0o078", "not a valid octal number"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), ("", 1), "{script}: stderr={err}");
+        assert!(err.contains(want), "{script}: stderr={err}");
+    }
+}
+
+/// The quote bytes change nothing on the new spellings either (family #335): the
+/// keyword, the flags and the operand are all read as word **text**, so each quoted
+/// row answers exactly like its unquoted twin.
+#[test]
+fn the_quote_bytes_of_the_new_spellings_are_transparent() {
+    for (script, want) in [
+        ("umask 022; 'umask' 'u=rwx'; umask", "0022\n"),
+        ("umask 022; umask '-S'", "u=rwx,g=rx,o=rx\n"),
+        ("umask 022; umask '-p' '-S'", "umask -S u=rwx,g=rx,o=rx\n"),
+        ("umask '022'; 'umask'", "0022\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err}");
+    }
+}

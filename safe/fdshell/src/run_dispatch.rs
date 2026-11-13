@@ -12,6 +12,7 @@ mod assign_array;
 mod assign_str;
 mod loop_ctl;
 mod state;
+mod umask;
 mod unset;
 
 /// Handle simple state-modifying parsed lines (assign, unset, umask, break, continue).
@@ -50,7 +51,11 @@ pub(crate) fn run_simple(
             assign_array::run(assigns, text, cell)?;
         }
         crate::parse::ParsedLine::Unset(targets) => unset::run(targets, cell)?,
-        crate::parse::ParsedLine::Umask { mask, dash_p } => state::umask(mask, dash_p, cell)?,
+        crate::parse::ParsedLine::Umask {
+            mode,
+            dash_p,
+            dash_s,
+        } => umask::run(mode.as_ref(), *dash_p, *dash_s, cell)?,
         crate::parse::ParsedLine::Function(def) => state::function_def(def, cell)?,
         crate::parse::ParsedLine::Break(n) => return loop_ctl::raise_break(n, cell),
         crate::parse::ParsedLine::Continue(n) => return loop_ctl::raise_continue(n, cell),

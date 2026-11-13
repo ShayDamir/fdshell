@@ -6,6 +6,7 @@ use crate::parse::function_block::FunctionDef;
 use crate::parse::group_block::GroupBlock;
 use crate::parse::if_block::IfBlock;
 use crate::parse::time_block::TimeBlock;
+use crate::parse::umask_mode::UmaskMode;
 use crate::parse::wait_block::WaitBlock;
 use crate::parse::while_block::{UntilBlock, WhileBlock};
 use crate::parse::{Assign, CommandLine, Pipeline};
@@ -43,13 +44,16 @@ pub enum ParsedLine {
     AssignArray(Vec<ArrayAssign>),
     /// `unset name…`: every operand word, in the order it was written.
     Unset(Vec<UnsetTarget>),
-    /// `umask [-p] [mode]`: `mask` is the mode operand (`None` = report the current
-    /// mask), `dash_p` selects the reusable `umask MODE` form of the report. The
-    /// report runs only when `mask` is `None`; with a mode the mask is applied
-    /// silently (bash, and POSIX XCU 2.95 mandates no output for a mode operand).
+    /// `umask [-p] [-S] [mode]`: `mode` is the mode operand (`None` = report the current
+    /// mask), `dash_p` selects the reusable `umask MODE` form of the report and
+    /// `dash_s` its symbolic form. Without an operand the current mask is printed in
+    /// the form the flags ask for; with one the mode is applied, and `-S` prints the
+    /// resulting mode (POSIX XCU 2.95 wants no output for a mask operand — bash prints,
+    /// and fdshell follows bash).
     Umask {
-        mask: Option<u32>,
+        mode: Option<UmaskMode>,
         dash_p: bool,
+        dash_s: bool,
     },
     /// The `{ …; }` group command: the body text and the redirections written
     /// after the closing brace.

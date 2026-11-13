@@ -22,26 +22,6 @@ fn fails_with(line: &[u8], pred: impl Fn(&ParseError) -> bool) -> bool {
     }
 }
 
-/// Run the `umask` detector on a tokenized statement (`tokens[0]` is the keyword).
-fn umask(line: &[u8]) -> Result<Option<ParsedLine>, Report<ParseError>> {
-    let tokens = tokenize_statement(line).unwrap();
-    detect_umask(&tokens)
-}
-
-fn umask_of(line: &[u8]) -> (Option<u32>, bool) {
-    match umask(line).unwrap() {
-        Some(ParsedLine::Umask { mask, dash_p }) => (mask, dash_p),
-        _ => panic!("expected Umask for {line:?}"),
-    }
-}
-
-fn umask_fails_with(line: &[u8], pred: impl Fn(&ParseError) -> bool) -> bool {
-    match umask(line) {
-        Err(err) => pred(err.current_context()),
-        Ok(_) => false,
-    }
-}
-
 #[test]
 fn bare_break_and_continue_default_to_count_one() {
     assert!(matches!(
@@ -141,51 +121,4 @@ fn the_quote_bytes_of_a_control_keyword_are_transparent() {
     // spelling whose text is not the name reaches no keyword at all.
     assert!(control(b"br\"ek\" 2").unwrap().is_none());
     assert_eq!(count_of(b"break 2"), 2);
-}
-
-/// The `-p` option (task #472): accepted before the operand, repeatable (XBD),
-/// and it selects the reusable `umask MODE` form only for the no-operand report
-/// — both here at the detector: the flag is set, the payload is what the report
-/// form needs. `tests/umask.rs` follows the flag to the printed bytes.
-#[test]
-fn p_before_the_operand_selects_the_report_form() {
-    assert_eq!(umask_of(b"umask -p"), (None, true));
-    assert_eq!(umask_of(b"umask -p -p"), (None, true));
-    assert_eq!(umask_of(b"umask -p 022"), (Some(0o022), true));
-    // The unquoted twin of the `-p` rows (rule 3: both sides of the comparison).
-    assert_eq!(umask_of(b"umask"), (None, false));
-    assert_eq!(umask_of(b"umask 022"), (Some(0o022), false));
-    assert_eq!(umask_of(b"umask 0o077"), (Some(0o077), false));
-}
-
-/// Decision D3 of task #472: a second operand stays a parse error where bash
-/// ignores it silently — including a `-p` **after** the operand, which is that
-/// second operand, not an option (XBD puts options first).
-#[test]
-fn a_second_operand_is_reported() {
-    for line in [
-        &b"umask 022 extra"[..],
-        b"umask 022 -p",
-        b"umask -p 022 extra",
-    ] {
-        assert!(
-            umask_fails_with(line, |e| matches!(
-                e,
-                ParseError::UmaskTakesAtMostOneArgument
-            )),
-            "line: {line:?}"
-        );
-    }
-}
-
-/// Symbolic modes and `-S` are task **#554**'s: the operand stays octal (with
-/// fdshell's `0o` prefix extension, task #472) and both spellings still fail here.
-#[test]
-fn symbolic_modes_and_uppercase_s_are_not_octal_yet() {
-    for line in [&b"umask u=rwx"[..], b"umask -S"] {
-        assert!(
-            umask_fails_with(line, |e| matches!(e, ParseError::InvalidOctal)),
-            "line: {line:?}"
-        );
-    }
 }

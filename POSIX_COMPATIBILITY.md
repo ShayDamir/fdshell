@@ -668,6 +668,20 @@ and left the `0o` octal prefix as an fdshell extension (bash 5.3.9 answers
 which now runs the whole intercepted table in a stage's own fork — these five names
 have no builtins, so the row stays).
 
+The rest of `umask`'s operand surface is parity (task **#554**): XCU 2.95 takes the
+`mask` operand "in the same way as the `mode` operand … for `chmod`", and that is
+what fdshell does — a word whose first byte is a digit is octal, any other word is
+the symbolic mode, applied to the complement of the current mask, and `-S` reports
+`u=…,g=…,o=…`. `-p` and `-S` cluster and repeat and a lone `--` ends them, as
+bash's `internal_getopt` does, and a lone `-` is an operand. The one deliberate
+divergence is `-S` **with** a mode operand: XCU 2.95 says "If a mask operand is
+specified, there shall be no output written to standard output", bash 5.3.9 prints
+the symbolic form of the mask it just wrote, and fdshell follows bash. What stays
+open from the paragraph above is unchanged: the `0o` octal extension, the
+single-operand rejection, and an unknown option — bash reports it as a usage error
+at rc 2, fdshell reports it as a parse error at rc 1 (the rc-1-vs-2 family). Every
+row is pinned byte-exact in `safe/fdshell/tests/umask.rs`.
+
 A second divergence is mechanical: fdshell parses a script **statement by
 statement**, where bash parses the whole input before running any of it, so a
 quoted opener runs as a command and the rest of the input keeps executing:
