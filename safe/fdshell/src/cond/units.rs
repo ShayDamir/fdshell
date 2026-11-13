@@ -72,7 +72,11 @@ fn units_of(line: &[u8]) -> Vec<Segment<'_>> {
 /// region bytes live on the lines below and travel in the caller's list), and
 /// the share is taken with the same per-part count `cond/parts.rs` uses within
 /// one list, so the global operator order is preserved across units run in
-/// order.
+/// order. **The two sources are the same bodies** (the caller's list is the
+/// global per-line order, LESSONS: "A heredoc body is a property of the logical
+/// line, not of a contiguous span"), so a unit served from the scanner consumes
+/// its share of the list too: a text that mixes a region **in** it with a region
+/// travelling in the list must not hand the first body out twice.
 fn own_bodies(
     seg: &Segment<'_>,
     line: &[u8],
@@ -85,6 +89,7 @@ fn own_bodies(
         _ => return Vec::new(),
     };
     if !own.is_empty() {
+        *body_idx += own.len();
         return own.clone();
     }
     let (start, len) = span(seg);

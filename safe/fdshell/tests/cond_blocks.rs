@@ -2130,6 +2130,57 @@ fn the_condition_runs_every_command_and_gates_on_the_last() {
         "bash prints the body, then y"
     );
     assert_eq!(output.status.code().unwrap_or(-1), 0);
+    // The body sources, each shape pinned at its measured value (bash 5.3.9(1)
+    // and this build, stdin `/dev/null`, 2026-11-13). A condition that spans
+    // physical lines carries its regions **in** its text, so the scan hands each
+    // unit its own; the single-line shape above takes them from the caller's
+    // list (the global per-line order). Both sources are the same bodies, so the
+    // cursor over them must never hand one out twice — the mixed shape (one
+    // region in the text, its sibling in the caller's list) is pinned at the
+    // unit level by
+    // `cond::units::tests::a_mix_of_scanner_assigned_and_listed_bodies_is_served_once`,
+    // where the list is complete and each `cat` prints its own body.
+    for (script, want, rc, note) in [
+        // All scanner-assigned: bash parity.
+        (
+            "if cat <<Q\nq-body\nQ\ncat <<R\nr-body\nR\nthen echo y; fi\n",
+            "q-body\nr-body\ny\n",
+            0,
+            "bash parity",
+        ),
+        // The mix through the parse layer: bash prints both bodies. fdshell
+        // prints the **first** one only and runs the second region's own lines as
+        // commands, because the parse layer collects regions per logical line and
+        // hands the condition the first line's alone — a parse-layer shape (its
+        // own rule: "A heredoc body is a property of the logical line, not of a
+        // contiguous span"), unchanged by this task, so the row is pinned at
+        // fdshell's measured value and names bash's. What it does pin here is the
+        // accounting: the first body must not be served twice.
+        (
+            "if cat <<Q\nq-body\nQ\ncat <<R; then echo y; fi\nr-body\nR\n",
+            "q-body\ny\n",
+            1,
+            "bash prints q-body, r-body, y at rc 0",
+        ),
+    ] {
+        let dir = scratch("body-sources");
+        let path = dir.join("body-sources.sh");
+        std::fs::write(&path, script).unwrap();
+        let output = Command::new(BIN)
+            .arg(&path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .unwrap();
+        assert_eq!(
+            str::from_utf8(&output.stdout).unwrap(),
+            want,
+            "{script}: {note}: {}",
+            str::from_utf8(&output.stderr).unwrap()
+        );
+        assert_eq!(output.status.code().unwrap_or(-1), rc, "{script}: {note}");
+    }
     // The task #492 join table: the second physical line's command must
     // **run**, so each row proves the condition text spans the newline; all are
     // bash parity. The glued operator, the trailing space and the comment tail

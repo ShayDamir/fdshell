@@ -8838,7 +8838,9 @@ rule
 ("the body slice keeps the `&`, its own scan marks the flag — a flag threaded through the `run*` layers is a second source of truth")
 has its boundary there. A body is **re-scanned** (`run_script` →
 `segment::scan_segments`, the single validator), so its text carries the `&`.
-A condition is never scanned: `run_part` → `run_one` → `parse`, and the parse
+A condition is never scanned **by the parse layer** (task #557 added a run-layer
+scan of a multi-unit condition, through the one shared scanner — this rule is
+the parse layer's and survives): `run_part` → `run_one` → `parse`, and the parse
 layer rejects a bare `&` (`parse/command_args.rs`
 `UnexpectedChar { ch: b'&' }`), so keeping the `&` there turns every accepted
 `&`-terminated condition into rc 1. Making the text carry it would need a
@@ -11233,10 +11235,22 @@ that yields one unit — every top-level statement and every condition whose
 separators are all data — runs the operator walk (now `run_list`) byte-identical
 to the pre-#557 entry. Loop control raised by **any** unit leaves the condition
 at once, and the last unit's status is what the state carries to the test: no
-bookkeeping. Pins: `cond/units/tests.rs` (the split shapes, the per-unit body
-allocation, the flag on the last unit only, the immediate control exit) and
+bookkeeping. **Body accounting is one cursor over one list.** A unit's bodies are
+the ones the scan assigned it, else its share of the caller's list — and the two
+are the **same** bodies: the caller's list is the global per-line order
+("A heredoc body is a property of the logical line, not of a contiguous span"),
+and a scan of a text that spans physical lines hands the same body to the unit
+whose region sits in it. So a unit served from the scan must consume its share of
+the list: in a text that mixes a region inside it with a region travelling in the
+list, serving the scan's copy without advancing the cursor hands the first body
+to the second unit too. Pins: `cond/units/tests.rs` (the split shapes, the per-unit body
+allocation — including the mix of the two sources — the flag on the last unit
+only, the immediate control exit) and
 `tests/cond_blocks.rs::the_condition_runs_every_command_and_gates_on_the_last`
-(this task's table and the flipped #498 family, at bash's measured values).
+(this task's table and the flipped #498 family, at bash's measured values; the
+file shape that mixes the sources is pinned at fdshell's value and names bash's,
+because the parse layer hands the condition only the first logical line's region
+— that half is the parse layer's rule, not the split's).
 
 ## An export dup is only ever created in a forked child (task #503)
 

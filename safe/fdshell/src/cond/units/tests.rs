@@ -237,3 +237,23 @@ fn a_block_unit_span_opening_with_whitespace_is_trimmed() {
     });
     assert_eq!(out, b"BODY\n");
 }
+
+/// The two body sources **mixed** in one run, and the cursor `own_bodies` keeps
+/// over them: the first unit's region is inside the scanned text (so the scan
+/// assigned it the body), the second unit's travels in the caller's list — which
+/// is the global per-line order (LESSONS: "A heredoc body is a property of the
+/// logical line, not of a contiguous span") and therefore holds **both** bodies,
+/// the one the scan already handed out included. Each unit must get its own: a
+/// unit served from the scanner without consuming its share of the list hands the
+/// first body to the second unit too. The order is bash's measured one — `q-body`
+/// then `r-body` (the file shapes of this family are pinned in
+/// `tests/cond_blocks.rs`).
+#[test]
+fn a_mix_of_scanner_assigned_and_listed_bodies_is_served_once() {
+    let out = capture_stdout(|| {
+        let cell = make_cell();
+        let bodies = [b"q-body\nQ".to_vec(), b"r-body\nR".to_vec()];
+        run_cond_list_bodies(b"cat <<Q\nq-body\nQ\ncat <<R", &bodies, &cell);
+    });
+    assert_eq!(out, b"q-body\nr-body\n");
+}
