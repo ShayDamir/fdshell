@@ -1,4 +1,4 @@
-use super::{PREFIXES, magic};
+use super::fd_path::{PREFIXES, magic};
 use core::ffi::CStr;
 use sys::ShortCStr;
 

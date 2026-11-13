@@ -4182,9 +4182,9 @@ descriptions racing at 0, `>` truncating), `cat < /dev/fd/0` after a partial
 read starts at byte 0, and a seed entry behaves like a def. A `dup` is **not**
 that effect on Linux: it shares the description, so the offset is shared and
 nothing truncates. The reading is on the **final expanded name** the open pass
-resolves (`redirect/open/target.rs`), in canonical decimal only — so a target
-that only *expands* to the magic form is opened at resolve time too (task
-#479) — and the kernel's entry for fd 1 is named `1`, so `/dev/fd/01`,
+resolves (`redirect/open/target/fd_path.rs`), in canonical decimal only — so a
+target that only *expands* to the magic form is opened at resolve time too
+(task #479) — and the kernel's entry for fd 1 is named `1`, so `/dev/fd/01`,
 `/dev/fd/1x` and `/dev/fd/-1` are plain paths whose open fails (bash rc 1),
 and a `Close` entry fails it too. Say that **"then"** all the way (task #482
 closed the boundary): the table now answers the magic open's **success** too —
