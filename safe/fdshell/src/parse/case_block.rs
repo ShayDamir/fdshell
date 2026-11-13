@@ -2,14 +2,13 @@
 
 mod literal;
 
-pub(crate) use literal::literal_indices;
+pub(crate) use literal::{literal_indices, owns_semi, up_to_esac};
 
 use super::Token;
 use super::case_clause;
-use super::semi::{List, list_closing_keyword_index, semi_byte, trim_semi, try_join_masked};
+use super::semi::{semi_byte, trim_semi, try_join_masked};
 use super::word_quoted::{keyword_word, slot_rejects};
 use crate::error::parse::ParseError;
-use crate::keywords::Closer;
 use crate::mask::MaskBit;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
@@ -121,34 +120,6 @@ pub(crate) fn tokens_to_case(
         clauses,
         redirects,
     })
-}
-
-/// What the `case` word slot owns as its own separator: the `;` (and the newline
-/// that tokenizes as one) [`trim_semi`] trims — task **#470**'s decision, and the
-/// ONE predicate's per-site data. Every other row of the ONE set, and a word
-/// opening with `(`, is the control operator bash rejects at this position.
-fn owns_semi(w: &[u8]) -> bool {
-    w == b";"
-}
-
-/// The `case` block's tokens up to and including its closing `esac`: the word
-/// walk of [`list_closing_keyword_index`] with [`List::Case`], whose closer must
-/// be an `esac`, plus the block's own leniency. A last clause whose body is not
-/// `;;`-terminated has its `esac` in argument position, where no closer scores —
-/// bash rejects the shape, fdshell accepts it
-/// (`parse::tests::case_last_clause_no_semi_semi`), so an unclosed walk keeps
-/// the whole list, and its last token must still be `esac`.
-fn up_to_esac<'a>(tokens: &'a [Token], line: &[u8]) -> Result<&'a [Token], Report<ParseError>> {
-    let rest = match list_closing_keyword_index(tokens, line, Closer::Esac, List::Case) {
-        Some(idx) => tokens.get(..=idx).ok_or(ParseError::CaseMissingEsac)?,
-        None => tokens,
-    };
-    ensure!(
-        rest.last()
-            .is_some_and(|tok| crate::parse::block_tail::is_closer(tok, b"esac")),
-        ParseError::CaseMissingEsac
-    );
-    Ok(rest)
 }
 
 #[cfg(test)]

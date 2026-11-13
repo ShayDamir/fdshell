@@ -2,12 +2,16 @@
 
 //! The brace-expansion-protected token indices of a `case` line: the `case`
 //! word and every clause's pattern region. Lives beside `tokens_to_case`
-//! because it mirrors that traversal.
+//! because it mirrors that traversal — the file therefore owns both walks, the
+//! one that answers `tokens_to_case` and the one that answers `literal_indices`.
 
 use super::Token;
+use crate::error::parse::ParseError;
 use crate::keywords::Closer;
+use crate::parse::block_tail;
 use crate::parse::semi::{List, list_closing_keyword_index};
 use alloc::vec::Vec;
+use error_stack::{Report, ensure};
 
 /// The token indices of the case word and every clause's pattern region in
 /// a `case` line (bash applies no brace expansion to them); empty for other
@@ -79,6 +83,37 @@ pub(crate) fn literal_indices(tokens: &[Token], line: &[u8]) -> Vec<usize> {
 /// for a keyword needle, so the #455/#273 mirror property holds.
 fn word_at(tokens: &[Token], i: usize, w: &[u8]) -> bool {
     tokens.get(i).is_some_and(|tok| tok.span_word(w))
+}
+
+/// What the `case` word slot owns as its own separator: the `;` (and the newline that
+/// tokenizes as one) [`crate::parse::semi::trim_semi`] trims — task **#470**'s decision,
+/// and the ONE predicate's per-site data. Every other row of the ONE set, and a word
+/// opening with `(`, is the control operator bash rejects at this position.
+pub(crate) fn owns_semi(w: &[u8]) -> bool {
+    w == b";"
+}
+
+/// The `case` block's tokens up to and including its closing `esac`: the word
+/// walk of [`list_closing_keyword_index`] with [`List::Case`], whose closer must
+/// be an `esac`, plus the block's own leniency. A last clause whose body is not
+/// `;;`-terminated has its `esac` in argument position, where no closer scores —
+/// bash rejects the shape, fdshell accepts it
+/// (`parse::tests::case_last_clause_no_semi_semi`), so an unclosed walk keeps
+/// the whole list, and its last token must still be `esac`.
+pub(crate) fn up_to_esac<'a>(
+    tokens: &'a [Token],
+    line: &[u8],
+) -> Result<&'a [Token], Report<ParseError>> {
+    let rest = match list_closing_keyword_index(tokens, line, Closer::Esac, List::Case) {
+        Some(idx) => tokens.get(..=idx).ok_or(ParseError::CaseMissingEsac)?,
+        None => tokens,
+    };
+    ensure!(
+        rest.last()
+            .is_some_and(|tok| block_tail::is_closer(tok, b"esac")),
+        ParseError::CaseMissingEsac
+    );
+    Ok(rest)
 }
 
 #[cfg(test)]
