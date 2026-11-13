@@ -1795,7 +1795,10 @@ bash's rejections are lost — `; ;`, `;;`, a `;` **behind** a newline, and the
 `&` that `is_list_terminator` counts stay parse errors (bash rc 2, measured).
 The rule is this tail's own — the word-form `for`, `while` and `if` are looser
 than bash at the same spot — and the same gap stands in front of the `{` of
-task #394's group body, which is the rule decided once, as #394 asked. Pin
+task #394's group body, which is the rule decided once, as #394 asked. Task
+**#559** made the word-form `for` measure this same rule at the same spot (its
+list gate reads the run from the slice's end), so the byte test and both run
+directions now have one owner, `parse/semi/gap.rs`, with the byte as data. Pin
 both sides:
 `parse/for_block/tests.rs::a_run_of_terminators_before_the_body_keyword_is_accepted`,
 `parse/for_block/tests.rs::a_gap_that_breaks_the_run_stays_a_parse_error`,
@@ -10605,11 +10608,17 @@ operator word leaves the pattern empty.
 
 The owned half must be a **word**, so the `for` list's terminator cannot be
 decided inside the closure — the caller hands the predicate the list minus its
-trailing terminator token, the one the `do` is preceded by. That is why the
+trailing terminator **run**: at most one real `;` byte, then any run of
+newlines, read from the **end** of the slice (task #559 — this gap is one rule
+with the arithmetic tail's, and the byte test plus both run directions now have
+one owner, `parse/semi/gap.rs`, the byte as data; comment rows need no arm
+because the tokenizer drops them, so the newline of the row **before** a
+comment is what stands in the run). The trim stays **asymmetric**: the leading
+side is not the gap. That is why the
 gate reads the **untrimmed** slice and lands before `trim_semi`:
 `for i in ; 1; do` is the leniency flipping to bash's side, and the rule stays
 a builder rule, per LESSONS:
-"A word-list rule lives at **two granularities"**. Both directions of `owned`
+"A word-list rule lives at **two granularities". Both directions of `owned`
 are pinned at each site: a parameter that never changes the answer is an
 equivalent mutant, per LESSONS:
 "A shared parser must gate the flag only one builtin honors".
@@ -10648,6 +10657,13 @@ Pins:
 (the glued and quoted spellings that stay divergences); the gate's own
 LESSONS:
 "A separator-shaped word needs the span gate, because the scan-back breaks on the separator byte itself".
+Task **#559**'s gap run is pinned at its owner —
+`parse/semi/gap/tests.rs::the_byte_test_separates_the_semi_byte_from_the_newline`
+and `parse/semi/gap/tests.rs::the_gap_is_one_rule_read_from_both_ends` — with
+the word-form builders
+`parse/for_block/tests.rs::the_terminator_run_before_the_do_belongs_to_the_word_list`,
+`parse/for_block/tests.rs::the_gap_that_breaks_the_run_stays_a_parse_error_for_the_word_form`
+and `tests/loops.rs::a_terminator_run_before_the_word_for_body_matches_bash`.
 
 ## A text comparison in the recognition layer is the ONE quotedness gate's answer; the glue row, the payload row and the bare-operand arms are one rule at three granularities (task #530)
 

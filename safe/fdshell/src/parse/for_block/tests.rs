@@ -451,6 +451,71 @@ fn an_operator_word_in_the_word_list_is_a_parse_error() {
     }
 }
 
+/// The list's own terminator is not one token but bash's **gap run** — at most
+/// one real `;` byte, then any run of newlines, read from the end of the slice
+/// (`for_block/words.rs`, task #559; the byte test and the run have one owner
+/// in `parse/semi/gap.rs`). Bash 5.3.9 runs every row at rc 0 (measured), so
+/// the words come out as words and the comment rows — dropped by the tokenizer
+/// with their own newlines — leave the newline of the row **before** them as
+/// the run. A quoted `";"` word with a gap is one word (one iteration), the
+/// glued `2;` spelling is the same list, and the wordless clause behind the run
+/// is the `SemiOrEmpty` arm of the `do` search (task #521) meeting the run.
+#[test]
+fn the_terminator_run_before_the_do_belongs_to_the_word_list() {
+    let two = vec![c"1".into(), c"2".into()];
+    let body = c"echo a".into();
+    for line in [
+        b"for i in 1 2 ;\ndo echo a; done".as_slice(),
+        b"for i in 1 2;\ndo echo a; done".as_slice(),
+        b"for i in 1 2 ;\n\ndo echo a; done".as_slice(),
+        b"for i in 1 2\n\ndo echo a; done".as_slice(),
+        b"for i in 1 2 ;\n# c\ndo echo a; done".as_slice(),
+        b"for i in 1 2 ;\n# c\n# d\ndo echo a; done".as_slice(),
+        b"for i in 1 2\n# c\n\ndo echo a; done".as_slice(),
+        b"for i in 1 2 ;\ndo\n# c\necho a\ndone".as_slice(),
+    ] {
+        let fb = word_for(line);
+        assert_eq!(fb.words, two, "{line:?}");
+        assert_eq!(fb.body.data, body, "{line:?}");
+    }
+    for line in [
+        b"for i in ;\ndo echo a; done".as_slice(),
+        b"for i in ;\n\ndo echo a; done".as_slice(),
+    ] {
+        let fb = word_for(line);
+        assert!(fb.words.is_empty(), "{line:?}");
+        assert_eq!(fb.body.data, body, "{line:?}");
+    }
+    let fb = word_for(b"for i in \";\" ;\ndo echo a; done");
+    assert_eq!(fb.words, vec![c";".into()]);
+    assert_eq!(fb.body.data, body);
+    let fb = word_for(b"for i ;\n\ndo echo a; done");
+    assert!(fb.words_default_to_positional);
+    assert!(fb.words.is_empty());
+    assert_eq!(fb.body.data, body);
+}
+
+/// The gaps that break the run stay parse errors — bash rc 2, fdshell rc 1 (the
+/// repo-wide convention) — measured: a second `;` (`; ;`, `;;`, `; ;` behind a
+/// comment row), a `;` **behind** a newline, a `&` in the list before the run,
+/// and the leading `;`, which is not the gap: the trim is asymmetric
+/// (`for i in ; 1; do` is bash's rc 2, the pin #496 landed). The killers of the
+/// byte parameters and of both run directions are pinned at the owner
+/// (`parse/semi/gap/tests.rs`).
+#[test]
+fn the_gap_that_breaks_the_run_stays_a_parse_error_for_the_word_form() {
+    for line in [
+        b"for i in 1 ; ;\ndo echo a; done".as_slice(),
+        b"for i in 1 ;;\ndo echo a; done".as_slice(),
+        b"for i in 1 ; ;\n# c\ndo echo a; done".as_slice(),
+        b"for i in 1 2\n;\ndo echo a; done".as_slice(),
+        b"for i in 1 & ;\n\ndo echo a; done".as_slice(),
+        b"for i in ; 1;\n\ndo echo a; done".as_slice(),
+    ] {
+        assert_eq!(parse_err(line), "expected 'do'", "{line:?}: bash rc 2");
+    }
+}
+
 /// bash's `for_action` ends with a compound list, so a group opener written behind
 /// the region is the loop's **body** (task #394). The group parse answers it — its
 /// terminator rule, its emptiness rule and its trailing redirections are the group's
@@ -610,11 +675,12 @@ fn a_closer_shaped_name_of_a_for_clause_is_the_name() {
 
 /// The word at `anchor` — the **name** word of a wordless clause — is the only
 /// data that can separate `anchor + 1` (the operator gate's word-list slice)
-/// from its `−`/`×` mutants. The gate strips the slice's **last** token (the
-/// list's own terminator, `for_block/words.rs`), so an operator-shaped name is
-/// word data the gate never sees when the slot behind it is **empty** — the
-/// glued spelling runs at rc 0 (task #521's arm is what makes it reachable);
-/// bash rc 2 there, where its tokenizer eats the `&`. The killer is the `;`
+/// from its `−`/`×` mutants. The gate drops the slice's trailing gap run (the
+/// list's own terminator — one token for these rows, `for_block/words.rs`), so
+/// an operator-shaped name is word data the gate never sees when the slot
+/// behind it is **empty** — the glued spelling runs at rc 0 (task #521's arm is
+/// what makes it reachable); bash rc 2 there, where its tokenizer eats the `&`.
+/// The killer is the `;`
 /// spelling: the mutant's slice is then [`&`, `;`], the strip leaves [`&`], and
 /// the gate answers `expected 'do'`. The `in`-form row pins the other side: its
 /// anchor word is the `in` keyword, never an operator word, so the gate's

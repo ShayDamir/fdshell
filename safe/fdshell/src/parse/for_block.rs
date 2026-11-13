@@ -58,8 +58,9 @@ pub(crate) fn tokens_to_for(
     // list (the invariant `head.rs` guards).
     let anchor = in_pos.unwrap_or(1);
 
-    // The `for` word list takes no list terminator **and** no operator word it
-    // does not own: its `do` is searched with `;` alone, and an operator word in
+    // The `for` word list takes no list terminator beyond its own trailing gap
+    // run (task #559) **and** no operator word it does not own: its `do` is
+    // searched with `;` alone, and an operator word in
     // the list is rejected below (`for i in 1 & do`, `for i in 1 & ; do`,
     // `for i in 1 && ; do`, `for i in 1 | ; do` are bash syntax errors). Only
     // the **wordless** clause may leave POSIX #2.9.1's `newline_list` empty

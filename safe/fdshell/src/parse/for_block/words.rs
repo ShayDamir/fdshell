@@ -7,7 +7,7 @@
 use super::super::Token;
 use crate::error::parse::ParseError;
 use crate::mask::MaskBit;
-use crate::parse::semi::trim_semi;
+use crate::parse::semi::{gap_run_at_end, trim_semi};
 use crate::parse::word_quoted::slot_rejects;
 use alloc::vec::Vec;
 use error_stack::Report;
@@ -39,10 +39,17 @@ pub(super) struct ForWords {
 /// Parse-time rule: a `&` that *expansion* produces (`for i in $(echo '&')`)
 /// stays a word, as in bash. The `owned` data stays load-bearing through the
 /// `case` word slot's `;` (task #470; `word_quoted/tests.rs` pins it).
+///
+/// The exclusion is **asymmetric** (task #559): the list's own terminator is
+/// bash's trailing **gap run** — at most one real `;` byte, then any run of
+/// newlines, read from the end through [`gap_run_at_end`] — while a `;`
+/// anywhere else, the leading side included, is a real operator word
+/// (`for i in ; 1; do` is bash's rc 2).
 pub(super) fn rejects_operator_word(tokens: &[Token], line: &[u8]) -> bool {
-    // The trailing `;`/newline is the list's own terminator — the token the `do`
+    // The trailing gap run is the list's own terminator — the tokens the `do`
     // is preceded by — so the list proper is everything before it.
-    let list = tokens.get(..tokens.len().saturating_sub(1)).unwrap_or(&[]);
+    let gap = gap_run_at_end(tokens, line);
+    let list = tokens.get(..tokens.len() - gap).unwrap_or(&[]);
     let owns_nothing = |_w: &[u8]| false;
     list.iter()
         .any(|tok| slot_rejects(tok, line, &owns_nothing))

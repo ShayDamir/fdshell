@@ -9,6 +9,7 @@ use sys::ScriptText;
 use sys::ShortCStr;
 
 mod closing;
+mod gap;
 mod preceded;
 mod semisemi;
 mod trim;
@@ -16,8 +17,9 @@ mod trim;
 pub(crate) use closing::{
     List, closing_keyword_index, glue_at, list_closing_keyword_index, up_to_closing, walk_until,
 };
+pub(crate) use gap::{gap_run, gap_run_at_end, semi_byte};
 pub(crate) use preceded::{
-    Term, amp_semi, ensure_before_closer, find_preceded_by, is_closer_predecessor, semi_byte,
+    Term, amp_semi, ensure_before_closer, find_preceded_by, is_closer_predecessor,
 };
 pub(crate) use semisemi::{first_stray, pair_at_byte};
 pub(crate) use trim::{

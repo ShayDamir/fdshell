@@ -13,6 +13,7 @@
 use super::Token;
 use crate::error::parse::ParseError;
 use crate::keywords::Closer;
+use crate::parse::semi::gap::semi_byte;
 use crate::parse::semi::{List, walk_until};
 use crate::parse::word_quoted::keyword_word;
 use error_stack::{Report, ensure};
@@ -69,23 +70,6 @@ pub(crate) fn ensure_before_closer(
 ) -> Result<(), Report<ParseError>> {
     ensure!(is_closer_predecessor(tokens, line, closer_idx - 1), err);
     Ok(())
-}
-
-/// The `;` **byte** behind a `;` **token** — the byte test that separates bash's
-/// two spellings, with one owner here. The tokenizer emits a `;` token for a `;`
-/// byte, a newline and `)` alike ([`crate::parse::token`]), and bash
-/// distinguishes them: `do echo a & ; done` is a syntax error while
-/// `do echo a &\ndone` is valid (task #355), and the `case` clause list of task
-/// #415 is the same split — POSIX #2.9.1 makes that slot a `newline_list`, so a
-/// newline may stand in it but a real `;` may not. Both words go through
-/// [`Token::span_word`], so a quoted `";"` is word data and never the byte (task #336).
-/// Read by [`amp_semi`] and by the clause-list guard `parse/case_block.rs`.
-///
-/// Stays free: it reads the raw script text `line` for the byte behind the `;`
-/// token, so its data is not the token's own state (task #550).
-pub(crate) fn semi_byte(tok: &Token, line: &[u8]) -> bool {
-    let Token { start, .. } = tok;
-    tok.span_word(b";") && line.get(*start) == Some(&b';')
 }
 
 /// The `;` **token** at `idx` of `tokens` is glued right behind a plain `&`

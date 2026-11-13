@@ -1444,6 +1444,56 @@ fn a_brace_expanded_ampersand_in_a_for_word_list_is_a_parse_error() {
     assert!(err.contains("expected 'do'"), "{err}");
 }
 
+/// The word-form `for` takes bash's terminator **gap run** before the `do`: at
+/// most one real `;` byte, then any run of newlines (task #559 — the twin of
+/// `c_style_for_a_terminator_run_before_the_body_matches_bash`, which the byte
+/// test and the run now share one owner for, `parse/semi/gap.rs`). Every row is
+/// measured against `bash -c` (5.3.9), which runs each at rc 0; a comment row
+/// is invisible to the tokenizer, so the newline of the row **before** it is
+/// what stands in the gap, the empty list runs zero iterations, the quoted
+/// `";"` word is one word (one iteration), and the wordless clause behind the
+/// run reads the positional parameters. The reject rows keep the house rc
+/// convention: fdshell 1, bash 2 (measured) — the second `;`, the `;` behind a
+/// newline, the `&`, and the **leading** `;`, which is not the gap.
+#[test]
+fn a_terminator_run_before_the_word_for_body_matches_bash() {
+    for (script, want) in [
+        ("for i in 1 2 ;\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2;\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2 ;\n\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2\n\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2 ;\n# c\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2 ;\n# c\n# d\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2\n# c\n\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2 ;\ndo\n# c\necho a\ndone", "a\na\n"),
+        ("for i in ;\ndo echo a; done", ""),
+        ("for i in ;\n\ndo echo a; done", ""),
+        ("for i in \";\" ;\ndo echo a; done", "a\n"),
+        ("set -- x y; for i ;\n\ndo echo [$i]; done", "[x]\n[y]\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            (want, 0),
+            "{script}: bash parity: {err}"
+        );
+    }
+    for script in [
+        "for i in 1 ; ;\ndo echo a; done",
+        "for i in 1 ;;\ndo echo a; done",
+        "for i in 1 ; ;\n# c\ndo echo a; done",
+        "for i in 1 2\n;\ndo echo a; done",
+        "for i in 1 ; &\ndo echo a; done",
+        "for i in ; 1;\n\ndo echo a; done",
+        "for i in 1 ; 2; do echo a; done",
+        "for i in 1 && ; do echo a; done",
+        "for i in (a); do echo x; done",
+    ] {
+        let (out, _, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
+    }
+}
+
 /// fdshell parses and runs **statement by statement**, so the statement before a
 /// failing loop has already run when the loop's parse fails: stdout `a`, rc 1,
 /// where bash parses the whole script first and prints nothing (rc 2).
