@@ -837,3 +837,14 @@ fn gobbler_escape_pair_never_swallows_a_span_close() {
 fn the_worddef_guard_starts_at_two_words() {
     assert!(expand(&text("cat >{,}")).is_err());
 }
+
+/// The worddef boundary's **one-word** side, asserted against bash 5.3.9
+/// `bash -c 'cat >{a..a} f'` on 2026-11-13: a single non-empty expansion is
+/// accepted — bash creates the file `a` and runs on, its only error the missing
+/// `f` (rc 1) — so the guard's one-word answer must stay `Ok` and the line must
+/// expand to `cat >a f`. The other side is the two-word row above (rule 15 pins
+/// the scope the deleted `> 1` gate claimed, balanced *and* unbalanced).
+#[test]
+fn a_one_word_expansion_of_a_redirect_operand_is_not_ambiguous() {
+    assert_eq!(expand_line("cat >{a..a} f"), b"cat >a f".to_vec());
+}

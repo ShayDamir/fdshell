@@ -49,7 +49,9 @@ pub(crate) fn measure(line: &[u8], open: usize) -> Result<Option<Region>, Report
     // statement splitter and to the cond-list splitter.
     let mut state = ScanState::new();
     let mut i = state.advance(line, open);
-    while i < line.len() && state.paren_depth > 0 {
+    // The bound is the exact range's own method (rule 18/24): the walk stops at
+    // the line end or when the depth returns, whichever the pair of tests says.
+    while state.paren_depth > 0 && !(i..line.len()).is_empty() {
         i = state.advance(line, i);
     }
     ensure!(

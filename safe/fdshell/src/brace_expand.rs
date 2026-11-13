@@ -56,9 +56,11 @@ fn rebuild(line: &[u8], tokens: &[Token]) -> Result<ShortCStr, Report<CmdError>>
             // A redirect word is bash's `worddef` subject: an operand that
             // expands to a number of non-empty words other than one is
             // `ambiguous redirect`, decided here so the command opens nothing.
-            if words.len() > 1 {
-                redirect_guard::guard(tokens, i, span)?;
-            }
+            // The call runs unconditionally: the guard answers `Ok` for one
+            // non-empty word, and a brace expansion yielding exactly one word
+            // never yields an empty one — pinned by
+            // `tests::a_one_word_expansion_of_a_redirect_operand_is_not_ambiguous`.
+            redirect_guard::guard(tokens, i, span)?;
             append_words(words, &mut out);
         } else {
             // A `{` with no valid group: the word is unchanged.

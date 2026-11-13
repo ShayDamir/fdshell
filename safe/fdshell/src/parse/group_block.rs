@@ -68,7 +68,7 @@ pub(crate) fn tokens_to_group(
     let regions = claimed_regions(text, body_tokens);
     let extension = regions
         .first()
-        .is_some_and(|&(start, _)| start < token_range(body_tokens).1);
+        .is_some_and(|&(start, _)| !(start..token_range(body_tokens).1).is_empty());
     let body = part_text(text, if extension { body_tokens } else { trimmed })?;
     // A body region's words are blanked by the tokenizer (task #266) and a
     // terminator line's words are not, so an appended region leaves heredoc
