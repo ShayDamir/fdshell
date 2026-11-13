@@ -8763,8 +8763,8 @@ The same layering decides the newline **behind** a top-level `&&`/`||` (task
 #492): POSIX #2.9 makes that newline part of the AND-IF/OR-IF terminator, so
 the join is decided in the scan — the one granularity that sees physical lines
 (`segment/join.rs`) — and every granularity that never re-scans keeps its own
-answer: condition slices (task #498), the body-slice trim above, the REPL's
-own completeness rule (its pins are in `repl/complete/tests.rs`). One shape
+answer: the body-slice trim above, the REPL's own completeness rule (its pins
+are in `repl/complete/tests.rs`). One shape
 cannot travel through the scan: a physical line that claims a body region —
 its `<<` in the joining run's own text **or** in a `;`-separated run ahead of
 it — cannot hand the scan its region text and keep the body attached, so the
@@ -8788,13 +8788,15 @@ exception has a visible cost, pinned as measured in `tests/heredoc.rs`: a
 chain with a comment on one of its middle links still splits at the comment's
 newline, so that one shape does not produce what bash does; closing it means
 discarding comment text, a rule the parse layer owns and the runner must not
-re-derive. The condition granularity closed its own half there (task #498):
-the slice **inherits** the scan's join verbatim — the cond layer splits on
-operators only and never re-splits on separators, so the join rows sit at
-bash's value — and its own answer at a **separator** inside a condition is the
-**first** command's where bash gates on the last; both are pinned at
-`tests/cond_blocks.rs::the_condition_granularity_runs_only_its_first_command`,
-and the separator answer is the entry below.
+re-derive. The condition granularity closed its own half there (task #498) and
+closed the other half through the **same** scanner (task #557): the slice
+**inherits** the scan's join verbatim — the cond walk splits on operators only,
+so the join rows sit at bash's value — and the run layer now splits a condition
+at a real **separator** too, asking `scan_segments` rather than re-deriving it,
+so a condition runs every command and gates on the last, at bash's value; both
+are pinned at
+`tests/cond_blocks.rs::the_condition_runs_every_command_and_gates_on_the_last`,
+and the splitter's own answer is pinned in `cond/units/tests.rs`.
 
 The byte is read at a second place now (task #415): the `case` clause list,
 whose POSIX #2.9.1 production is a `newline_list`. An empty slot there is
@@ -11211,28 +11213,30 @@ pin: an empty def makes the helper's script open on the `;`), and the
 unchanged `segment/bg/tests.rs` scan pins (`&\n;` stays a whole-string
 divergence — `newline_ends_the_peek`).
 
-## A condition answers with its first command; each operator-part runs one command (task #498)
+## A condition runs every command and gates on the last (task #557, closing task #498)
 
-`if true; false; then echo y; fi` prints `y` here and nothing in bash (rc 0
-both), and `if false; true; then echo y; fi` is the same divergence from the
-other side: the cond layer splits on operators **only** and never re-splits on
-separators, so each part is **one** command (`run_part` → `run_one` → `parse`
-stops at the separator and everything behind it is dropped unrun) and the
-condition's gate is the **first** command's status, where bash's
-`compound_list` runs every command and gates on the **last**. Accepted, pinned
-at fdshell's value with bash's value named per row in
-`safe/fdshell/tests/cond_blocks.rs::the_condition_granularity_runs_only_its_first_command`
-(measured 2026-11-11, bash 5.3.9), which also hosts the join's structural rows
-and the owner-named boundaries (the `;`-byte family pinned at its owners'
-values — #300/#415/#423/#424 — #367's report, #496/#524's span gate, #492's
-region and merge rows; the REPL keeps its own completeness pins). It stays
-this way because a condition is **never re-scanned** (LESSONS:
-"A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)")
-— bash's reading would need a second split-time validator in the run layer,
-which that entry refuses — while the newline **behind** an operator is the
-scan's alone (LESSONS:
-"A `;` token is a newline in disguise: the body-slice rule must read the token's byte (task #355)"),
-which the verbatim slice simply inherits.
+`if true; false; then echo y; fi` prints nothing and `if false; true; then
+echo y; fi` prints `y` — bash's answers, and fdshell gives them now. Task #498
+had accepted the first-command answer as the condition granularity's, because a
+condition was never re-scanned and a run-layer split "would need a second
+split-time validator"; the reversal honours that refusal — the validator is the
+**one** shared scanner (`crate::segment::scan_segments`), and `cond/units.rs`
+only dispatches the units the scan produced, so the "no scan-side twin" rule
+stands. Two rules survived the move. The parse-error pre-passes stay the
+entry's, run over the **whole** text before anything runs, because bash parses
+the whole input before running anything — the pinned rows of #367/#406 were
+measured on them and the units dispatcher invents no error paths. And the
+plain-`&` flag rides on the **last** unit only: a plain `&` ends the statement
+before it (task #326), and a condition slice carries no `&` byte (task #356),
+so the flag is the parse layer's, handed to the entry as an argument. A text
+that yields one unit — every top-level statement and every condition whose
+separators are all data — runs the operator walk (now `run_list`) byte-identical
+to the pre-#557 entry. Loop control raised by **any** unit leaves the condition
+at once, and the last unit's status is what the state carries to the test: no
+bookkeeping. Pins: `cond/units/tests.rs` (the split shapes, the per-unit body
+allocation, the flag on the last unit only, the immediate control exit) and
+`tests/cond_blocks.rs::the_condition_runs_every_command_and_gates_on_the_last`
+(this task's table and the flipped #498 family, at bash's measured values).
 
 ## An export dup is only ever created in a forked child (task #503)
 

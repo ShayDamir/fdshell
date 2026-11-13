@@ -4,6 +4,7 @@ mod boundary;
 pub(crate) mod errexit;
 pub(crate) mod part;
 mod parts;
+mod units;
 
 use crate::error::cmd::CmdError;
 use crate::error::parse::ParseError;
@@ -15,8 +16,12 @@ use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
-/// Bash's errexit exemption is **one** mechanism: the execution-context gate
-/// ([`errexit::gated`], [`crate::state::ShellState::errexit_gated`]). The
+/// The condition entry: the two parse-error pre-passes (bash parses the whole
+/// input before running anything), then [`units`] — the shared scanner's split
+/// at real separators (task #557), so a condition that lists several commands
+/// runs **every** one and gates on the **last**, as bash's `compound_list`
+/// does. Bash's errexit exemption is **one** mechanism: the execution-context
+/// gate ([`errexit::gated`], [`crate::state::ShellState::errexit_gated`]). The
 /// list's **non-final** parts run inside it, and the
 /// `if`/`elif`/`while`/`until` **condition** callers (`if_exec.rs`, `loop_.rs`)
 /// run a whole condition list inside it, because bash exempts the test *and*
@@ -56,6 +61,23 @@ pub(crate) fn run_cond_list(
             Report::new(ParseError::ExpectedCommandBeforeOp { op }).change_context(CmdError::Parse)
         );
     }
+    units::run_units(text, bodies, cell, background)
+}
+
+/// The operator walk over one unit — the whole text when the unit scan splits
+/// nothing (every pinned single-unit condition and top-level statement runs
+/// through here byte-identical), or one split unit of a multi-unit condition
+/// (task #557, [`units`]). The pre-passes above are the entry's, run once over
+/// the whole text **before** anything runs, because bash parses the whole
+/// input before running anything (tasks #367/#406); `run_list` adds no
+/// error paths of its own.
+pub(super) fn run_list(
+    text: &ScriptText,
+    bodies: &[Vec<u8>],
+    cell: &ForkCell<ShellState>,
+    background: bool,
+) -> Result<Option<LoopControl>, Report<CmdError>> {
+    let line = text.as_bytes().change_context(CmdError::Never)?;
     let mut state = ScanState::new();
     let mut start = 0;
     let mut body_idx = 0;

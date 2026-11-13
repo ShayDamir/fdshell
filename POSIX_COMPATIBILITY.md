@@ -731,14 +731,14 @@ begins **mid-line** — the tail of a line whose head a definition's body or a h
 claimed — and a text that is only an operator, blank on both sides, keep their measured
 answers.
 
-The **condition** granularity inherits the join verbatim: its slice is never
-re-scanned, and the cond layer splits on operators only, so a short circuit spans
-the newline exactly as bash's does and the task's table is parity. Inside a
-condition the newline (like `;` and `;;`) stays a **separator**, and there the
-condition keeps its own answer: each operator-part runs only its **first**
-command, so that command's status gates the branch where bash's `compound_list`
-runs every command and gates on the last (accepted divergence, pinned per row in
-`safe/fdshell/tests/cond_blocks.rs::the_condition_granularity_runs_only_its_first_command`).
+The **condition** granularity inherits the join verbatim: the cond layer's walk
+splits on operators only, so a short circuit spans the newline exactly as bash's
+does and the task's table is parity. Inside a condition a real separator (`;` or
+a plain newline) **splits**: the units dispatcher (`cond/units.rs`, task #557)
+runs every command of the list, in order, through the one shared scanner's
+granularity, and the **last** one's status gates the branch, as bash's
+`compound_list` does; the scan's marks keep their owners' answers (pinned per row
+in `safe/fdshell/tests/cond_blocks.rs::the_condition_runs_every_command_and_gates_on_the_last`).
 
 The gate is the token's **raw span**, one owner:
 `safe/fdshell/src/parse/token_word.rs::Token::span_word` (text **and** span). Not the
