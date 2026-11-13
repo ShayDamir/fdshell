@@ -3604,7 +3604,13 @@ pair the pass consumed, **never** by a second scan of the raw word:
 a `\` inside a `'…'` span from an escape pair (POSIX §2.2.3: a single-quoted
 span has no escape pair). A trailing lone `\` escapes nothing, so it is no
 pair and quotes nothing (`E\` → `quoted == false`, pinned in
-`scan/heredoc/op/tests.rs`). A quoted body is also verbatim w.r.t.
+`scan/heredoc/op/tests.rs`). The exception landed with task **#555**: a
+`\<newline>` pair the pass **drops** sets no flag — XCU 2.3 counts the pair
+that *folds* into a byte, and a dropped pair produces none (measured:
+`X=zzz; cat <<a\` + `b` + `$X` + `ab` prints `zzz` and is silent — the joined
+word is unquoted, so the body expands; pinned in
+`bytes/fold/tests.rs::fold_quotes_drops_a_newline_pair_without_the_flag`).
+A quoted body is also verbatim w.r.t.
 `\<newline>`: `parse/heredoc.rs` gates `strip_continuations` on the same flag,
 so flipping it changes the body's **bytes** as well as its expansion — measure
 both.
@@ -3658,8 +3664,8 @@ print their body at rc 0. The **`\` at the end of the word** member is
 narrowed but not closed: the tokenizer's continuation join (`<<E\` + `zzz` →
 the word `Ezzz`, `<<a\` + `a\` → `aa\` — the pinned script's last line has no
 final newline, so bash's trailing lone `\` keeps its backslash; give that line
-a newline and the pair joins and the word is `aa`) is pinned as measured by
-task **#489** and implemented by task **#555**, in
+a newline and the pair joins and the word is `aa`) is decided by task
+**#489** and landed with task **#555**, in
 `tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners`
 — since task **#364** both shells run these rows at rc 0 with an end-of-file
 warning, so only the word text (and the warning count it produces) stays with
@@ -3670,7 +3676,12 @@ pins are `scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word` and
 **The join's owner, decided on #489's measurements (the arm lands in #555)**:
 it belongs to the folding machine the delimiter word already shares —
 `bytes/fold/raw.rs::fold_impl`'s escape-pair arm — not to a pre-region-scan
-text pass and not to `parse/heredoc/strip.rs`. The word text decides both the
+text pass and not to `parse/heredoc/strip.rs`. The arm landed as planned
+(task #555): a new branch after the two quote-toggle arms, gated on `!single`
+(POSIX §2.2.3 — a `'…'` span has no escape pair), dropping **both** bytes of a
+`\`+newline pair inside double quotes as well as outside, the same arm
+`parse/quotes.rs` runs, and setting no quote flag (the measured exception is
+in rule 2 above). The word text decides both the
 warning *and* the delimiter-line match, and both come from `Operator::new` →
 `fold_quotes` → `fold_impl`, the machine this entry names as shared by the
 byte scanner and the token parser; the rule decided anywhere else is a private
@@ -3688,13 +3699,20 @@ the byte level's raw word stays clipped and the text rule is where the join
 can live. The body side already implements the rule and is at parity
 (`strip_continuations`, pinned by
 `tests/heredoc.rs::heredoc_body_line_continuation_joins_the_lines` and
-`heredoc_body_pairs_backslashes_left_to_right`), so the word side is the
+`heredoc_body_pairs_backslashes_left_to_right`), so the word side was the
 missing half; the control row proves the rule is about the pair and not the
 newline — POSIX gives a `'…'` span no escape pair, and `cat <<'a\` + newline +
 `b'` is parity today. `bytes/fold.rs::fold_mask` (the `>a\` + `b` redirect
 target — bash writes `ab`, fdshell a file named `a` + newline + `b` — the
-`command`/`builtin` name fold, the replacer) takes the same arm or an explicit
-refusal, decided once in #555.
+`command`/`builtin` name fold, the replacer) **took the arm** (#555, decided
+once): it is mask-blind, because a single-quoted span's literal backslash
+reaches the word text as the encoded `\\` pair, so a `\`+newline pair reaching
+this arm is the tokenizer's own escape pair — the same reasoning as
+`substitute/arg/escape.rs::unquoted`, which drops the pair regardless of the
+mask state. The five surfaces it feeds move to bash parity, pinned by
+`tests/backslash.rs::escaped_newline_joins_the_word_on_the_mask_surfaces`
+(word 0, `builtin`, `command`, `exec`, the redirect target, and the
+single-quote control that must stay parity).
 
 
 
@@ -6127,8 +6145,11 @@ parse layer compares the **folded** word — the signature is the false
 "byte-level and token-level counts must agree". The pair is clipped at the
 window end (`min(to)`): a `\` at the physical line's end stays a lone byte
 (`fold_quotes` keeps the backslash, so the delimiter is the literal `a\`), and
-the `\`+newline continuation join is pinned as measured by task **#489** and
-implemented by task **#555**; the clip at the window end stands. Pins:
+the `\`+newline continuation join is decided by task **#489** and **landed in
+the folding machine with task #555** — the arm in
+`bytes/fold/raw.rs::fold_impl`, gated on `!single` (POSIX §2.2.3), and the
+mask-blind twin in `bytes/fold.rs::fold_mask` (the single-quote-encoding
+reason); the clip at the window end stands. Pins:
 `scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word`,
 `scan/heredoc/tests.rs::delimiter_span_clips_a_trailing_escape_pair_to_the_window`,
 `parse/heredoc/tests.rs::escaped_delimiter_words_fold_the_same_at_both_levels`
@@ -6137,11 +6158,18 @@ implemented by task **#555**; the clip at the window end stands. Pins:
 (every row bash-measured: the `<<-` form, the io-number form, two operators on
 one line, the escaped-tab word, and `X=v; cat <<a\ b` + `$X` + `a b`, whose
 folded pair quotes the body), and the flipped #349 pin
-`tests/heredoc.rs::chevron_terminator_known_divergences`. The rows that stay
-divergent keep their owners: the continuation join (**#489** pins it, **#555**
-implements it; narrowed by task **#364** — both shells now run its rows at rc
-0 with the end-of-file warning, so only the word text and the warning count
-differ) in
+`tests/heredoc.rs::chevron_terminator_known_divergences`. When #555 landed the
+arm, its pinned test moved to **bash's values**: the rows whose joined word
+matches a line are now silent in both shells, and the word-text rows name the
+joined word. What stays pinned as measured is what the fold cannot decide
+alone: `cat <<a\ ` + `a ` (bash is **silent** — its word `a ` matches the
+terminator line — while fdshell's word is `aa`, the escaped trailing space
+having vanished from the word text before the fold; owner: the pass that drops
+a trailing space before a newline, not the fold) and the no-newline script
+`cat <<a\` + `a\` (bash's trailing lone `\` escapes nothing and keeps its
+backslash — word `aa\` — where fdshell's word text ends in a `\`+newline pair
+the arm drops, answering `aa`), both running at rc 0 in both shells (**#364**
+narrowed the family to the word text and the warning's absence) in
 `tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners`;
 the EOF-starved delimiter rows (**#275** / **#429**) these tests used to pin
 are parity now.

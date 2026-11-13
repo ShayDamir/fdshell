@@ -225,6 +225,38 @@ fn escaped_newline_is_a_line_continuation() {
     assert_eq!(out, "xy");
 }
 
+/// Task #555 lands the same arm in the folding machine, so every mask-surface
+/// word now joins across the pair and matches bash: word 0, the `builtin` and
+/// `command` name words, the replacer (`exec`), and the redirect target. The
+/// single-quoted control must stay parity: POSIX §2.2.3 gives a `'…'` span no
+/// escape pair, and its literal backslash reaches the machine as the encoded
+/// `\\` pair, so nothing is dropped (the kill row for a mask-blind arm that
+/// drops too much).
+#[test]
+fn escaped_newline_joins_the_word_on_the_mask_surfaces() {
+    for script in [
+        "e\\\ncho hi",
+        "builtin e\\\ncho hi",
+        "command e\\\ncho hi",
+        "exec ec\\\nho hi",
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script}: stderr={err:?}");
+        assert_eq!(out, "hi\n", "{script}: bash prints hi");
+    }
+    let dir = scratch(&[]);
+    let (out, err, code) = run_in(&dir, "echo x > a\\\nb");
+    assert_eq!((out.as_str(), code), ("", 0), "{err:?}");
+    assert_eq!(names_in(&dir), vec!["ab".to_string()], "bash writes `ab`");
+    assert_eq!(std::fs::read(dir.join("ab")).unwrap(), b"x\n");
+    // The control: the filename is the word as written in the span, escape
+    // pair and all (bash writes the same `a`+newline+`b` file).
+    let (out, err, code) = run_in(&dir, "echo x > 'a\\\nb'");
+    assert_eq!((out.as_str(), code), ("", 0), "{err:?}");
+    assert_eq!(names_in(&dir), vec!["a\\\nb".to_string(), "ab".to_string()]);
+    assert_eq!(std::fs::read(dir.join("a\\\nb")).unwrap(), b"x\n");
+}
+
 /// The escaped `$` and backtick are literal: no expansion, no command
 /// substitution.
 #[test]

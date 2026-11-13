@@ -248,3 +248,91 @@ fn fold_mask_round_trips_the_single_quote_encoding() {
         (b"a\\*b".to_vec(), vec![Quoted, Quoted, Quoted, Quoted])
     );
 }
+
+/// Task #555: `\<newline>` is a line continuation — **both bytes are dropped**,
+/// inside double quotes as well as outside (the arm `parse/quotes.rs` runs).
+/// The verbatim row is the POSIX §2.2.3 control and the kill test for the
+/// arm's `!single` gate: a `'…'` span has no escape pair.
+#[test]
+fn fold_drops_a_newline_escape_pair() {
+    assert_eq!(fold(b"a\\\nb"), b"ab");
+    assert_eq!(fold(b"\"a\\\nb\""), b"\"ab\"");
+    assert_eq!(fold(b"'a\\\nb'"), b"'a\\\nb'");
+    // Only the **backslash** opens the arm: a plain byte before a newline is
+    // word data.
+    assert_eq!(fold(b"a\nb"), b"a\nb");
+}
+
+/// A dropped `\<newline>` pair is **not** a POSIX quote operator (bash expands
+/// `$` in a body whose delimiter joined lines — measured on the row
+/// `X=zzz; cat <<a\` + `b` + `$X` + `ab`, which prints `zzz`): the flag stays
+/// down on the unquoted join. The quoted rows' flags come from their marker
+/// bytes alone.
+#[test]
+fn fold_quotes_drops_a_newline_pair_without_the_flag() {
+    assert_eq!(fold_quotes(b"a\\\nb"), (b"ab".to_vec(), false));
+    assert_eq!(fold_quotes(b"\"a\\\nb\""), (b"ab".to_vec(), true));
+    // The `'…'` control: the span's literal backslash is data (POSIX §2.2.3),
+    // so the pair survives verbatim and only the markers set the flag.
+    assert_eq!(fold_quotes(b"'a\\\nb'"), (b"a\\\nb".to_vec(), true));
+    // Only the **backslash** opens the arm: a plain byte before a newline is
+    // word data, and no quote operator was seen.
+    assert_eq!(fold_quotes(b"a\nb"), (b"a\nb".to_vec(), false));
+}
+
+/// Task #555 took the same arm in the mask machine; it is deliberately
+/// mask-blind (a single-quoted span's literal backslash reaches word text as
+/// the encoded `\\` pair, so a `\`+newline pair here is the tokenizer's own
+/// escape pair — `substitute/arg/escape.rs::unquoted` drops it at either
+/// mask bit). Every row binds bytes **and** the mask vector, with bytes after
+/// the dropped pair (LESSONS: a mask-alignment test must bind the variable it
+/// probes).
+#[test]
+fn fold_mask_drops_a_newline_pair_at_either_mask_bit() {
+    assert_eq!(
+        fold_mask(b"a\\\nb", &[Unquoted, Unquoted, Unquoted, Unquoted]),
+        (b"ab".to_vec(), vec![Unquoted, Unquoted])
+    );
+    assert_eq!(
+        fold_mask(b"a\\\nb", &[Quoted, Quoted, Quoted, Quoted]),
+        (b"ab".to_vec(), vec![Quoted, Quoted])
+    );
+    assert_eq!(
+        fold_mask(
+            b"a\\\nbc",
+            &[Unquoted, Unquoted, Unquoted, Unquoted, Quoted]
+        ),
+        (b"abc".to_vec(), vec![Unquoted, Unquoted, Quoted])
+    );
+    // The single-quote-encoding control: `'a\<newline>b'` arrives as the
+    // encoded `\\` pair (five bytes, mask `Quoted`); the pair keeps the
+    // POSIX #4.2 arm below the newline arm, so the span round-trips to the
+    // bytes written in it — the newline was never the pair's second byte.
+    assert_eq!(
+        fold_mask(b"a\\\\\nb", &[Quoted, Quoted, Quoted, Quoted, Quoted]),
+        (b"a\\\nb".to_vec(), vec![Quoted, Quoted, Quoted, Quoted])
+    );
+    // Only the **backslash** opens the arm: a plain byte before a newline is
+    // word data, mask and all (the guard-`true` kill row).
+    assert_eq!(
+        fold_mask(b"a\nb", &[Unquoted, Unquoted, Unquoted]),
+        (b"a\nb".to_vec(), vec![Unquoted, Unquoted, Unquoted])
+    );
+    assert_eq!(
+        fold_mask(b"a\nb", &[Quoted, Quoted, Quoted]),
+        (b"a\nb".to_vec(), vec![Quoted, Quoted, Quoted])
+    );
+}
+
+/// [`fold_word`] returns the joined word with its aligned mask (task #555):
+/// the dropped pair shortens the word and the mask by its two bytes.
+#[test]
+fn fold_word_drops_a_newline_pair_with_the_aligned_mask() {
+    let (word, mask) = fold_word(
+        &ShortCStr::from(c"a\\\nb"),
+        &[Unquoted, Unquoted, Unquoted, Unquoted],
+    )
+    .expect("folded word is NUL-free");
+    assert_eq!(word.as_bytes().expect("bytes"), b"ab");
+    assert_eq!(mask, vec![Unquoted, Unquoted]);
+}

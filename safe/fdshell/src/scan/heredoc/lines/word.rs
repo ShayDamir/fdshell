@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C heredoc -- -E 'test(/^scan::heredoc::/) | test(/^parse::heredoc::/) | binary(heredoc)'
+
 //! The word-byte walk of the delimiter word: quote spans, escape pairs and
 //! `$( … )` regions consumed whole (the module `lines` splits scan from walk).
 
@@ -15,8 +17,9 @@ use crate::paren_scan::scan_at;
 /// `missing terminating delimiter line` while bash reads the whole folded word
 /// (`<<a\ b` delimits `a b`, `<<\;` delimits `;`). A `\` at the window end
 /// stays a lone byte: the pair never steps over the physical-line end (the
-/// `\`+newline continuation is task #489's), exactly `read_escape`'s
-/// trailing-`\` rule, and `fold_quotes` keeps that backslash. So is a `$( … )`
+/// `\`+newline continuation join lives in the folding machine — #489's
+/// decision, landed with #555), exactly `read_escape`'s trailing-`\`
+/// rule, and `fold_quotes` keeps that backslash. So is a `$( … )`
 /// region opened on the word ([`substitution_span`]).
 pub(crate) fn word_span(line: &[u8], j: usize, to: usize) -> usize {
     if line.get(j) == Some(&b'\\') {

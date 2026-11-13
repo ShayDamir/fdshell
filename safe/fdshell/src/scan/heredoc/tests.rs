@@ -528,7 +528,8 @@ fn skip_escaped_delimiter_word_is_one_word() {
 /// A `\` at the **window end** stays a lone byte: the pair is clipped to `to`,
 /// so the walk never reads past the physical-line window the caller handed it
 /// (the window ends at the newline; the `\`+newline continuation join is task
-/// **#489**'s). `fold_quotes` keeps that trailing backslash, so the delimiter
+/// **#489**'s decision and landed in the folding machine with **#555**).
+/// `fold_quotes` keeps that trailing backslash, so the delimiter
 /// is the literal `a\`.
 #[test]
 fn delimiter_span_clips_a_trailing_escape_pair_to_the_window() {

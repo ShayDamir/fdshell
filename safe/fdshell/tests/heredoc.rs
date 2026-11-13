@@ -4651,69 +4651,68 @@ fn an_escaped_delimiter_word_is_one_word_at_both_levels() {
     }
 }
 
-/// Task #347, the members of the escaped-delimiter family that stay divergent,
-/// pinned **as measured** with the owner named (never silently accepted): a `\`
-/// at the **end of the word** opens the tokenizer's line-continuation join —
-/// the delimiter word swallows the next line (`cat <<a\` with a following `a\`
-/// is one word `aa\` in bash — the pinned script's last line has no newline, so
-/// bash's trailing lone `\` keeps its backslash; give that line a newline and
-/// the pair joins and the word is `aa` — and `cat <<E\` with a following `zzz`
-/// is `Ezzz`), a rule task **#489** pins and task **#555** implements
-/// (decision: LESSONS "A delimiter word is a word: quote removal strips
-/// every quote byte"); a delimiter line that never arrives is the
-/// end-of-file family of task **#364** (both shells read to EOF, warn and
-/// run at rc 0 — parity measured 2026-10-29; the #489 rows keep their
-/// word-shape divergence, which decides the warning's text and whether bash
-/// warns at all on the matching row).
+/// Task #347, the members of the escaped-delimiter family whose word-final `\`
+/// opens the tokenizer's line-continuation join — the delimiter word swallows
+/// the next line. The join landed in the folding machine with task **#555**
+/// (`bytes/fold/raw.rs::fold_impl` and `bytes/fold.rs::fold_mask` drop a
+/// `\`+newline pair whole; decision: LESSONS "A delimiter word is a word:
+/// quote removal strips every quote byte"), so the rows whose word the join
+/// decides are pinned at **bash's value**; what stays measured-as-divergent is
+/// what the fold cannot decide: bash's word for `cat <<a\` with a following
+/// `a\` is `aa\` (the pinned script's last line has no newline, so bash's
+/// trailing lone `\` keeps its backslash; give that line a newline and the
+/// pair joins and the word is `aa`) where fdshell's is `aa`, and on the
+/// `cat <<a\ ` row bash is **silent** because its word is `a ` while
+/// fdshell's escaped trailing space is gone from the word text before the
+/// fold (owner: the pass that drops a trailing space before a newline, not
+/// the fold). A delimiter line that never arrives is the end-of-file family
+/// of task **#364** (both shells read to EOF, warn and run at rc 0 — parity
+/// measured 2026-10-29); the word text the message names, and whether it
+/// names it at all, is what stays with **#489** — pinned as measured, with
+/// the owner named (never silently accepted).
 #[test]
 fn an_escaped_delimiter_word_at_the_line_end_keeps_its_owners() {
-    // The **word-glued continuation family** (task **#489**): every row asserts
-    // fdshell's measured value with bash's value in the comment right beside it,
-    // so the rows the fold machine flips (rows 2/3/4/9/11 — bash's joined word
-    // matches a line, so it is silent; task **#555** implements the arm, decided
-    // in LESSONS "A delimiter word is a word: quote removal strips every quote
-    // byte") stay a one-token edit per row. Measured 2026-11-11 on this branch:
-    // bash 5.3.9 against fdshell's debug binary, stdin /dev/null, script text
-    // (the interactive/REPL path is not measured here). The message-format
-    // difference — bash's `line N:` prefix and its escaping of the word — is
-    // task **#364**'s; what is pinned is the **word text** the message names and
-    // whether bash warns at all.
-    for (script, want_out, code) in [
-        // bash: word `ab`, warn, stdout `a b`, rc 0 — rc/stdout/warning parity,
-        // fdshell's word is `a` + newline + `b`.
-        ("cat <<a\\\nb\na b\n", "a b\n", 0),
-        // The joined word `ab` MATCHES line 3, so bash is **silent** and line 3
-        // prints nothing; fdshell's word `a` + newline + `b` never matches, so
-        // line 3 is body and the run carries the end-of-file warning.
-        ("cat <<a\\\nb\nab\n", "ab\n", 0),
-        // `<<-` twin of the matching row: bash **silent**, no stdout; fdshell
-        // warns and prints line 3.
-        ("cat <<-a\\\nb\nab\n", "ab\n", 0),
-        // io-number twin of the matching row: bash **silent**, nothing on stdout
-        // (its body is fd 3); fdshell warns and its body is fd 3 too, so the
-        // only difference on this surface is the warning.
-        ("cat 3<<a\\\nb\nab\n", "", 0),
-        // bash: word `ab`, warn, no stdout, rc 0 — parity bar the word text.
-        ("cat 3<<a\\\nb\na b\n", "", 0),
-        // bash: word `ab`, warn, stdout `a b`, rc 0 — parity bar the word text.
-        ("cat <<-a\\\nb\na b\n", "a b\n", 0),
-        // bash: word `ab`, warn, stdout `b`, rc 0 — parity bar the word text.
-        ("cat <<a\\\nb\nb\n", "b\n", 0),
-        // The join puts the tab *inside* the line, so bash's word is `a` and
+    // The **word-glued continuation family** (task **#489**, arm landed in
+    // task **#555**): every row asserts the value both shells now agree on;
+    // the four rows whose joined word matches a line are **silent** in both,
+    // and the warning rows' `want_err` names the **joined** word the message
+    // carries (the message format — bash's `line N:` prefix and its escaping
+    // — is task **#364**'s; what is pinned is the word text and whether a
+    // warning is printed at all). Measured 2026-11-13 on this branch:
+    // bash 5.3.9 against fdshell, stdin /dev/null, script text (the
+    // interactive/REPL path is not measured here).
+    for (script, want_out, code, want_err) in [
+        // Both warn the joined word `ab`, stdout `a b`, rc 0 — word-text
+        // parity since #555.
+        ("cat <<a\\\nb\na b\n", "a b\n", 0, "wanted 'ab'"),
+        // The joined word `ab` MATCHES line 3, so both shells are **silent**
+        // and line 3 prints nothing.
+        ("cat <<a\\\nb\nab\n", "", 0, ""),
+        // `<<-` twin of the matching row: both silent, no stdout.
+        ("cat <<-a\\\nb\nab\n", "", 0, ""),
+        // io-number twin of the matching row: both silent, nothing on stdout
+        // (both bodies are fd 3).
+        ("cat 3<<a\\\nb\nab\n", "", 0, ""),
+        // Both warn the joined word `ab`, no stdout, rc 0.
+        ("cat 3<<a\\\nb\na b\n", "", 0, "wanted 'ab'"),
+        // Both warn the joined word `ab`, stdout `a b`, rc 0.
+        ("cat <<-a\\\nb\na b\n", "a b\n", 0, "wanted 'ab'"),
+        // Both warn the joined word `ab`, stdout `b`, rc 0.
+        ("cat <<a\\\nb\nb\n", "b\n", 0, "wanted 'ab'"),
+        // The join puts the tab *inside* the line, so the word is `a` and
         // `<TAB>b` is a `cat` argument (`cat: b: No such file or directory`,
-        // rc 1, warn word `a`); fdshell prints the same rc and stderr with its
-        // word `a` + newline.
-        ("cat <<-a\\\n\tb\nab\n", "", 1),
-        // A double-quoted word: bash folds the pair — `\<newline>` is an escape
-        // pair inside `"…"` — so its word is `ab`, line 3 matches and bash is
-        // **silent**. fdshell's quoted pair keeps its backslash, so its word is
-        // `a\` + newline + `b`, line 3 is body, and it warns.
-        ("cat <<\"a\\\nb\"\nab\n", "ab\n", 0),
+        // rc 1, warn word `a`) — bash's value, and fdshell's since #555.
+        ("cat <<-a\\\n\tb\nab\n", "", 1, "wanted 'a'"),
+        // A double-quoted word: the arm runs inside `"…"` too
+        // (`parse/quotes.rs`), so the joined word `ab` matches line 3 and
+        // **both shells are silent**.
+        ("cat <<\"a\\\nb\"\nab\n", "", 0, ""),
         // A single-quoted word: POSIX gives no escape pair inside `'…'`, so the
         // newline is data and **both shells read the same word** — `a\` +
         // newline + `b` — warn, and print `ab`. The control row: the rule is
-        // about the pair, not about quoting.
-        ("cat <<'a\\\nb'\nab\n", "ab\n", 0),
+        // about the pair, not about quoting (the kill test for the arm's
+        // `!single` gate).
+        ("cat <<'a\\\nb'\nab\n", "ab\n", 0, "wanted 'a\\\nb'"),
     ] {
         let (out, err, got) = run(script);
         assert_eq!(
@@ -4721,27 +4720,33 @@ fn an_escaped_delimiter_word_at_the_line_end_keeps_its_owners() {
             (code, want_out),
             "script {script:?}: stderr={err:?}"
         );
-        assert!(
-            err.contains("delimited by end-of-file"),
-            "script {script:?}: stderr={err:?}"
-        );
+        match want_err {
+            // Silent rows: bash prints no warning, and fdshell now matches —
+            // the joined word answers the delimiter line.
+            "" => assert!(err.is_empty(), "script {script:?}: stderr={err:?}"),
+            word => assert!(err.contains(word), "script {script:?}: stderr={err:?}"),
+        }
     }
-    // #489's rows, pinned as measured 2026-10-29 and re-measured 2026-11-11: the
-    // trailing `\` joins the word with the next line **in bash** — its word is
-    // `a `, `aa\` and `Ezzz`; fdshell keeps its own word shape (`a` + newline +
-    // `a`, `a` + newline + `a` + newline, `E` + newline + `zzz`), so the delimiter
-    // line never matches and fdshell's run carries the end-of-file warning (task
-    // #364). Both shells run every row at rc 0; the first row is behavioural
-    // because bash's joined word matches its line and bash is **silent**.
+    // #489's rows, pinned as measured 2026-10-29, re-measured 2026-11-11 and
+    // re-pinned when #555's fold arm landed: the trailing `\` joins the word
+    // with the next line in **both** shells now — fdshell's word is `aa`, `aa`
+    // and `Ezzz` — but the rows stay measured-as-divergent where the fold does
+    // not decide alone. The first row: bash's word is `a ` and **bash is
+    // silent** (line 2 is the terminator) because fdshell's escaped trailing
+    // space is gone from the word text **before** the fold (owner: the pass
+    // that drops a trailing space before a newline, not the fold — #555's plan
+    // says to pin the measured value, not to force the row by touching the
+    // walk), so fdshell's joined word is `aa`, the delimiter line never
+    // matches and fdshell's run carries the end-of-file warning (task #364).
+    // The second row: bash's word is `aa\` (the pinned script's last line has
+    // no newline, so bash's trailing lone `\` escapes nothing; give that line
+    // a newline and the pair joins and the word is `aa` — which is what
+    // fdshell answers, its word text ending in the pair the arm drops). The
+    // third row is full parity bar the message format: both shells warn the
+    // joined word `Ezzz`, stdout `EOF\n`, rc 0. All rows run at rc 0.
     for (script, want_out) in [
-        // bash: word `a ` — line 2 is the terminator, so bash is **silent**, rc 0,
-        // no stdout.
         ("cat <<a\\ \na ", ""),
-        // bash: word `aa\` (the pinned script's last line has no newline, so the
-        // trailing lone `\` escapes nothing), warn, rc 0, no stdout — parity bar
-        // the word text.
         ("cat <<a\\\na\\", ""),
-        // bash: word `Ezzz`, warn, stdout `EOF\n`, rc 0 — parity bar the word text.
         ("cat <<E\\\nzzz\nEOF", "EOF\n"),
     ] {
         let (out, err, code) = run(script);
