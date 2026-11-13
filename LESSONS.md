@@ -1421,8 +1421,8 @@ the load-flaky tests comes before chasing any of this.
    identically, so no answer could see it; measured green by hand twice, task
    #318). Resolved by task #513: the walk ends through the range's own
    `is_empty` — no operator site (rules 18/24). Its
-   outer twin `while i < to` → `i <= to` is **killed**, not equivalent
-   (re-proved by hand, 2026-10-25): at `i == to` the read is `line.get(to)` of the
+   outer twin `while i < to` → `i <= to` is    **killed**, not equivalent
+   (re-proved by hand): at `i == to` the read is `line.get(to)` of the
    **whole** line — `None` only when the window ends the line — and a token byte
    there (`\n` is one, task #261) sets `seen_token`, which is exactly what
    `ops/tests.rs::window_end_is_exclusive` pins (**task #345 rewrote this body**
@@ -1445,19 +1445,14 @@ the load-flaky tests comes before chasing any of this.
      rule-24 shape is what resolved it): **the recorded mutant is now the
      source** — the entry's own proof licensed it (the extra iteration touches
      only the index, which converges, `advance` consuming the newline being
-     state-neutral; #276 measured it three ways, #513 re-proved it green twice,
-     and the full suite went green a third time on the rewritten source,
-     2026-11-05) — and the jump is written as a method call
+     state-neutral) — and the jump is written as a method call
      (`Some(p) => i = i.saturating_add(p),`) so no operator is left at the site
      (rules 22/24): the family — `+`→`*` and its `-` twins at both operands,
      which the focus runs kept scoring as caught — has no site to land on.
-      The focused `-j1` run over the five rewritten files (this one, `block.rs`,
-      `group.rs`, `bg.rs`, `regions.rs`, 108 mutants, 2026-11-05) reports **no
-      miss** from any of the seven resolved sites; its four misses were the
-      pre-existing `segment/bg.rs::line_continues` family (drift from task
-      #313's sweep, not a registry record — this chore's `bg.rs` change is
-      value-identical by construction and those mutants touch only
-      `line_continues`'s own body, so they read the same before and after).
+      The focused `-j1` run over the five rewritten files reports **no miss** from
+      any of the seven resolved sites; its four misses were the pre-existing
+      `segment/bg.rs::line_continues` family (drift from task #313's sweep, not a
+      registry record).
       Task #534 closed that family with a pin at the predicate's own answer
       (`segment/bg/tests.rs::the_three_cursor_rows_are_pinned_at_their_own_answer`:
       comment behind the `&`, command behind it, the line ending at it — each row
@@ -1488,9 +1483,7 @@ the load-flaky tests comes before chasing any of this.
    `tests.rs::the_substitution_guard_demands_the_full_dollar_paren_pair` (a
    non-`$` word byte before a `(` with a matching `)` inside the window: the guard
    must fall through, and under the mutant the paren scan jumps the walk past the
-   `;`). It had been caught in the 2026-10 record; the test that fed it drifted
-   out, the mutant went green twice on the current tree, and the pin restored the
-   kill (verified RED under the mutation). Item 1's lesson sharpens the
+   `;`). Item 1's lesson sharpens the
    *why* the old bounds were safe: each body **tests its own condition** at the
    extra index (`matches!(…)`, `!= Some(&q)`) and `word_span` clamps with
    `.min(to)` — not because `line.get(to)` is `None`, since a window's `to` is a
@@ -1524,9 +1517,9 @@ LESSONS: "A heredoc terminator line is structure, not command bytes"; the
 body-line half of the class is #311's, pinned by
 `tests/heredoc.rs::single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_is_verbatim`.
 
-Measured boundary of the same entry (task #263's review, 2026-10-19): the delimiter word's *flag* rule is now bash-parity, its *word-span* rule is not, and the two must not be conflated. An escaped whitespace byte inside the word (`<<a\ b`, `<<\ b`, `<<a\<TAB>b`) and a `\` at the end of the word before the newline (`<<E\`) still diverge — bash joins the word across the pair (delimiter `a b`, ` b`, `a<TAB>b`, and `<<E\` joins the next line into `Ezzz` with its EOF warning, rc 0) where fdshell splits the word at the whitespace byte and reports a parse error at rc 1. `bytes/fold.rs` is not the fix for those rows: the span is built by `scan/heredoc/lines/word.rs::word_span`/`lines.rs::delimiter_span`, which step one byte at a time. The owner was task #349 (measured at review, no prerequisite relation to #263; the flag flip then left every one of those rows rc 1, unchanged).
+Measured boundary of the same entry: the delimiter word's *flag* rule is now bash-parity, its *word-span* rule is not, and the two must not be conflated. An escaped whitespace byte inside the word (`<<a\ b`, `<<\ b`, `<<a\<TAB>b`) and a `\` at the end of the word before the newline (`<<E\`) still diverge — bash joins the word across the pair (delimiter `a b`, ` b`, `a<TAB>b`, and `<<E\` joins the next line into `Ezzz` with its EOF warning, rc 0) where fdshell splits the word at the whitespace byte and reports a parse error at rc 1. `bytes/fold.rs` is not the fix for those rows: the span is built by `scan/heredoc/lines/word.rs::word_span`/`lines.rs::delimiter_span`, which step one byte at a time. The owner was task #349 (measured at review, no prerequisite relation to #263; the flag flip then left every one of those rows rc 1, unchanged).
 
-**Closed by task #347 for the pair half, and the boundary is narrower now** (measured 2026-10-28, bash 5.3.9): `word_span` consumes an unquoted `\X` pair whole, so the escaped-whitespace rows are bash parity — `cat <<a\ b`, `<<\ b`, `<<a\<TAB>b`, `<<a\;b`, `<<a\|b`, `<<a\)`, `<<\;`, `<<\|`, their `<<-` and io-number twins, and `X=v; cat <<a\ b` + `$X` (the pair quotes the body) all print their body at rc 0. The **`\` at the end of the word** member is narrowed but not closed: the tokenizer's continuation join (`<<E\` + `zzz` → the word `Ezzz`, `<<a\` + `a\` → `aa\` — the pinned script's last line has no final newline, so bash's trailing lone `\` keeps its backslash; give that line a newline and the pair joins and the word is `aa`) is pinned as measured by task **#489** and implemented by task **#555**, in `tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners` — since task **#364** both shells run these rows at rc 0 with an end-of-file warning, so only the word text (and the warning count it produces) stays with #489. #349's remaining scope was that join (its pair half landed in #347); the pins are `scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word` and `parse/heredoc/tests.rs::escaped_delimiter_words_fold_the_same_at_both_levels`.
+**Closed by task #347 for the pair half, and the boundary is narrower now** (measured against bash 5.3.9): `word_span` consumes an unquoted `\X` pair whole, so the escaped-whitespace rows are bash parity — `cat <<a\ b`, `<<\ b`, `<<a\<TAB>b`, `<<a\;b`, `<<a\|b`, `<<a\)`, `<<\;`, `<<\|`, their `<<-` and io-number twins, and `X=v; cat <<a\ b` + `$X` (the pair quotes the body) all print their body at rc 0. The **`\` at the end of the word** member is narrowed but not closed: the tokenizer's continuation join (`<<E\` + `zzz` → the word `Ezzz`, `<<a\` + `a\` → `aa\` — the pinned script's last line has no final newline, so bash's trailing lone `\` keeps its backslash; give that line a newline and the pair joins and the word is `aa`) is pinned as measured by task **#489** and implemented by task **#555**, in `tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners` — since task **#364** both shells run these rows at rc 0 with an end-of-file warning, so only the word text (and the warning count it produces) stays with #489. #349's remaining scope was that join (its pair half landed in #347); the pins are `scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word` and `parse/heredoc/tests.rs::escaped_delimiter_words_fold_the_same_at_both_levels`.
 
 **The join's owner, decided on #489's measurements (the arm lands in #555)**: it belongs to the folding machine the delimiter word already shares — `bytes/fold/raw.rs::fold_impl`'s escape-pair arm — not to a pre-region-scan text pass and not to `parse/heredoc/strip.rs`. The word text decides both the warning *and* the delimiter-line match, and both come from `Operator::new` → `fold_quotes` → `fold_impl`, the machine this entry names as shared by the byte scanner and the token parser; the rule decided anywhere else is a private copy of the folding rule (the #323/#247 drift trap). The word **walk** is already right at both levels (`scan/advance.rs` consumes a `\X` pair whole, `parse/token/escape.rs::read_escape` keeps the pair in the word text), only the pair's **fold** is the odd one out — and it must agree with the house's own substitution pass for the same word (`substitute/arg/escape.rs::unquoted` drops a `\<newline>` pair). A join *before* the region scan is not available at the byte level: the windows end at the newline by construction and `word_span` clips a pair to `to` (pinned by `scan/heredoc/tests.rs::delimiter_span_clips_a_trailing_escape_pair_to_the_window`, load-bearing for the window/subset invariant of `scan/heredoc/regions.rs`), so the byte level's raw word stays clipped and the text rule is where the join can live. The body side already implements the rule and is at parity (`strip_continuations`, pinned by `tests/heredoc.rs::heredoc_body_line_continuation_joins_the_lines` and `heredoc_body_pairs_backslashes_left_to_right`), so the word side is the missing half; the control row proves the rule is about the pair and not the newline — POSIX gives a `'…'` span no escape pair, and `cat <<'a\` + newline + `b'` is parity today. `bytes/fold.rs::fold_mask` (the `>a\` + `b` redirect target — bash writes `ab`, fdshell a file named `a` + newline + `b` — the `command`/`builtin` name fold, the replacer) takes the same arm or an explicit refusal, decided once in #555.
 
@@ -1600,13 +1593,13 @@ Three faces of *measure, don't quote*.
   `here-doc: missing terminating delimiter line 'T'` rc 1 where bash prints
   the body at rc 0, and `{ cat 3<<T; }` + body + `T` the same rc 1 where bash
   prints nothing at rc 0 (a numbered here-doc feeds fd 3, not `cat`'s stdin).
-  Task **#315** closed the gap on 2026-10-25 — the group branch claims its own
+  Task **#315** closed the gap — the group branch claims its own
   regions like the other two block branches — and the rows are pinned at bash
   parity, with the nested-group def body, by
   `tests/heredoc.rs::heredoc_in_a_single_line_group_body_prints_its_region`.
   The **function-definition** form is at parity, closed by task **#305**:
   `f(){ cat <<T; }; f` + body + `T` prints the body rc 0 and
-  `f(){ cat 3<<T; }; f` + body + `T` prints nothing rc 0, measured 2026-10-25,
+  `f(){ cat 3<<T; }; f` + body + `T` prints nothing rc 0, measured,
   pinned by `tests/heredoc.rs::heredoc_in_function_body` and
   `heredoc_of_a_terminated_function_body_line_prints_on_every_call` (the plain
   `<<` rows); the numbered row is pinned by its own
@@ -2856,12 +2849,9 @@ A sweep residual that outlives the new pins is usually pre-existing code, not th
 new module: the sites left outside the touched files were
 `cond/boundary/gate.rs` (`b == b'\n'` → `!=`, the region rule consulted at every
 byte) and `scan/heredoc/ops.rs` (`while i < next` → `<=`, one `advance` past the
-delimiter word) — tracked as task #431 with the probes that failed to kill them.
-Hand-reprobing the gate mutant on the current tree (task #466) left all 5 076
-`fdshell` tests green, confirming the equivalence then measured; an *earlier*
-reading of the same probe reported 27 failures, which were files an aborted
-mutated run had leaked into the crate root (a tracked `safe/fdshell/0` flips
-`test -f 0`), not a kill — see CATCHING_MUTANTS rule 23. Task #477 **resolved**
+delimiter word) — tracked as task #431 with the probes that failed to kill them
+(CATCHING_MUTANTS rule 23 covers false kills from probes leaked into the crate root).
+Task #477 **resolved**
 the gate.rs site by following the entry's prescription — the redundant conjunct
 is deleted and the arm folds onto the callee's own answer (entry: "A guard
 duplicated inside the callee is an equivalent mutant"); the ops.rs residual
@@ -2883,8 +2873,7 @@ statement opacity is
 the shared helper's own `body_start >= line.len()` guard in
 `scan/heredoc/line.rs`. Deleting the filter deleted the mutant (the species of
 LESSONS: "Re-deriving an already-set flag is dead code with equivalent mutants").
-**Re-derived for task #364 (hand probe, 2026-10-29): the dead-code verdict would
-now go the other way** — with the end-of-file claim the allocation can push a
+**The dead-code verdict would now go the other way** — with the end-of-file claim the allocation can push a
 tail region whose start is at or past `line.len()` (`pos` one past the text end
 when the last delimiter line has no terminating newline), so the filter would no
 longer be a no-op and its mutant would be killable; the filter stays deleted, and
@@ -2909,7 +2898,7 @@ is invariant **on the success path**.
   end-of-file claim (task **#364**), and the mutant is killed, by
   `scan/heredoc/opaque/tests.rs::a_window_starting_on_the_claiming_line_blinds_the_terminator_chevron`
   and `scan/heredoc/line/tests.rs::line_start_anchors_past_the_preceding_newline`
-  (re-derived by hand, 2026-10-29). `n + 1` → `n - 1` is still **killed**, by
+  (re-derived by hand). `n + 1` → `n - 1` is still **killed**, by
   `condition_bodies_of_a_text_starting_with_a_newline` (the same equivalence only
   for `n ≥ 1`: at `n = 0` it computes `0 - 1` in `usize` — a debug panic (release
   wraps to `usize::MAX`), emptying the window; verified). The `line_start`
@@ -3217,7 +3206,7 @@ pattern separator — measured `case '|' in "|") echo hit;; esac`: fdshell rc 1
 `case: empty pattern`, bash rc 0 `hit`; `parse/group_block.rs`'s trailing-word
 test — measured `{ true } "|" out`: fdshell rc 1 `expected ';' before '}'`,
 bash rc 2): message/pattern family only, nothing feeds the heredoc counts.
-**Task #346 landed both readers**, so no token layer reads `|` text any more:
+**Both readers landed**, so no token layer reads `|` text any more:
 `parse/case_clause/patterns.rs::collect_patterns` threads `line` out of the
 `ScriptText` (the `as_bytes().change_context` idiom every block builder uses) and
 (the `as_bytes().change_context` idiom every block builder uses) and
@@ -4827,7 +4816,7 @@ killed by the rule-19 helper-level pin
 — the old "a pattern token reaches no raw-span reader" is a program-level claim
 that does not bind a unit call, so the pin feeds the helper a token with
 `start > 0` and a quote span behind the `(` and asserts the exact returned
-tuple, measured on the clean tree (2026-11-05). The `*fully_quoted` → `false`
+tuple, measured on the clean tree. The `*fully_quoted` → `false`
 half of the old record generated no mutant in 27.1.0 (a tuple field deref, not
 a call), so it is no longer a live family; the span-covers-text invariant
 (`word_quoted`'s `end - start`) it guarded stands.
@@ -5439,8 +5428,8 @@ links behind it). The exception has a visible cost, pinned as measured in
 `tests/heredoc.rs`: a chain with a comment on one of its middle links still splits at the
 comment's newline, so that one shape does not produce what bash does; closing it means
 discarding comment text, a rule the parse layer owns and the runner must not re-derive.
-The condition granularity closed its own half there (task #498, measured
-2026-11-11): the slice **inherits** the scan's join verbatim — the cond layer
+The condition granularity closed its own half there (task #498): the slice
+**inherits** the scan's join verbatim — the cond layer
 splits on operators only and never re-splits on separators, so the join rows sit
 at bash's value — and its own answer at a **separator** inside a condition is the
 **first** command's where bash gates on the last; both are pinned at
@@ -5860,8 +5849,7 @@ old branch decided are pinned at
 and
 `tests/heredoc.rs::a_heredoc_word_in_another_owner_family_keeps_its_reading`
 (word-list, `case` pattern and subshell rows, each kept as measured by its own
-owner). The tail collector moved (`command_args` was 89 LoC, one line under the
-§2.2 cap) into
+owner). The tail collector moved into
 `parse/command/collect_tail.rs` with one added parameter, `word0_slot`: the
 **first** plain word becomes the command word (`>f g` runs `g` with the
 redirect), every other word is an argument — a move, not a copy, so
@@ -5974,12 +5962,12 @@ the pipeline reports (task #381). `cat | $(false) >f` is full bash parity at rc 
 while `$(false) >f | cat` answers bash's rc 0 but keeps fdshell's lookup message:
 the measured residual, pinned on rc only.
 
-**Correction, measured 2026-11-05: bash sets `$_` to the empty command name** for
+**Correction, measured against bash: bash sets `$_` to the empty command name** for
 this arm — which is what `tests/last_arg.rs::plain_assignment_clears_last_arg` has
 always pinned for the assignment arm — so the arm clears it; both spellings are
 pinned by `tests/last_arg.rs::the_omitted_command_name_clears_last_arg`.
 
-**Pins of the old rule moved**, each on the plan's list:
+**Pins of the old rule moved:**
 `word0_empty_expansion_consumes_the_next_field` split its loop — the quoted
 `"$(true)" echo hi` keeps the message, the unquoted `$(echo )` row is silent rc 0;
 `empty_dollar_at_alone_in_word_zero_reports_the_empty_name` became
@@ -6120,7 +6108,7 @@ a hypothesis.** Six rows a plan expected to reach parity did not, and each
 keeps its owner: the loop row's rc 1 is fdshell's `while` reporting the
 failing condition, a command-not-found is rc 1 here and 127 in bash,
 `{ cat <<E; }` and the nested `f() { { cat <<E; }; }` were **#315**'s (both
-closed 2026-10-25), `f() { …; }; f | cat` is **#182**'s, the starved first
+closed), `f() { …; }; f | cat` is **#182**'s, the starved first
 operator (`f() { cat <<E; }; f` + body, no delimiter line) was **#429**'s —
 closed by **#364**'s accept-and-warn rule, pinned in
 `tests/heredoc.rs::function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence`
@@ -6935,7 +6923,7 @@ against the async-`&` and stray-`;;` arms; bash rc 2 on every row),
 (the `&>` family's arms — the rule below),
 `tests/block_redirect.rs::the_combined_redirect_family_on_a_closer` and
 `tests/group.rs::the_combined_redirect_family_on_the_group_closer` (task #409,
-measured against bash 5.3.9 on 2026-11-03; the `%var`, pidvar and rc-1-vs-2 rows
+measured against bash 5.3.9; the `%var`, pidvar and rc-1-vs-2 rows
 name their owners),
 and the group twin `parse/group_block/tail.rs` with `GroupTrailingWord`.
 
