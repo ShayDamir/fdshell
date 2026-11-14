@@ -162,6 +162,80 @@ fn the_run_gate_takes_only_a_head_whose_body_is_a_group() {
         b"for ((i=0;i<2;i++)) ;\n\"#\"\n{ echo a; }",
         0
     ));
+    // Task #560: the cond arm — the run's tail after its last `&&` / `||` is the
+    // head, and bash runs the shape (measured `a a` rc 0 on every row here).
+    assert!(opens_a_block(
+        b"true && for ((i=0;i<2;i++)) ;",
+        b"true && for ((i=0;i<2;i++)) ;\n{ echo a; }",
+        0
+    ));
+    assert!(opens_a_block(
+        b"true && for ((i=0;i<2;i++)) ;",
+        b"true && for ((i=0;i<2;i++)) ;\n# c\n{ echo a; }",
+        0
+    ));
+    assert!(opens_a_block(
+        b"false || for ((i=0;i<2;i++)) ;",
+        b"false || for ((i=0;i<2;i++)) ;\n{ echo a; }",
+        0
+    ));
+    // Two cond operators: the **last** one owns the tail (the rfind step — the
+    // first-operator reading leaves a `true &&` in the tail and loses this row).
+    assert!(opens_a_block(
+        b"true && true && for ((i=0;i<2;i++)) ;",
+        b"true && true && for ((i=0;i<2;i++)) ;\n{ echo a; }",
+        0
+    ));
+    // The glued head (task #396) rows on a cond run too (bash measures `a a`).
+    assert!(opens_a_block(
+        b"true && for((i=0;i<2;i++)) ;",
+        b"true && for((i=0;i<2;i++)) ;\n# c\n{ echo a; }",
+        0
+    ));
+    // The rc-2 family in cond position answers `false` at the arm — the negative
+    // twins of every positive row above (the comment **before** the `;`, quoted,
+    // escaped and glued-`#` rows, the comment that swallows the brace, `; ;`,
+    // `;;`), and a run whose tail is not a head while the opener side is true.
+    assert!(!opens_a_block(
+        b"true && for ((i=0;i<2;i++)) ;",
+        b"true && for ((i=0;i<2;i++)) ;\n# c\n; { echo a; }",
+        0
+    ));
+    assert!(!opens_a_block(
+        b"true && for ((i=0;i<2;i++)) ;",
+        b"true && for ((i=0;i<2;i++)) ;\n\"#\"\n{ echo a; }",
+        0
+    ));
+    assert!(!opens_a_block(
+        b"true && for ((i=0;i<2;i++)) ;",
+        b"true && for ((i=0;i<2;i++)) ;\n\\#c\n{ echo a; }",
+        0
+    ));
+    assert!(!opens_a_block(
+        b"true && for ((i=0;i<2;i++)) ;",
+        b"true && for ((i=0;i<2;i++)) ;\nx# c\n{ echo a; }",
+        0
+    ));
+    assert!(!opens_a_block(
+        b"true && for ((i=0;i<2;i++)) ;",
+        b"true && for ((i=0;i<2;i++)) ;\n#c { echo a; }",
+        0
+    ));
+    assert!(!opens_a_block(
+        b"true && for ((i=0;i<2;i++)) ; ; { echo a; }",
+        b"true && for ((i=0;i<2;i++)) ; ; { echo a; }",
+        0
+    ));
+    assert!(!opens_a_block(
+        b"true && for ((i=0;i<2;i++)) ;; do echo a; done",
+        b"true && for ((i=0;i<2;i++)) ;; do echo a; done",
+        0
+    ));
+    assert!(!opens_a_block(
+        b"true && echo x",
+        b"true && echo x\n{ echo a; }",
+        0
+    ));
 }
 
 /// The run test the group branch and the span start share, called when the caller is

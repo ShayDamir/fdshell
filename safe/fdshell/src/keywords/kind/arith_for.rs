@@ -53,11 +53,37 @@ pub(crate) fn opens_a_group(line: &[u8], word_end: usize) -> bool {
 
 /// The run gate's form of the same question, seen from the whole run instead of the
 /// word's end (task #394): the run is the `for` word plus its region and nothing
-/// else, and the group opener written behind the run is this construct's body — so
-/// the block branch takes the run and its body as one statement. A run that is a
-/// plain `do … done` for answers `false`; the `done` frame owns it.
+/// else — or, since task #560, its tail after the last cond operator is the head
+/// ([`trails_cond_head`]) — and the group opener written behind the run is this
+/// construct's body, so the block branch takes the run and its body as one
+/// statement. A run that is a plain `do … done` for answers `false`; the `done`
+/// frame owns it.
 pub(crate) fn opens_a_block(run: &[u8], line: &[u8], start: usize) -> bool {
-    is_run_head(run) && opener_behind(line, start + run.len())
+    (is_run_head(run) || trails_cond_head(run)) && opener_behind(line, start + run.len())
+}
+
+/// The run gate's cond arm (task #560, bash parity on both the no-comment and the
+/// comment row): the run's tail after its last `&&` / `||` is the head, so a run
+/// prefixed by a cond operator (`true && for ((i=0;i<2;i++)) ;`) is claimed with the
+/// opener standing behind the whole run. It is `segment::group::prefix`'s
+/// `trails_cond_head` — the same run-tail rule, which has read the brace side of the
+/// same-line shape since task #394 — with the byte just past the run's last cond
+/// operator owned by [`last_cond_op`]. The tail must be **the whole** head
+/// (whitespace around the operator is trimmed away), so the rc-2 cond rows — the
+/// comment **before** the `;`, the quoted, escaped and glued-`#` rows, the comment
+/// that swallows the brace, `; ;` and `;;` — stay the parse layer's.
+fn trails_cond_head(run: &[u8]) -> bool {
+    last_cond_op(run).is_some_and(|end| is_run_head(run.get(end..).unwrap_or(b"").trim_ascii()))
+}
+
+/// The byte just past the run's last `&&` / `||`, `None` when it has none — the
+/// four-line twin of `segment/group/prefix.rs`'s private owner, kept local so this
+/// already-mapped file stays the diff (task #560; the promotion would pull the
+/// `segment/group.rs` re-export — and a second mutation map — into it).
+fn last_cond_op(run: &[u8]) -> Option<usize> {
+    (0..run.len())
+        .rfind(|&p| matches!(run.get(p..p + 2), Some(b"&&") | Some(b"||")))
+        .map(|p| p + 2)
 }
 
 /// The group opener standing behind the region at `at`: the single `;` the parse

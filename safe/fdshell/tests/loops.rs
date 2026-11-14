@@ -1970,8 +1970,9 @@ fn c_style_for_a_terminator_run_before_the_body_matches_bash() {
 /// as the body's opener (LESSONS); its definer twin `f()` + `# c {` + `{ echo a; }` +
 /// `f` shares that one helper and is pinned at
 /// `brace/tests.rs::a_comment_row_hides_a_brace_written_in_its_text`. The `echo tail`
-/// row shows the loop is still one statement to the parser. The cond-prefixed spelling
-/// is the family's one accepted divergence, pinned in the test below.
+/// row shows the loop is still one statement to the parser. The cond-prefixed family
+/// is bash parity too, pinned in the test below (task **#560** closed the divergence
+/// task **#518** pinned there).
 #[test]
 fn c_style_for_every_spelling_of_a_gap_comment_matches_bash() {
     for (script, want) in [
@@ -1996,25 +1997,92 @@ fn c_style_for_every_spelling_of_a_gap_comment_matches_bash() {
     }
 }
 
-/// The cond-prefixed row is this family's one **accepted divergence** (task **#518**):
-/// bash runs `true && for ((…)) ;` + `# c` + `{ echo a; }` as `a a` at rc 0 (measured,
-/// bash 5.3.9), fdshell reports a parse error at rc 1 — pinned with bash's value beside
-/// fdshell's. The byte rule now claims the run (this task's arm) and the cond parse has
-/// no comment arm of its own, because the tokenizer's comment drop serves a
-/// *statement*, never a cond part. Proof it is the cond path and not the comment: the
-/// neighbouring row with **no** comment at all is a parse error too, on `master` as
-/// here. The cond-path arm is its own task; both rows are pinned so the pair stays
-/// visible.
+/// The cond-prefixed family is **bash parity** (task **#560** closed the divergence
+/// task **#518** pinned here): bash runs `true && for ((…)) ;` + `{ …; }` — with and
+/// without a comment row in the gap — as `a a` at rc 0 (measured, bash 5.3.9), and so
+/// does fdshell now. The byte rule claims a cond run through the run gate's cond arm
+/// (the run's tail after its last `&&` / `||` is the head, the run-tail rule read at
+/// the run's end), and the cond parse needs **no** comment arm of its own: the
+/// tokenizer's comment drop serves both paths, so the tail walk gets the same
+/// comment-token-free list either way (probe evidence recorded at LESSONS). Proof it
+/// is the cond path and not the comment, kept from task **#518**'s pin: the row with
+/// **no** comment at all was already the divergence on `master` before the comment
+/// arm existed. The `echo tail` row shows the loop is still one statement to the
+/// parser, and the `false &&` row is bash's short-circuit (only `echo tail` runs).
+/// The last two rows keep diverging, pinned at fdshell's measured value naming
+/// bash's.
 #[test]
-fn c_style_for_a_gap_comment_in_a_cond_list_is_an_accepted_divergence() {
+fn c_style_for_a_gap_comment_in_a_cond_list_is_bash_parity() {
+    for (script, want) in [
+        ("true && for ((i=0;i<2;i++)) ;\n{ echo a; }", "a\na\n"),
+        ("true && for ((i=0;i<2;i++)) ;\n# c\n{ echo a; }", "a\na\n"),
+        (
+            "true && for ((i=0;i<2;i++)) ;\n# c {\n{ echo a; }",
+            "a\na\n",
+        ),
+        (
+            "true && for ((i=0;i<2;i++)) ;\n# c\n# d\n{ echo a; }",
+            "a\na\n",
+        ),
+        ("true && for((i=0;i<2;i++)) ;\n# c\n{ echo a; }", "a\na\n"),
+        (
+            "true && true && for ((i=0;i<2;i++)) ;\n{ echo a; }",
+            "a\na\n",
+        ),
+        (
+            "true && for ((i=0;i<2;i++)) ;\n{ echo a; }\necho tail",
+            "a\na\ntail\n",
+        ),
+        (
+            "false && for ((i=0;i<2;i++)) ;\n{ echo a; }\necho tail",
+            "tail\n",
+        ),
+        (
+            "true && for ((i=0;i<2;i++)) ;\n{ echo a; } && echo b",
+            "a\na\nb\n",
+        ),
+        (
+            "if true; then\ntrue && for ((i=0;i<2;i++)) ;\n# c\n{ echo a; }\nfi",
+            "a\na\n",
+        ),
+        (
+            "true && for ((i=0;i<2;i++)) ;\n{ echo a; } &\nwait",
+            "a\na\n",
+        ),
+        ("false || for ((i=0;i<2;i++)) ;\n{ echo a; }", "a\na\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+    // Everything bash rejects here, fdshell rejects too (bash rc 2, fdshell rc 1 —
+    // the repo-wide parse-error convention), including the comment-**before**-`;`
+    // row that task **#518**'s `;`-slot order keeps rejecting and the same rc-2
+    // family one cond operator in from the statement-path pins.
     for script in [
-        "true && for ((i=0;i<2;i++)) ;\n# c\n{ echo a; }",
-        "true && for ((i=0;i<2;i++)) ;\n{ echo a; }",
+        "true && for ((i=0;i<2;i++)) ;\n# c\n; { echo a; }",
+        "true && for ((i=0;i<2;i++)) ;\n\"#\"\n{ echo a; }",
+        "true && for ((i=0;i<2;i++)) ;\nx# c\n{ echo a; }",
+        "true && for ((i=0;i<2;i++)) ;\n#c { echo a; }",
+        "true && for ((i=0;i<2;i++)) ; ; { echo a; }",
+        "true && for ((i=0;i<2;i++)) ;; do echo a; done",
     ] {
         let (out, err, rc) = run(script);
         assert_eq!((out.as_str(), rc), ("", 1), "{script}: {err}");
         assert!(err.contains("parse error"), "{script}: {err}");
     }
+    // The pipeline row prints the body — `a a`, bash's value — and then reports the
+    // group layer's inherited pipe-behind-the-body error (measured, bash 5.3.9 runs
+    // it at rc 0 on the same output; LESSONS: "The arithmetic `for` is a second
+    // raw-byte keyword"). Pin it, do not fix it here.
+    let (out, err, rc) = run("true && for ((i=0;i<2;i++)) ;\n{ echo a; } | cat");
+    assert_eq!((out.as_str(), rc), ("a\na\n", 1), "{err}");
+    assert!(err.contains("parse error"), "{err}");
+    // The `true ||` row keeps diverging exactly as it did on `master`: fdshell runs
+    // the loop's body once (`a` rc 0) where bash skips the right side of the
+    // operator entirely and prints nothing (both rc 0) — pinned at fdshell's
+    // measured value naming bash's.
+    let (out, err, rc) = run("true || for ((i=0;i<2;i++)) ;\n{ echo a; }");
+    assert_eq!((out.as_str(), rc), ("a\n", 0), "{err}; bash prints nothing");
 }
 
 /// Everything bash rejects, fdshell rejects too (bash rc 2, fdshell rc 1 — the

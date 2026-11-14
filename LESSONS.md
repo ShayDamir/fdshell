@@ -1894,13 +1894,24 @@ definer twin `f()` + `# c {` + `{ echo a; }` + `f` as `a`. Pinned at
 `brace/tests.rs::a_comment_row_hides_a_brace_written_in_its_text`,
 `parse/for_block/tests.rs::a_comment_row_in_the_gap_is_bash_parity` and
 `safe/fdshell/tests/loops.rs::c_style_for_every_spelling_of_a_gap_comment_matches_bash`.
-**The cond path is the one accepted divergence** (bash `a a` rc 0, fdshell rc
-1, pinned at
-`safe/fdshell/tests/loops.rs::c_style_for_a_gap_comment_in_a_cond_list_is_an_accepted_divergence`):
-a comment row in a *cond part's* gap is not hidden by the tokenizer, so
-claiming the run at the byte rule needs an arm of the cond path's own — and
-the proof that it is the cond path, not the comment, is that the neighbouring
-`true &&` row with **no** comment was already a parse error before this task.
+**The cond path is closed** (task **#560**, bash parity): the run gate gained the
+cond arm — the run's tail after its last `&&` / `||` is the head, the same
+run-tail rule `segment/group/prefix.rs` has read from the brace side since
+**#394**, now read at the run's end — with the opener standing behind the whole
+run and the `;` slot still **before** the comment rows (the load-bearing order
+above). The cond parse needs **no** comment arm of its own after all: the token
+list the tail walk (`parse/for_block/arith/tail.rs`) receives for a cond part
+carries **no** token for a comment row — the tokenizer's drop serves the cond
+path exactly as it serves the statement path, probe-verified on the full suite —
+so `parse/semi/gap.rs`'s header ("Comment rows need no arm in either direction")
+stays true for the walks it owns and nothing is to be re-added there. The family
+is pinned at bash's measured values in
+`safe/fdshell/tests/loops.rs::c_style_for_a_gap_comment_in_a_cond_list_is_bash_parity`;
+the no-comment row keeps the proof that this is the cond path (it diverged before
+the comment arm existed), and the two rows that keep diverging — the loop behind
+a pipe (the group layer's inherited error) and the `true ||` row (fdshell runs
+the body where bash skips the operator's right side) — are pinned there at
+fdshell's measured value naming bash's.
 
 Filed, measured, do not re-open blind: **#395** the spaced step `i ++` is
 **parity** on both spellings (`i ++`/`++ i`, `i --`/`-- i`), pinned by
