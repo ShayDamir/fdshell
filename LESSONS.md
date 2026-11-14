@@ -5848,7 +5848,7 @@ that reached `printf` was therefore `%` where bash passes `%%`, and a trailing
 `%` is POSIX's *missing format character*: `printf '%%'` ended at rc 1,
 `printf 'a%%b'` printed `a`, `echo '%%'` printed `%`. The arm is gone
 (`substitute/percent.rs`): `%%` is two ordinary literal bytes and the `printf`
-builtin (`child/printf.rs:74-77`) interprets its own escape, which is the only
+builtin (`child/printf/render_loop.rs:41-44`) interprets its own escape, which is the only
 semantics that can match bash — a shell collapse and bash-parity output are
 mutually exclusive.
 
