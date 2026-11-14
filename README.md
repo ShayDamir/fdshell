@@ -870,6 +870,26 @@ all, `"${a[*]}"` one empty field). `[@]`/`[*]` never bail under `set -u` (an
 unset name gives nothing), an unresolved `[idx]` does. Pinned in
 `tests/arrays.rs`.
 
+The `word` of the four colon forms is a **word**: it goes through the ordinary
+word pipeline before the arm uses it — tilde, `$name`, `$(…)`, `$((…))`,
+backticks, escape folding, quote removal — so `"${u:=$(echo hi)}"` prints `hi`,
+`"${u:=$v}"` prints the value, and `${u:=a\ b}` folds the escape. The word's own
+quote bits govern its own expansion, and the whole `${…}` result then follows the
+outer reference's quote bit for field splitting and globbing: an unquoted
+`${u:="a b"}` splits into two fields and `${u:="*"}` globs, while the quoted
+reference keeps one word. `:=` stores the expanded scalar (space-joining `$@`,
+first-`IFS` joining `$*`); `:?` expands its message word **unquoted** even inside
+a quoted reference, so `"${u:?~}"` reports `$HOME` and `"${u:?a\ b}"` reports
+`a b`, and its message space-joins whatever the `IFS` is. A word written as an
+empty quote pair is a word that is present and empty, so the unquoted `${u:?""}`
+reports the empty message. Two residuals: the region body is still read to the
+first `}` — a nested `${…}`, a `}` inside `$( … )` or inside a quote, and
+unquoted literal whitespace in the word are task #174's brace-aware scanner — and
+the **quoted** `"${u:?""}"` keeps the default message, because the parser strips
+the empty pair without recording the span (task #571) that would tell it apart
+from `${u:?}`; the same loss affects a quoted message written `~""`, while every
+unquoted spelling matches bash. Pinned in `tests/unset_expand.rs`.
+
 The positional and special parameters are also available: `$1`, `$2`, … are
 the arguments, `$#` the argument count, `$0` the program name, `$?` the last
 status, `$$` the shell pid, `$!` the last background pid. `"$@"` expands to

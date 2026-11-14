@@ -6,6 +6,8 @@
 //! names, so the arithmetic of the moved code is the loop's, byte for byte: no
 //! arm is reordered, no cursor advance changes.
 
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 use error_stack::{Report, ResultExt};
 
 use crate::error::resolve::ResolveError;
@@ -113,12 +115,19 @@ impl Ex<'_> {
     /// The `$` arm (the `$( … )` arm is above): `quoted` is the trigger byte's
     /// mask bit, the quote bit the `$@` arm gives its positionals; `limit` caps
     /// the name read. `region` bundles the mask, the word index of the byte
-    /// after `$` (the `{` of a `${…}` arm) and that cap. The `$@` arm's
+    /// after `$` (the `{` of a `${…}` arm) and that cap, plus the word's
+    /// zero-byte quote spans: an operator word slices all three to its own bytes
+    /// before it expands itself (task #561). The `$@` arm's
     /// positional boundaries are recorded by `dollar_subst` itself, through
     /// `origin`; the output range is recorded by `resync`, after the realign.
     fn dollar(&mut self, limit: usize, quoted: bool) -> Result<(), Report<ResolveError>> {
-        let (mask, start, limit) = (self.mask, self.idx, limit);
-        let region = Region { mask, start, limit };
+        let (mask, start, limit, spans) = (self.mask, self.idx, limit, self.spans);
+        let region = Region {
+            mask,
+            start,
+            limit,
+            spans,
+        };
         let (peek, _, out, _, origin, cell, _, join) = self.parts();
         let before = out.len();
         dollar::dollar_subst(peek, cell, out, region, quoted, join, origin)?;

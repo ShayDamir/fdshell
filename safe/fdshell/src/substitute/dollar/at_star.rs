@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 //! The `$@` / `$*` arms of `dollar_subst` — the spellings inside a larger
 //! word (the whole-word `$@`/`$*` goes through `substitute::positional`
 //! instead; the two must agree, pinned side by side in `tests/positional.rs`).
@@ -39,7 +41,8 @@ use crate::substitute::Join;
 use crate::substitute::borrow_state;
 use crate::substitute::mask::Counting;
 use crate::substitute::origin::Origin;
-use crate::substitute::positional::{first_ifs_byte, join, positional_join};
+use crate::substitute::positional::{first_ifs_byte, join};
+mod modes;
 
 pub(super) fn expand(
     peek: &mut Counting<'_>,
@@ -51,18 +54,23 @@ pub(super) fn expand(
 ) -> Result<(), Report<ResolveError>> {
     let is_star = peek.next() == Some(b'*');
     let state = borrow_state(cell)?;
-    if mode == Join::Pattern {
-        return pattern_arm(is_star, quoted, &state, out, origin);
+    match mode {
+        // The `:=` word becomes the parameter's one scalar text: `$@`
+        // space-joins, `$*` joins on the first `IFS` byte (both measured).
+        Join::Assign => {
+            let sep = if is_star {
+                first_ifs_byte(&state.ifs)?
+            } else {
+                Some(b' ')
+            };
+            joined(&state.positional, sep, out, origin)
+        }
+        // The `:?` message is one text: both spellings space-join, whatever
+        // the `IFS` is (measured `IFS=,` keeps the space).
+        Join::Message => joined(&state.positional, Some(b' '), out, origin),
+        Join::Pattern => pattern_arm(is_star, quoted, &state, out, origin),
+        Join::Args => modes::args_arm(is_star, quoted, &state, out, origin),
     }
-    if is_star || !quoted {
-        let before = out.len();
-        let joined = positional_join(&state.positional, &state.ifs)?;
-        out.push(&joined);
-        origin.record(before, out.len());
-        return Ok(());
-    }
-    adjacent(&state.positional, out, origin);
-    Ok(())
 }
 
 /// The pattern arm's matrix (all rows measured in bash 5.3.9, task #319), shared
@@ -112,7 +120,7 @@ pub(crate) fn pattern_arm(
 /// quoted word boundary at the start of each one after the first: the word
 /// list is the **caller's** to cut — the splitting path splits it, the pattern
 /// path cuts on the boundaries and keeps the first piece.
-fn adjacent<'a>(
+pub(super) fn adjacent<'a>(
     positional: impl IntoIterator<Item = &'a ImportedStr>,
     out: &mut ShortCStr,
     origin: &mut Origin,

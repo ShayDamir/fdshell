@@ -267,15 +267,16 @@ fn quoted_brace_default_value_matches_bash() {
         assert_eq!(&out, want, "{script:?}");
     }
 }
-/// Accepted divergence (owner task #174): the substitution pass takes a `${ … }`
-/// body verbatim, so a nested `$( … )` inside it is *scanned* as one unit by
-/// #130 (one word, exit 0, no parse error) but is not expanded.
+/// Task #561 moves this row to bash parity: the word of a colon operator is a
+/// word, so the nested `$( … )` — scanned as one unit by #130 (one word, exit 0,
+/// no parse error) — now runs as part of the word's expansion. bash prints
+/// `xp qy` for the same script.
 #[test]
-fn nested_paren_inside_a_brace_region_is_scanned_but_not_expanded() {
+fn nested_paren_inside_a_brace_region_is_expanded() {
     let (out, err, code) = run(r#"echo "x${u:-"$(echo "p q")"}y""#);
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(err, "");
-    assert_eq!(out, "x$(echo p q)y\n");
+    assert_eq!(out, "xp qy\n");
 }
 
 // Accepted divergence (task #172): an indirect target that is not a valid
@@ -581,4 +582,221 @@ fn braced_parameter_assignment_divergences() {
     let (out, err, code) = run(r#"set -- a b c; v=1; r=${!v}; printf "[%s]" "$r""#);
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "[]");
+}
+
+// --- task #561: the word of a colon operator goes through the word pipeline ---
+
+/// Every expectation is bash 5.3.9's own output for the same script (`HOME` is
+/// set inside the script so no row depends on the ambient home). The word of
+/// `:-` / `:=` / `:+` / `:?` goes through the ordinary pipeline — command
+/// substitution, parameter and arithmetic expansion, tilde, escapes — and the
+/// word's own quote bits govern its expansion: `"${u:=a\ b}"` keeps the
+/// backslash (POSIX #2.2.2), `"${u:=~/x}"` keeps the tilde literal, while the
+/// unquoted spellings fold the escape and expand the tilde. `:?` expands its
+/// message word **unquoted** even inside a quoted reference, so its rows show
+/// the folded and expanded forms.
+#[test]
+fn colon_word_expansion_matches_bash() {
+    for (script, want) in [
+        (r#"u=; printf "%s" "${u:=$(printf hi)}""#, "hi"),
+        (r#"u=; printf "%s" ${u:=$(printf hi)}"#, "hi"),
+        (r#"v=V; u=; printf "%s" "${u:=$v}""#, "V"),
+        (r#"u=; printf "%s" "${u:=$((1+2))}""#, "3"),
+        (r#"u=; v=V; printf "%s" "${u:-$(printf hi)}""#, "hi"),
+        (r#"v=V; u=; printf "%s" "${v:-$(printf hi)}""#, "V"),
+        (r#"v=V; u=; printf "%s" "${v:+$(printf hi)}""#, "hi"),
+        (r#"u=; v=V; printf "%s" "${u:+$(printf hi)}""#, ""),
+        (r#"u=; printf "%s" "${u:=a\ b}""#, "a\\ b"),
+        (r#"HOME=/h; u=; printf "%s" "${u:=~/x}""#, "~/x"),
+        (r#"HOME=/h; u=; printf "%s" ${u:=~/x}"#, "/h/x"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script:?}: stderr={err}");
+    }
+    for (script, want) in [
+        (r#"u=; printf "%s" "${u:?$(printf boom)}""#, "u: boom"),
+        (r#"HOME=/h; u=; printf "%s" "${u:?~}""#, "u: /h"),
+        (r#"u=; printf "%s" "${u:?a\ b}""#, "u: a b"),
+        (r#"u=; printf "%s" ${u:?""}"#, "u: "),
+        (r#"HOME=/h; u=; printf "%s" ${u:?~""}"#, "u: ~"),
+        (r#"u=; printf "%s" "${u:?$(true)}""#, "u: "),
+    ] {
+        // bash exits 127 with the same message; fdshell bails at its own status.
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "{script:?} must bail, stderr={err}");
+        assert_eq!(out, "", "{script:?} must print nothing");
+        assert!(err.contains(want), "{script:?} stderr={err}");
+    }
+    // The one core row that stays divergent: a **quoted** space inside a
+    // substitution written in a region body. bash has one word `a b`; the parser
+    // strips the region body's quote bytes (documented divergence, pinned by
+    // `tests/quotes.rs::region_body_drops_the_span_quote_bytes`), so the child
+    // runs `printf a b` and only the first line comes back.
+    let (out, err, code) = run(r#"u=; printf "%s" "${u:=$(printf "a b")}""#);
+    assert_eq!((out.as_str(), code), ("a", 0), "stderr={err}");
+}
+
+/// `:=` stores the **expanded** word, so the parameter and the reference agree
+/// (bash's values; `HOME` is set inside the script). Persistence is pinned inside
+/// one command: `:=` across separate commands is task #153.
+#[test]
+fn colon_assign_stores_the_expanded_scalar() {
+    for (script, want) in [
+        (
+            r#"u=; w=${u:=$(printf hi)}; printf "%s %s" "$u" "$w""#,
+            "hi hi",
+        ),
+        (
+            r#"HOME=/h; u=; w=${u:=~/x}; printf "%s %s" "$u" "$w""#,
+            "/h/x /h/x",
+        ),
+        (
+            r#"u=; w=${u:=a\ b}; printf "<%s><%s>" "$u" "$w""#,
+            "<a b><a b>",
+        ),
+        (r#"u=; v=V; w=${u:=$v}; printf "%s %s" "$u" "$w""#, "V V"),
+        (
+            r#"u=; w=${u:='$v'}; printf "<%s> <%s>" "$u" "$w""#,
+            "<$v> <$v>",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script:?}: stderr={err}");
+    }
+    // The cross-command row, pinned as the divergence it is: bash has `x` in the
+    // second `printf`, fdshell an empty `u` (task #153 — each `printf` is a
+    // forked child that loses the assignment).
+    let (out, err, code) = run(r#"u=; printf "%s" "${u:=x}"; printf "u=%s" "$u""#);
+    assert_eq!((out.as_str(), code), ("xu=", 0), "stderr={err}");
+}
+
+/// bash does not expand the word of an arm that does not take it, so `set -u`
+/// never sees an unbound name inside it; when the arm does take the word, the
+/// word's own name bails. bash reports the same messages and exits 127, fdshell
+/// bails at its own status (task #177's convention).
+#[test]
+fn colon_word_expansion_is_lazy_under_nounset() {
+    for (script, want) in [
+        (r#"set -u; v=V; printf "%s" "${v:-$nope}""#, "V"),
+        (r#"set -u; u=; printf "%s" "${u:+$nope}""#, ""),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script:?}: stderr={err}");
+    }
+    for (script, want) in [
+        (
+            r#"set -u; u=; printf "%s" "${u:-$nope}""#,
+            "nope: unbound variable",
+        ),
+        (
+            r#"set -u; u=; printf "%s" "${u:?$nope}""#,
+            "nope: unbound variable",
+        ),
+        (r#"set -u; printf "%s" "${u:?boom}""#, "u: boom"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "{script:?} must bail, stderr={err}");
+        assert_eq!(out, "", "{script:?} must print nothing");
+        assert!(err.contains(want), "{script:?} stderr={err}");
+    }
+}
+
+/// A command substitution in the word runs, so it leaves its status behind for
+/// the rest of the word. bash's values, rc 0 in both shells (`false` resolves to
+/// a program that exits 0 in this environment, which is why the last row is
+/// `<0> rc=0` in both).
+#[test]
+fn colon_word_command_substitution_updates_dollar_question() {
+    for (script, want) in [
+        (
+            r#"u=; printf "<%s> rc=%s" "${u:=$(false)}" "$?""#,
+            "<> rc=1",
+        ),
+        (
+            r#"u=; printf "<%s> rc=%s" "${u:=$(exit 3)}" "$?""#,
+            "<> rc=3",
+        ),
+        (
+            r#"v=V; u=; printf "<%s> rc=%s" "${v:+$(exit 3)}" "$?""#,
+            "<> rc=3",
+        ),
+        (
+            r#"false; u=; printf "<%s> rc=%s" "${u:=$?}" "$?""#,
+            "<0> rc=0",
+        ),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script:?}: stderr={err}");
+    }
+}
+
+/// `set -- a b` in bash. `:-` keeps the argument join, so a quoted word still
+/// cuts two words and an unquoted one splits after the IFS join; `:=` joins into
+/// the one scalar it stores; the `:?` message space-joins whatever the `IFS` is.
+/// Every row matches bash.
+#[test]
+fn colon_word_positional_join_rows() {
+    for (script, want) in [
+        (r#"set -- a b; u=; printf "<%s>" "${u:-$@}""#, "<a><b>"),
+        (r#"set -- a b; u=; printf "<%s>" ${u:-$@}"#, "<a><b>"),
+        (r#"set -- a b; u=; printf "<%s>" "${u:=$@}""#, "<a b>"),
+        (r#"set -- a b; u=; printf "<%s>" ${u:=$@}"#, "<a><b>"),
+        (
+            r#"set -- a b; u=; printf "%s|%s" "${u:=$@}" "$u""#,
+            "a b|a b",
+        ),
+        (
+            r#"set -- a b; IFS=,; u=; printf "<%s>" "${u:=$*}""#,
+            "<a,b>",
+        ),
+        (
+            r#"set -- a b; IFS=,; u=; printf "<%s>" "${u:-$*}""#,
+            "<a,b>",
+        ),
+        (r#"set -- a b; u=; printf "<%s>" "${u:-$*}""#, "<a b>"),
+        (r#"set -- a ""; u=; printf "<%s>" "${u:-$@}""#, "<a><>"),
+        (r#"set -- a ""; u=; printf "<%s>" "${u:=$@}""#, "<a >"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!((out.as_str(), code), (want, 0), "{script:?}: stderr={err}");
+    }
+    for (script, want) in [
+        (r#"set -- a b; u=; printf "%s" "${u:?$@}""#, "u: a b"),
+        (r#"set -- a b; IFS=,; u=; printf "%s" "${u:?$*}""#, "u: a b"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 1, "{script:?} must bail, stderr={err}");
+        assert_eq!(out, "", "{script:?} must print nothing");
+        assert!(err.contains(want), "{script:?} stderr={err}");
+    }
+}
+
+/// The region body is still read to the first `}` (task #174), so the word of
+/// this row is a fragment; the truncation guard keeps it literal and the row
+/// stays at rc 0 instead of becoming an `UnclosedParen` bail. bash runs the
+/// substitution and prints `}`; fdshell's current literal is pinned.
+#[test]
+fn colon_word_truncated_nested_substitution_stays_literal() {
+    let (out, err, code) = run(r#"u=; printf "<%s>" "${u:=$(echo })}""#);
+    assert_eq!((out.as_str(), code), ("<$(echo )}>", 0), "stderr={err}");
+    // The backtick analogue cannot stay literal end to end: the whole quoted word
+    // reaches the substitution pass, so after the region ends at the `}` the
+    // word's own trailing backtick is an unclosed command substitution (bash runs
+    // `` `echo ` `` there and prints `}`). The guard on the word itself is pinned
+    // by `substitute::tests::colon_word_truncated_paren_stays_literal`.
+    let (out, err, code) = run(r#"u=; printf "<%s>" "${u:=`echo }`}""#);
+    assert_eq!((out.as_str(), code), ("", 1), "stderr={err}");
+    assert!(err.contains("unclosed backtick"), "stderr={err}");
+}
+
+/// The unquoted-word row is the tokenizer's gap, not the substitution's:
+/// `parse/token/step.rs` does not treat an unquoted `${…}` as one unit, so this
+/// word is two tokens and each keeps its own literal (task #174's body scanner
+/// owns it; bash has one word `a b`). The space-free spelling below is parity.
+#[test]
+fn colon_word_unquoted_space_row_is_still_the_tokenizer_gap() {
+    let (out, err, code) = run(r#"u=; printf "<%s>" ${u:=a b}"#);
+    assert_eq!((out.as_str(), code), ("<${u:=a><b}>", 0), "stderr={err}");
+    let (out, err, code) = run(r#"HOME=/h; u=; printf "<%s>" ${u:=~/x}"#);
+    assert_eq!((out.as_str(), code), ("</h/x>", 0), "stderr={err}");
 }

@@ -2974,6 +2974,10 @@ fn pattern_operator_scan_is_positional() {
     assert_eq!(scan(c"%x"), Some((b(c""), ShortestSuffix, b(c"x"))));
     assert_eq!(scan(c"v:a"), None);
     assert_eq!(scan(c"v:a:-w"), Some((b(c"v:a"), Default, b(c"w"))));
+    // A `:` at index 0 has no name in front of it, so it opens no operator and
+    // the scan runs to the end and answers None: the guard is `i > 0`.
+    assert_eq!(scan(c":-x"), None);
+    assert_eq!(scan(c":?x"), None);
 }
 
 #[test]
@@ -3921,4 +3925,404 @@ fn word_fields_are_the_pre_glob_step_of_substitute_args() {
             super::substitute_args(core::slice::from_ref(&w), &[], &[], &[false], &cell).unwrap();
         assert_eq!(got, want, "word {word:?}");
     }
+}
+
+// --- task #561: the word of a colon operator is a word, so it is expanded ---
+
+/// The fields of one word, as text lists — the pipeline the argument pass runs,
+/// so the word's own quote bits are visible to it.
+fn colon_field_texts(
+    cell: &ForkCell<ShellState>,
+    word: &ShortCStr,
+    mask: &[MaskBit],
+    spans: &[usize],
+    quoted: bool,
+) -> Vec<Vec<u8>> {
+    let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
+    word_fields(word, mask, spans, quoted, &mut cache, cell)
+        .unwrap()
+        .iter()
+        .map(|(f, _)| f.as_bytes().unwrap().to_vec())
+        .collect()
+}
+
+/// The `:?` bail's message word: the arm bails, so the plain helper cannot
+/// unwrap; every row here is what bash puts in `u: <word>`.
+fn colon_question_word(
+    cell: &ForkCell<ShellState>,
+    word: &'static core::ffi::CStr,
+    mask: &[MaskBit],
+    spans: &[usize],
+) -> Vec<u8> {
+    let err = substitute_arg(
+        &ShortCStr::from(word),
+        mask,
+        spans,
+        &mut HashMap::new(),
+        cell,
+    )
+    .unwrap_err();
+    match err.current_context() {
+        ResolveError::ParamNullOrNotSet { word, .. } => word.as_bytes().unwrap().to_vec(),
+        other => panic!("expected the `:?` bail, got {other:?}"),
+    }
+}
+
+/// `cell` with `HOME` set to `/h/o/m/e`, the `HOME` bash was measured with.
+fn home_cell(cell: ForkCell<ShellState>) -> ForkCell<ShellState> {
+    bind(&cell, c"HOME", c"/h/o/m/e");
+    cell
+}
+
+#[test]
+fn colon_dash_word_expands_command_substitution() {
+    // bash 5.3.9 prints `hi` for both spellings (master printed the literal
+    // `$(printf hi)`). The word's mask governs only the word's own expansion,
+    // and the whole `${ … }` result keeps the outer reference's bit.
+    let cell = dummy_cell();
+    let word = ShortCStr::from(c"${u:-$(printf hi)}");
+    let (res, mask, expanded) = expand_marked(&cell, &word, &[Unquoted; 18], &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"hi");
+    assert_eq!(
+        mask,
+        vec![Unquoted; 2],
+        "the result keeps the outer trigger's bit"
+    );
+    assert!(expanded, "the word ran a command substitution");
+    let (res, mask, _) = expand_marked(&cell, &word, &[Quoted; 18], &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"hi");
+    assert_eq!(
+        mask,
+        vec![Quoted; 2],
+        "a quoted reference keeps the result quoted"
+    );
+    // The word's own mask is discarded on the way out, which is what bash does:
+    // an unquoted region splits after a word that quoted its own space
+    // (`${u:-'a b'}` → `a`, `b`), while a fully quoted reference is one word
+    // (`"${u:-'a b'}"` → `a b`).
+    let word = ShortCStr::from(c"${u:-a b}");
+    let mask = [
+        Unquoted, Unquoted, Unquoted, Unquoted, Unquoted, Quoted, Quoted, Quoted, Unquoted,
+    ];
+    assert_eq!(
+        colon_field_texts(&cell, &word, &mask, &[], false),
+        vec![b"a".to_vec(), b"b".to_vec()]
+    );
+    assert_eq!(
+        colon_field_texts(&cell, &word, &[Quoted; 9], &[], true),
+        vec![b"a b".to_vec()]
+    );
+}
+
+#[test]
+fn colon_dash_word_expands_parameter_and_arithmetic() {
+    // bash: `${u:-$v}` → `V` and `${u:-$((1+2))}` → `3` (master printed both
+    // spellings literally). An empty word is a word too: `${u:-}` gives the
+    // empty word, so the reference expands to nothing.
+    let cell = dummy_cell();
+    bind(&cell, c"v", c"V");
+    assert_eq!(expand(&cell, c"${u:-$v}", &[]), b"V");
+    assert_eq!(expand(&cell, c"${u:-$((1+2))}", &[]), b"3");
+    assert_eq!(expand(&cell, c"${u:-}", &[]), b"");
+}
+
+#[test]
+fn colon_assign_stores_the_expanded_word() {
+    // bash keeps the store and the printed word equal; a fresh `u` per row,
+    // since `:=` only takes the word when the parameter is null.
+    let cell = env_cell();
+    assert_eq!(expand(&cell, c"${u:=$(printf hi)} [$u]", &[]), b"hi [hi]");
+    assert_eq!(var_of(&cell.borrow().unwrap(), c"u"), b"hi");
+    let cell = env_cell();
+    bind(&cell, c"v", c"V");
+    assert_eq!(expand(&cell, c"${u:=$v} [$u]", &[]), b"V [V]");
+    assert_eq!(var_of(&cell.borrow().unwrap(), c"u"), b"V");
+}
+
+#[test]
+fn colon_assign_tilde_uses_the_word_mask() {
+    // The word's own quote bits decide its expansion (bash, `HOME=/h/o/m/e`):
+    // mask-unquoted `${u:=~/x}` → `/h/o/m/e/x`, mask-quoted `"${u:=~/x}"` → `~/x`,
+    // and a zero-byte span at the word's end keeps the tilde literal
+    // (`"${u:=~""}"` → `~`) — only the span says the pair was there.
+    assert_eq!(
+        expand_marked(
+            &home_cell(env_cell()),
+            &ShortCStr::from(c"${u:=~/x}"),
+            &[Unquoted; 9],
+            &[]
+        )
+        .0
+        .as_bytes()
+        .unwrap(),
+        b"/h/o/m/e/x"
+    );
+    assert_eq!(
+        expand_marked(
+            &home_cell(env_cell()),
+            &ShortCStr::from(c"${u:=~/x}"),
+            &[Quoted; 9],
+            &[]
+        )
+        .0
+        .as_bytes()
+        .unwrap(),
+        b"~/x"
+    );
+    assert_eq!(
+        expand_marked(
+            &home_cell(env_cell()),
+            &ShortCStr::from(c"${u:=~}"),
+            &[Unquoted; 7],
+            &[6]
+        )
+        .0
+        .as_bytes()
+        .unwrap(),
+        b"~"
+    );
+}
+
+#[test]
+fn colon_assign_folds_unquoted_backslash() {
+    // bash: `${u:=a\ b}` → `a b` (POSIX #2.2.1 folds an unquoted pair) while
+    // `"${u:=a\ b}"` keeps `a\ b` (#2.2.2 keeps a `\` before a non-special byte).
+    let cell = env_cell();
+    let word = ShortCStr::from(c"${u:=a\\ b}");
+    let (res, _, _) = expand_marked(&cell, &word, &[Unquoted; 10], &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"a b");
+    assert_eq!(var_of(&cell.borrow().unwrap(), c"u"), b"a b");
+    let cell = env_cell();
+    let (res, _, _) = expand_marked(&cell, &word, &[Quoted; 10], &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"a\\ b");
+}
+
+#[test]
+fn colon_assign_keeps_single_quoted_dollar_literal() {
+    // The tokenizer hands the word as `\$v` with its bytes masked (single quotes
+    // contribute no bytes), and the quoted `\` arm keeps the dollar literal:
+    // bash stores `$v` for `w=${u:='$v'}`, and so does fdshell.
+    let cell = env_cell();
+    let mask = [
+        Unquoted, Unquoted, Unquoted, Unquoted, Unquoted, Quoted, Quoted, Quoted,
+    ];
+    let (res, _, _) = expand_marked(&cell, &ShortCStr::from(c"${u:=\\$v}"), &mask, &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"$v");
+    assert_eq!(var_of(&cell.borrow().unwrap(), c"u"), b"$v");
+}
+
+#[test]
+fn colon_plus_word_is_lazy() {
+    // `$(exit 3)` is observable through `${?}` in the same word: bash runs the
+    // word only for the branch that takes it, so an arm that keeps the value (or
+    // takes nothing) leaves the status alone. A fresh cell per row: the status
+    // and the assignment persist through the cell.
+    for (word, want) in [
+        (c"${v:+$(exit 3)}|${?}", b"|3".to_vec()),
+        (c"${u:+$(exit 3)}|${?}", b"|0".to_vec()),
+        (c"${u:-$(exit 3)}|${?}", b"|3".to_vec()),
+        (c"${v:-$(exit 3)}|${?}", b"V|0".to_vec()),
+        (c"${v:=$(exit 3)}|${?}", b"V|0".to_vec()),
+    ] {
+        let cell = env_cell();
+        bind(&cell, c"v", c"V");
+        assert_eq!(expand(&cell, word, &[]), want, "{word:?}");
+    }
+}
+
+#[test]
+fn colon_question_word_expands_unquoted() {
+    // Every row measured in bash 5.3.9: the message word of `:?` goes through the
+    // pipeline **unquoted** even inside a quoted reference (`~` and `a\ b` both
+    // expand), and a zero-byte span makes an empty word present (`${u:?~""}` keeps
+    // the tilde literal through the span).
+    let cell = home_cell(env_cell());
+    assert_eq!(
+        colon_question_word(&cell, c"${u:?$(printf boom)}", &[], &[]),
+        b"boom"
+    );
+    assert_eq!(
+        colon_question_word(&cell, c"${u:?~}", &[], &[]),
+        b"/h/o/m/e"
+    );
+    assert_eq!(colon_question_word(&cell, c"${u:?a\\ b}", &[], &[]), b"a b");
+    assert_eq!(colon_question_word(&cell, c"${u:?~}", &[], &[6]), b"~");
+    assert_eq!(colon_question_word(&cell, c"${u:?$v}", &[], &[]), b"");
+}
+
+#[test]
+fn colon_question_message_respects_literal_emptiness() {
+    // `${u:?}` has no word ⇒ the default message; `${u:?""}` has an empty word
+    // **with** a span at its start (the tokenizer records the pair), so the
+    // message is empty (bash); `${u:?$(true)}` has a word that *expands* to empty
+    // — a different input shape, and bash reports an empty message too.
+    let cell = env_cell();
+    assert_eq!(
+        colon_question_word(&cell, c"${u:?}", &[], &[]),
+        b"parameter null or not set"
+    );
+    assert_eq!(colon_question_word(&cell, c"${u:?}", &[], &[5]), b"");
+    assert_eq!(colon_question_word(&cell, c"${u:?$(true)}", &[], &[]), b"");
+    // The **quoted** `"${u:?""}"` still gives the default message here: the parser
+    // strips the empty pair and records no span, so this layer cannot see it — the
+    // divergence is task #571, pinned in `tests/quotes.rs`.
+}
+
+#[test]
+fn colon_word_positional_joins_match_bash() {
+    // Two positionals (`arg1`, `arg2` — bash `set -- a b`). `:-` keeps the
+    // argument join, so a quoted word keeps the positional boundaries and yields
+    // two fields; `:=` joins into the one scalar it stores (`a b`, and `a,b` with
+    // `IFS=,` and `$*`); the `:?` message space-joins whatever the `IFS` is.
+    let cell = positional_cell_with_n(3);
+    let word = ShortCStr::from(c"${u:-$@}");
+    assert_eq!(
+        colon_field_texts(&cell, &word, &[Quoted; 8], &[], true),
+        vec![b"arg1".to_vec(), b"arg2".to_vec()]
+    );
+    assert_eq!(
+        colon_field_texts(&cell, &word, &[], &[], false),
+        vec![b"arg1".to_vec(), b"arg2".to_vec()]
+    );
+    assert_eq!(expand(&cell, c"${u:=$@}", &[]), b"arg1 arg2");
+    let cell = positional_cell_with_n(3);
+    assert_eq!(
+        colon_question_word(&cell, c"${u:?x$@}", &[], &[5]),
+        b"xarg1 arg2"
+    );
+    let cell = positional_cell_with_n(3);
+    cell.borrow_mut().unwrap().ifs = ShortCStr::from(c",");
+    assert_eq!(expand(&cell, c"${u:=$*}", &[]), b"arg1,arg2");
+    let cell = positional_cell_with_n(3);
+    cell.borrow_mut().unwrap().ifs = ShortCStr::from(c",");
+    assert_eq!(
+        colon_question_word(&cell, c"${u:?x$*}", &[], &[5]),
+        b"xarg1 arg2"
+    );
+}
+
+#[test]
+fn colon_word_truncated_paren_stays_literal() {
+    // The region reader still stops at the first `}` (task #174), so the word is a
+    // fragment whose `$( … )` / backtick span never closes inside it; expanding it
+    // would turn today's accepted literal into an `UnclosedParen` /
+    // `UnclosedBacktick` bail, so the guard keeps the word literal. bash's own
+    // answers (`}` and `` `echo ` `` both run) belong to #174's body scanner; the
+    // integration pin is in `tests/unset_expand.rs`.
+    let cell = env_cell();
+    assert_eq!(expand(&cell, c"${u:=$(echo }", &[]), b"$(echo ");
+    let cell = env_cell();
+    assert_eq!(expand(&cell, c"${u:=`echo }", &[]), b"`echo ");
+    // The guard skips `\X` pairs (the tokenizer writes a single-quoted `$` as
+    // `\$`), so an escaped dollar in a cut word opens no span: the word expands
+    // and the quoted-`\` arm keeps the dollar literal.
+    let cell = env_cell();
+    assert_eq!(expand(&cell, c"${u:=\\$(echo }", &[]), b"$(echo ");
+    // A span that **closes** inside the word is no fragment, so the word runs:
+    // `` `true` `` prints nothing (bash's `` "${u:=`echo hi`}" `` row, pinned in
+    // `tests/unset_expand.rs`, is the same shape with an output).
+    let cell = env_cell();
+    assert_eq!(expand(&cell, c"${u:=`true`}", &[]), b"");
+    // The closing backtick is sought past the escape pair, so the span closes and
+    // the word runs — and `ab\c` is no command, so the row is not the literal.
+    let cell = env_cell();
+    let got = substitute_arg(
+        &ShortCStr::from(c"${u:=`ab\\c`}"),
+        &[],
+        &[],
+        &mut HashMap::new(),
+        &cell,
+    );
+    let got = got.map(|(r, _)| r.as_bytes().unwrap().to_vec());
+    assert!(
+        !matches!(&got, Ok(text) if *text == *b"`ab\\c`"),
+        "the span closes past the escape, so the word runs and is not the literal: {got:?}"
+    );
+}
+
+#[test]
+fn colon_word_nested_brace_stays_literal_until_174() {
+    // bash gives `x`; the region body is read to the first `}`, so the inner
+    // `${v:-x` is unclosed and the whole word stays literal (task #174's scanner).
+    let cell = env_cell();
+    assert_eq!(expand(&cell, c"${u:=${v:-x}}", &[]), b"${v:-x}");
+}
+
+#[test]
+fn colon_word_mask_shorter_than_word_is_unquoted() {
+    // A mask that stops short of the word carries no information for the rest of
+    // it, so those bytes pad unquoted — the rule every mask-independent caller
+    // uses — and the escape folds as if the word were unquoted throughout.
+    let cell = env_cell();
+    let word = ShortCStr::from(c"${u:=a\\ b}");
+    let (res, _, _) = expand_marked(&cell, &word, &[Quoted; 6], &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"a b");
+    let cell = env_cell();
+    let (res, _, _) = expand_marked(&cell, &word, &[], &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"a b");
+    // With a bit for every byte the quoted arm answers instead (bash `a\ b`).
+    let cell = env_cell();
+    let (res, _, _) = expand_marked(&cell, &word, &[Quoted; 10], &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"a\\ b");
+}
+
+#[test]
+fn colon_word_spans_are_rebased() {
+    // The spans belonging to the word are the ones at or inside its own byte
+    // range, and they are what the tilde gate reads: `~/x` with a pair at the
+    // word's start, or `~` with a pair at its end, stay literal (bash). A span in
+    // front of the operator belongs to the name or the operator and is dropped, so
+    // the tilde expands.
+    assert_eq!(
+        expand_marked(
+            &home_cell(env_cell()),
+            &ShortCStr::from(c"${u:=~/x}"),
+            &[Unquoted; 9],
+            &[5]
+        )
+        .0
+        .as_bytes()
+        .unwrap(),
+        b"~/x"
+    );
+    assert_eq!(
+        expand_marked(
+            &home_cell(env_cell()),
+            &ShortCStr::from(c"${u:=~}"),
+            &[Unquoted; 7],
+            &[6]
+        )
+        .0
+        .as_bytes()
+        .unwrap(),
+        b"~"
+    );
+    assert_eq!(
+        expand_marked(
+            &home_cell(env_cell()),
+            &ShortCStr::from(c"${u:=~}"),
+            &[Unquoted; 7],
+            &[3]
+        )
+        .0
+        .as_bytes()
+        .unwrap(),
+        b"/h/o/m/e"
+    );
+    // The rebasing is a subtraction, and the position is what the tilde gate
+    // reads: a span **past** the tilde-prefix (the prefix ends at the first `/`,
+    // inclusive) leaves the tilde expandable — bash prints `[<HOME>/x]` for
+    // `~/x""`, so this word's relative index 2 is not a prefix byte.
+    assert_eq!(
+        expand_marked(
+            &home_cell(env_cell()),
+            &ShortCStr::from(c"${u:=~/x}"),
+            &[Unquoted; 9],
+            &[7]
+        )
+        .0
+        .as_bytes()
+        .unwrap(),
+        b"/h/o/m/e/x"
+    );
 }

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -12,7 +14,9 @@ mod length;
 
 // The `join` mode lets the braced `${@}`/`${*}` reach the shared pattern arm;
 // threading it through `substitute/resolve.rs` instead would put the argument on
-// every braced surface, arithmetic and nounset included (task #452).
+// every braced surface, arithmetic and nounset included (task #452). `spans` is
+// the word's zero-byte quote-span list, and an operator word needs it (task
+// #561) — the arg pass owns it and hands it down here.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_brace(
     peek: &mut super::mask::Counting<'_>,
@@ -23,6 +27,7 @@ pub(crate) fn handle_brace(
     quoted: bool,
     join: Join,
     origin: &mut super::origin::Origin,
+    spans: &[usize],
 ) -> Result<(), Report<ResolveError>> {
     peek.next();
     if peek.peek().copied() == Some(b'#') {
@@ -49,9 +54,20 @@ pub(crate) fn handle_brace(
     }
     match super::param_op::split_operator(&content) {
         // `start` is the word index of the `{` byte, so the braced content
-        // begins at `start + 1` and the pattern arm can slice its mask.
+        // begins at `start + 1` and each operator arm can slice the mask, the
+        // spans and `origin` under its own bytes.
         Some((name, op, word)) if !name.is_empty() => {
-            return super::param_op::apply_param_op(&name, op, &word, mask, start + 1, cell, out);
+            return super::param_op::apply_param_op(
+                &name,
+                op,
+                &word,
+                mask,
+                start + 1,
+                spans,
+                cell,
+                out,
+                origin,
+            );
         }
         _ => {}
     }

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 pub(crate) mod at_star;
 mod name;
 
@@ -15,12 +17,14 @@ use super::origin::Origin;
 
 /// The `$` arm's quote-region context: the output mask, the word index of the
 /// byte after `$` (the `${…}` arm reads the mask under its own content
-/// bytes), and the cap of the trigger byte's quote region, spent by
-/// [`region_ends_at_dollar`] before any arm runs.
+/// bytes), the cap of the trigger byte's quote region, spent by
+/// [`region_ends_at_dollar`] before any arm runs, and the word's zero-byte quote
+/// spans (task #321), which an operator word of a `${…}` arm needs (task #561).
 pub(crate) struct Region<'a> {
     pub mask: &'a [MaskBit],
     pub start: usize,
     pub limit: usize,
+    pub spans: &'a [usize],
 }
 
 /// The region cap **every** arm of the `$` arm obeys, special parameters
@@ -45,7 +49,12 @@ pub(crate) fn dollar_subst(
     join: Join,
     origin: &mut Origin,
 ) -> Result<(), Report<ResolveError>> {
-    let Region { mask, start, limit } = region;
+    let Region {
+        mask,
+        start,
+        limit,
+        spans,
+    } = region;
     if region_ends_at_dollar(limit, out) {
         return Ok(());
     }
@@ -63,7 +72,7 @@ pub(crate) fn dollar_subst(
             }
         }
         Some(b'{') => {
-            super::brace::handle_brace(peek, mask, start, cell, out, quoted, join, origin)?
+            super::brace::handle_brace(peek, mask, start, cell, out, quoted, join, origin, spans)?
         }
         Some(b'#') => {
             peek.next();

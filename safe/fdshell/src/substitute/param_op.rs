@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 use error_stack::Report;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -5,85 +7,70 @@ use sys::fork_cell::ForkCell;
 use crate::error::resolve::ResolveError;
 use crate::mask::MaskBit;
 use crate::state::ShellState;
+use crate::substitute::Join;
+use crate::substitute::origin::Origin;
 
 mod op;
+mod scan;
+mod word;
 
 pub(in crate::substitute) use op::ParamOp;
+pub(super) use scan::split_operator;
+use word::Word;
 
 pub(super) mod colon;
 pub(super) mod pattern;
 
-/// Splits `${name<op>word}` content at the first operator, scanned
-/// left-to-right so the precedence is positional: `${v#a:}` takes the pattern
-/// `a:` (bash), `${var:x:-w}` takes the colon word `w` (a lone `:` is no
-/// operator), and `${v:-x#y}` stops at the colon so `#` is part of its word.
-pub(super) fn split_operator(content: &ShortCStr) -> Option<(ShortCStr, ParamOp, ShortCStr)> {
-    let bytes = content.as_bytes().ok()?;
-    let mut i = 0usize;
-    loop {
-        let b0 = bytes.get(i).copied()?;
-        let b1 = bytes.get(i + 1).copied();
-        if i > 0
-            && b0 == b':'
-            && let Some(op) = colon_op(b1)
-        {
-            return Some((content.get(0..i)?, op, content.get(i + 2..)?));
-        }
-        if matches!(b0, b'#' | b'%') {
-            let longest = b1 == Some(b0);
-            let skip = 1 + usize::from(longest);
-            return Some((
-                content.get(0..i)?,
-                pattern_op(b0, longest),
-                content.get(i + skip..)?,
-            ));
-        }
-        i += 1;
-    }
-}
-
-/// The byte after a `:` is a colon operator only when it is one of the four;
-/// a lone `:` (or `:x`) is no operator, so the scan continues.
-fn colon_op(op: Option<u8>) -> Option<ParamOp> {
+/// The join the operator word's `$@`/`$*` uses, per the rows measured in bash
+/// 5.3.9: `:=` stores the scalar it measured, so it joins into one text; `:?`
+/// reports a message, which always space-joins; `:-` and `:+` produce a value
+/// for the word surface, so they keep [`Join::Args`].
+fn join_of(op: ParamOp) -> Join {
     match op {
-        Some(b'-') => Some(ParamOp::Default),
-        Some(b'=') => Some(ParamOp::Assign),
-        Some(b'+') => Some(ParamOp::Alternate),
-        Some(b'?') => Some(ParamOp::Error),
-        _ => None,
-    }
-}
-
-/// `#`/`%` with the doubled byte as the long form (`##`, `%%`).
-fn pattern_op(op: u8, longest: bool) -> ParamOp {
-    match (op, longest) {
-        (b'#', false) => ParamOp::ShortestPrefix,
-        (b'#', true) => ParamOp::LongestPrefix,
-        (b'%', false) => ParamOp::ShortestSuffix,
-        _ => ParamOp::LongestSuffix,
+        ParamOp::Assign => Join::Assign,
+        ParamOp::Error => Join::Message,
+        _ => Join::Args,
     }
 }
 
 /// Applies the operator, appending the expansion to `out`. `mask` is the word's
-/// quote mask and `content_start` the word index of the first braced-content
-/// byte, so the pattern arm can slice the mask under its pattern bytes.
+/// quote mask, `spans` its zero-byte quote spans and `content_start` the word
+/// index of the first braced-content byte, so each arm can slice all three under
+/// its own bytes. The colon arms hand their word to `word.rs`, which runs it
+/// through the ordinary word pipeline first (task #561); the pattern arm keeps
+/// its own mask slice, since a pattern is never expanded. `origin` is the outer
+/// word's provenance, which replays a quoted `$@`'s boundaries.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn apply_param_op(
     name: &ShortCStr,
     op: ParamOp,
-    word: &ShortCStr,
+    source: &ShortCStr,
     mask: &[MaskBit],
     content_start: usize,
+    spans: &[usize],
     cell: &ForkCell<ShellState>,
     out: &mut ShortCStr,
+    origin: &mut Origin,
 ) -> Result<(), Report<ResolveError>> {
+    let w = Word {
+        literal: source,
+        mask,
+        start: content_start + name.len() + op.word_offset(),
+        spans,
+        cell,
+        join: join_of(op),
+        force_unquoted: op == ParamOp::Error,
+    };
     match op {
         ParamOp::Default | ParamOp::Alternate | ParamOp::Error => {
-            colon::apply(name, op, word, cell, out)
+            colon::apply(name, op, &w, cell, out, origin)
         }
-        ParamOp::Assign => colon::assign(name, word, cell, out),
+        ParamOp::Assign => colon::assign(name, &w, cell, out, origin),
         ParamOp::ShortestPrefix
         | ParamOp::LongestPrefix
         | ParamOp::ShortestSuffix
-        | ParamOp::LongestSuffix => pattern::apply(name, op, word, mask, content_start, cell, out),
+        | ParamOp::LongestSuffix => {
+            pattern::apply(name, op, source, mask, content_start, cell, out)
+        }
     }
 }

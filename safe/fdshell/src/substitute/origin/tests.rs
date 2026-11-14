@@ -89,3 +89,26 @@ fn ends_quoted_only_for_the_boundary_at_the_word_end() {
     origin.boundary(1, false);
     assert!(!origin.ends_quoted(1), "an unquoted empty tail vanishes");
 }
+
+#[test]
+fn append_boundaries_offsets_and_preserves_order() {
+    // A nested expansion's boundaries are replayed at the outer level, moved by
+    // the output offset where its text starts (task #561): the push order
+    // survives, so the `partition_point` reads in `boundaries_at` still find
+    // them, and the host's own boundaries are untouched.
+    let mut origin = Origin::new();
+    origin.record(0, 3);
+    origin.boundary(0, true);
+    let mut other = Origin::new();
+    other.record(0, 2);
+    other.boundary(0, true);
+    other.boundary(2, false);
+    origin.append_boundaries(&other, 3);
+    assert_eq!(origin.boundaries_at(0), &[(0, true)]);
+    assert_eq!(origin.boundaries_at(3), &[(3, true)]);
+    assert_eq!(origin.boundaries_at(5), &[(5, false)]);
+    // An empty `other` is a no-op.
+    origin.append_boundaries(&Origin::new(), 6);
+    assert_eq!(origin.boundaries_at(3), &[(3, true)]);
+    assert_eq!(origin.boundaries_at(5), &[(5, false)]);
+}

@@ -7,6 +7,9 @@
 //! (`execute_case_command`, bash-5.3 `execute_cmd.c`: the pattern is
 //! `es->word->word`), so the arm must express the positional *word list* for
 //! the caller to cut, and join only where bash itself joins (`Join::Pattern`).
+//! The word of a braced operator adds two modes, both measured in bash 5.3.9
+//! (task #561): `Join::Assign` joins the list into the one scalar text the
+//! operator stores, `Join::Message` joins it into the one text `:?` reports.
 //! LESSONS: "`$@` has two join rules".
 
 /// The join mode of the `$@`/`$*` arm, threaded from the entry point that owns
@@ -26,4 +29,16 @@ pub(crate) enum Join {
     /// whatever the `IFS` is; `$*` (quoted or not) joins with the first `IFS`
     /// byte and **concatenates** when the `IFS` is empty.
     Pattern,
+    /// The word of a braced `:=` (task #561, all rows measured in bash 5.3.9):
+    /// the operator's word becomes the parameter's scalar value, so the
+    /// positional list is **joined into that one text** — `$@` space-joins with
+    /// no boundary (`"${u:=$@}"` stores `a b`), `$*` joins with the first `IFS`
+    /// byte and concatenates on an empty `IFS` (`IFS=,; "${u:=$*}"` stores
+    /// `a,b`). The measured rows are the `Join::Args` ones for every other
+    /// spelling; only `:=`'s own word uses this mode.
+    Assign,
+    /// The message word of a braced `:?` (task #561): the message is one text,
+    /// so both `$@` and `$*` **space-join** with no boundary whatever the `IFS`
+    /// is (`"${u:?$@}"` and `IFS=,; "${u:?$*}"` both report `u: a b`).
+    Message,
 }

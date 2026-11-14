@@ -3,6 +3,8 @@
 //! that stay fixed for the whole run. `arg.rs` builds it and loops over the
 //! bytes; every arm in `arg/arms.rs` moves it through [`Ex::parts`].
 
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 use sys::ExportedFd;
@@ -18,9 +20,11 @@ use crate::substitute::origin::Origin;
 /// The state of one word's substitution, shared by every arm of the loop:
 /// `peek` hands out the word's bytes and counts them, `idx` is the word index
 /// the input `mask` is read at, and `out`/`out_mask`/`origin` accumulate the
-/// output. `mask`, `join`, `cache` and `cell` are the run's inputs, fixed for
-/// the whole word: carrying them here keeps each arm's signature down to the
-/// arguments that arm alone moves.
+/// output. `mask`, `spans`, `join`, `cache` and `cell` are the run's inputs,
+/// fixed for the whole word: carrying them here keeps each arm's signature down
+/// to the arguments that arm alone moves. `spans` (task #561) is the input-side
+/// zero-byte quote-span list the tilde gate and a nested operator word read;
+/// the loop's own arm consumes it, so it lives here.
 pub(crate) struct Ex<'a> {
     pub peek: Counting<'a>,
     pub idx: usize,
@@ -30,6 +34,7 @@ pub(crate) struct Ex<'a> {
     pub cell: &'a ForkCell<ShellState>,
     pub cache: &'a mut HashMap<ShortCStr, ExportedFd>,
     pub mask: &'a [MaskBit],
+    pub spans: &'a [usize],
     pub join: Join,
 }
 

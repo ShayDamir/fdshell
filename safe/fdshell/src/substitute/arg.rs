@@ -5,6 +5,8 @@
 //! (the mask realign, the `idx` re-sync, the `origin` record), so the loop body
 //! here is one call per byte.
 
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 mod arms;
 mod escape;
 mod state;
@@ -55,6 +57,7 @@ pub(super) fn substitute_arg_marked(
         cell,
         cache,
         mask,
+        spans,
         join,
     };
     if super::tilde::leads(bytes, mask, spans) {

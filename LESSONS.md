@@ -11407,3 +11407,41 @@ three mutants, measured by hand) and
 bash's rc 0; the `\v`/`\f`/`\r` and closer-behind-an-argument rows stay at
 their measured rc 1, and the other blocks' tab-before-closer rows stay as
 their own owners pinned them).
+
+## An operator word is a word: expand it; the outer `${…}` owns the mask (task #561)
+
+The `word` of a colon operator (`:-`, `:=`, `:+`, `:?`) is a **word**, so it runs
+the ordinary word pipeline (`substitute_arg_marked`) before the arm uses it:
+tilde, `$name`, `$(…)`, `$((…))`, backticks, escape folding, quote removal. The
+word's own mask governs only its own expansion, and the sub-mask is
+**discarded** on the way out: the caller pads the whole `${…}` result with the
+outer trigger byte's bit, exactly as it does for any other expansion. That is
+why an unquoted `${u:="a b"}` splits into two fields and `${u:="*"}` globs even
+though the word quoted its own content, while the fully quoted reference keeps
+one field. `:=` stores the **expanded** scalar (space-joining `$@`, first-`IFS`
+joining `$*`); `:?` expands its message word **unquoted** even inside a quoted
+reference, and its message joins space on both spellings whatever the `IFS` is.
+The absent-word test is `literal.is_empty() && !spans.contains(&start)`: a
+zero-byte quote span is a word that is present and empty, and it is the only
+thing that says so — the parser strips the pair, so no mask bit survives (the
+spans are rebased to the word's byte range and a span at the word's start or end
+is what the tilde gate reads). Guard a word that an unclosed `$(…)` or backtick
+cuts in half (the region body is still read to the first `}`, task #174):
+without the guard, expanding the fragment turns an accepted literal into an
+`UnclosedParen` / `UnclosedBacktick` bail.
+
+Pins: `substitute/tests.rs::colon_dash_word_expands_*`,
+`colon_assign_stores_the_expanded_word`, `colon_assign_tilde_uses_the_word_mask`,
+`colon_assign_folds_unquoted_backslash`,
+`colon_assign_keeps_single_quoted_dollar_literal`, `colon_plus_word_is_lazy`,
+`colon_question_word_expands_unquoted`,
+`colon_question_message_respects_literal_emptiness`,
+`colon_word_positional_joins_match_bash`,
+`colon_word_truncated_paren_stays_literal`, `colon_word_mask_shorter_than_word_*`,
+`colon_word_spans_are_rebased`;
+`origin/tests.rs::append_boundaries_offsets_and_preserves_order`;
+`tests/unset_expand.rs::colon_word_expansion_matches_bash` (and its sibling
+tests, with bash 5.3.9's measured values), whose
+`nested_paren_inside_a_brace_region_is_expanded` row is the one pin this task
+moved to parity; the residuals it lists are task #174 (reader) and task #571
+(quoted zero-byte span inside a `${…}` body).

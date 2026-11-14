@@ -849,9 +849,11 @@ fn region_body_drops_the_span_quote_bytes() {
     let (out, err, code) = run("v=; echo \"${v:-'a b'}\"");
     assert_eq!((out.as_str(), code), ("a b\n", 0), "stderr={err:?}");
     // bash: `a\}b` — a literal `}` written in an alternate word diverges too
-    // (the region ends at the span's `}`, the body keeps a literal `\}`).
+    // (the region ends at the span's `}`, the body keeps a literal `\}`), and
+    // task #561 moves the last byte: the word `a\` is now expanded, so its
+    // unquoted `\` folds away (POSIX #2.2.1) and fdshell prints `a\b}`.
     let (out, err, code) = run("v=; echo ${v:-'a\\}b'}");
-    assert_eq!((out.as_str(), code), ("a\\\\b}\n", 0), "stderr={err:?}");
+    assert_eq!((out.as_str(), code), ("a\\b}\n", 0), "stderr={err:?}");
 }
 
 /// Task #155: the shell performs no percent escaping — `%%` is data in every

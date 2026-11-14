@@ -10,6 +10,8 @@
 //! is empty (`IFS=,; set -- a ""; printf %s x"$@"` → `[xa][]`), while an
 //! unquoted empty one vanishes (`[xa]`).
 
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -54,6 +56,16 @@ impl Origin {
     /// A positional starts at byte index `at` and closes the open field.
     pub(crate) fn boundary(&mut self, at: usize, quoted: bool) {
         self.boundaries.push((at, quoted));
+    }
+
+    /// Replay another origin's boundaries, moved right by `offset` output bytes:
+    /// a nested expansion keeps the word boundaries its own `$@` produced, so a
+    /// quoted `"$@"` inside it still cuts (task #561). Assumes `other` pushed its
+    /// boundaries in increasing order, as the `$@` arm does.
+    pub(crate) fn append_boundaries(&mut self, other: &Self, offset: usize) {
+        for &(at, quoted) in &other.boundaries {
+            self.boundary(offset + at, quoted);
+        }
     }
 
     /// No byte of the word came from an expansion (a tilde arm deliberately
