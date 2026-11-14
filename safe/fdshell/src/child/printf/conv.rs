@@ -21,11 +21,13 @@ use super::fmt_int;
 use super::spec::{Fmt, Spec};
 
 /// Apply one fully-parsed specifier, consuming its `*` fields and its argument.
-/// Returns `true` when at least one argument was consumed.
+/// Returns `true` when at least one argument was consumed; `stopped` reports a
+/// `%b` whose argument ended with `\c`.
 pub(super) fn apply_spec(
     spec: &Spec,
     rest: &mut &[&CStr],
     sink: &mut Sink,
+    stopped: &mut bool,
 ) -> Result<bool, Report<BuiltinError>> {
     let before = rest.len();
     let (width, width_left) = field::resolve_field(spec.width, rest, sink, false);
@@ -52,7 +54,7 @@ pub(super) fn apply_spec(
         b'a' | b'A' => fmt_hexfloat::render(num::next_float(rest, sink), &fmt, &mut sink.out),
         b's' => string_conv(rest, &fmt, &mut sink.out),
         b'c' => char_conv(rest, &fmt, &mut sink.out),
-        b'b' => byte_conv(rest, &fmt, &mut sink.out),
+        b'b' => byte_conv(rest, &fmt, &mut sink.out, stopped),
         b'q' => quote_conv(rest, &fmt, &mut sink.out),
         // `spec::is_conv` guarantees a known conversion character.
         _ => {}

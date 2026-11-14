@@ -84,6 +84,62 @@ fn printf_b_interprets_escapes() {
     assert_eq!(out, "a\tb\n");
 }
 
+// --- `%b`'s own escape rules (POSIX, values measured against bash 5.3.9) ---
+
+#[test]
+fn printf_b_zero_prefixed_octal() {
+    // `\0` plus up to three further octal digits, unlike the format string's
+    // three-digit rule; ASCII outputs only (the `run` helper decodes UTF-8).
+    let (out, _err, code) = run(r"printf '%b' '\0101'");
+    assert_eq!(code, 0);
+    assert_eq!(out, "A");
+    let (out, _err, code) = run(r"printf '%b' '\0040'");
+    assert_eq!(code, 0);
+    assert_eq!(out, " ");
+}
+
+#[test]
+fn printf_b_backslash_c_stops_output() {
+    // `\c` stops the operand, the remaining operands and the rest of the
+    // format; a `\c` in the format string itself is passed through, as bash
+    // measures it.
+    let (out, _err, code) = run(r"printf 'a\cb'; echo X");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a\\cbX\n");
+    let (out, _err, code) = run(r"printf 'x%by\n' 'a\cb'; echo after");
+    assert_eq!(code, 0);
+    assert_eq!(out, "xaafter\n");
+    let (out, _err, code) = run(r"printf 'A%bz%s\n' 'x\cy' tail");
+    assert_eq!(code, 0);
+    assert_eq!(out, "Ax");
+    let (out, _err, code) = run(r"printf '%b' '\c'; echo rc=$?");
+    assert_eq!(code, 0);
+    assert_eq!(out, "rc=0\n");
+    let (out, _err, code) = run(r"printf '%b' 'a\c' extra");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a");
+}
+
+#[test]
+fn printf_b_precision_after_expansion() {
+    // The precision truncates the converted string, not the raw operand.
+    let (out, _err, code) = run(r"printf '%.2b' 'A\101B'");
+    assert_eq!(code, 0);
+    assert_eq!(out, "AA");
+    let (out, _err, code) = run(r"printf '%.1b' 'ab\cde'");
+    assert_eq!(code, 0);
+    assert_eq!(out, "a");
+}
+
+#[test]
+fn printf_b_padding_survives_the_stop() {
+    // The padding due for the converted prefix is emitted before `\c` halts
+    // the rest of the format.
+    let (out, _err, code) = run(r"printf '[%10b]' 'a\cb'");
+    assert_eq!(code, 0);
+    assert_eq!(out, "[         a");
+}
+
 #[test]
 fn printf_reuses_format_until_args_exhausted() {
     // One arg for two `%s`: the second is empty, the format is not re-run.

@@ -17,6 +17,8 @@
 //!   long double (e.g. `0.1`, `5e-324`) the trailing digits are the `f64`
 //!   form, not bash's long-double digits.
 
+// mutants: -C --lib -C --test -C printf -- -E 'test(/^child::printf::/) | binary(printf)'
+
 mod sink;
 
 use builtins::error::BuiltinError;
@@ -45,18 +47,26 @@ pub(super) fn handle_printf(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
 }
 
 /// Render `fmt` against `args` into `sink`. The format string is reused while
-/// arguments remain, matching bash; a round that consumes nothing ends it.
+/// arguments remain, matching bash; a round that consumes nothing ends it, and
+/// so does a `%b` argument ending in `\c` (no further output, exit status
+/// unchanged).
 fn render(fmt: &[u8], args: &[&CStr], sink: &mut Sink) -> Result<(), Report<BuiltinError>> {
     let mut rest = args;
+    let mut stopped = false;
     loop {
-        let consumed = round(fmt, &mut rest, sink)?;
-        if rest.is_empty() || !consumed {
+        let consumed = round(fmt, &mut rest, sink, &mut stopped)?;
+        if stopped || rest.is_empty() || !consumed {
             return Ok(());
         }
     }
 }
 
-fn round(fmt: &[u8], rest: &mut &[&CStr], sink: &mut Sink) -> Result<bool, Report<BuiltinError>> {
+fn round(
+    fmt: &[u8],
+    rest: &mut &[&CStr],
+    sink: &mut Sink,
+    stopped: &mut bool,
+) -> Result<bool, Report<BuiltinError>> {
     let mut consumed = false;
     let mut i = 0;
     while let Some(&b) = fmt.get(i) {
@@ -77,7 +87,10 @@ fn round(fmt: &[u8], rest: &mut &[&CStr], sink: &mut Sink) -> Result<bool, Repor
             }
             Some(_) => {
                 let (s, j) = spec::parse(fmt, i + 1).ok_or_else(invalid_format)?;
-                consumed = conv::apply_spec(&s, rest, sink)? || consumed;
+                consumed = conv::apply_spec(&s, rest, sink, stopped)? || consumed;
+                if *stopped {
+                    return Ok(consumed);
+                }
                 i = j;
             }
         }

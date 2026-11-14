@@ -35,6 +35,16 @@ fn rendered(fmt: &str, args: &[&str]) -> String {
     rendered_pair(fmt, args).0
 }
 
+/// Rendered stdout as raw bytes (for outputs that are not valid UTF-8).
+fn rendered_bytes(fmt: &str, args: &[&str]) -> Vec<u8> {
+    let cs = refs(args);
+    let strs: Vec<&core::ffi::CStr> = cs.iter().map(|s| s.as_c_str()).collect();
+    let mut sink = Sink::new();
+    render(fmt.as_bytes(), &strs, &mut sink).unwrap();
+    assert!(sink.err.is_empty() && !sink.failed);
+    sink.out
+}
+
 fn render_err(fmt: &str, args: &[&str]) -> error_stack::Report<builtins::error::BuiltinError> {
     let cs = refs(args);
     let strs: Vec<&core::ffi::CStr> = cs.iter().map(|s| s.as_c_str()).collect();
@@ -343,8 +353,80 @@ fn b_numeric_argument_verbatim() {
 }
 
 #[test]
-fn b_precision_truncates_before_expansion() {
+fn b_precision_truncates_after_expansion() {
+    // The precision applies to the converted string, not the raw operand
+    // (POSIX); the `ab\ncd` row is equal under both readings, the rest only
+    // under the POSIX one (bash-measured).
     assert_eq!(rendered("%.2b", &[r"ab\ncd"]), "ab");
+    assert_eq!(rendered("%.2b", &[r"A\101B"]), "AA");
+    assert_eq!(rendered("%.2b", &[r"A\0101B"]), "AA");
+    assert_eq!(rendered("%.1b", &[r"ab\cde"]), "a");
+    assert_eq!(rendered("%.2b", &[r"\0101"]), "A");
+}
+
+#[test]
+fn b_zero_prefixed_octal() {
+    // `\0` plus up to three further octal digits, the value truncated to one
+    // byte (bash-measured; the format string keeps the three-digit rule).
+    assert_eq!(rendered("%b", &[r"\0"]), "\0");
+    assert_eq!(rendered("%b", &[r"\00"]), "\0");
+    assert_eq!(rendered("%b", &[r"\0000"]), "\0");
+    assert_eq!(rendered("%b", &[r"\0101"]), "A");
+    assert_eq!(rendered("%b", &[r"\0040"]), " ");
+    assert_eq!(rendered("%b", &[r"\0077"]), "?");
+    assert_eq!(rendered("%b", &[r"\08"]), "\u{0}8");
+    assert_eq!(rendered("%b", &[r"\0400"]), "\0");
+    assert_eq!(rendered("%b", &[r"\0410"]), "\u{8}");
+    assert_eq!(rendered("%b", &[r"\00101"]), "\u{8}1");
+}
+
+#[test]
+fn b_zero_prefixed_octal_stops_at_three_after_prefix() {
+    assert_eq!(rendered("%b", &[r"\00000"]), "\u{0}0");
+    assert_eq!(rendered("%b", &[r"\000000"]), "\u{0}00");
+    assert_eq!(rendered("%b", &[r"\01011"]), "A1");
+}
+
+#[test]
+fn b_octal_byte_truncates_mod_256() {
+    // Not valid UTF-8, so asserted on the raw sink bytes.
+    assert_eq!(rendered_bytes("%b", &[r"\0777"]), vec![0xFF]);
+    assert_eq!(rendered_bytes("%b", &[r"\777"]), vec![0xFF]);
+}
+
+#[test]
+fn b_non_octal_after_zero() {
+    assert_eq!(rendered("%b", &[r"\0x41"]), "\0x41");
+    assert_eq!(rendered("%b", &[r"\8"]), "\\8");
+}
+
+#[test]
+fn b_backslash_c_stops() {
+    // `\c` stops the rest of the operand, the remaining operands and the rest
+    // of the format; already-emitted output survives and rc stays 0.
+    assert_eq!(
+        rendered_pair("%b", &[r"a\cb"]),
+        (String::from("a"), String::new(), false)
+    );
+    assert_eq!(
+        rendered_pair("%bX%s", &[r"a\c", "b"]),
+        (String::from("a"), String::new(), false)
+    );
+    assert_eq!(
+        rendered_pair("A%bz", &[r"x\cy"]),
+        (String::from("Ax"), String::new(), false)
+    );
+    assert_eq!(
+        rendered_pair("%b%b", &["a", r"b\c"]),
+        (String::from("ab"), String::new(), false)
+    );
+}
+
+#[test]
+fn b_stop_after_padding() {
+    // The padding due for the converted prefix is emitted before the stop.
+    assert_eq!(rendered("%10b", &[r"a\cb"]), "         a");
+    assert_eq!(rendered("%-5.1b", &[r"ab\cde"]), "a    ");
 }
 
 #[test]

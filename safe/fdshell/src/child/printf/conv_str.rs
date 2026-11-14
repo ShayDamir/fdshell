@@ -1,6 +1,8 @@
 //! The string-taking conversions (`s c b q`): they consume one argument (or
 //! print an empty value when the arguments are exhausted) and pad to the width.
 
+// mutants: -C --lib -C --test -C printf -- -E 'test(/^child::printf::/) | binary(printf)'
+
 use alloc::vec::Vec;
 use core::ffi::CStr;
 
@@ -41,15 +43,17 @@ pub(super) fn char_conv(rest: &mut &[&CStr], fmt: &Fmt, out: &mut Vec<u8>) {
     );
 }
 
-/// `%b`: the argument with backslash escapes expanded (the precision truncates
-/// the raw bytes first), then padded.
-pub(super) fn byte_conv(rest: &mut &[&CStr], fmt: &Fmt, out: &mut Vec<u8>) {
-    let (mut b, _) = arg_bytes(rest);
-    if let Some(p) = fmt.precision {
-        b.truncate(p);
-    }
+/// `%b`: the argument with backslash escapes expanded — the precision
+/// truncates the *expanded* bytes, per POSIX — then padded; `stopped` reports
+/// a `\c` that halted output (the padding due for the converted prefix is
+/// emitted first).
+pub(super) fn byte_conv(rest: &mut &[&CStr], fmt: &Fmt, out: &mut Vec<u8>, stopped: &mut bool) {
+    let (b, _) = arg_bytes(rest);
     let mut core = Vec::new();
-    emit_arg(&b, &mut core);
+    *stopped = emit_arg(&b, &mut core);
+    if let Some(p) = fmt.precision {
+        core.truncate(p);
+    }
     pad(fmt.left, false, fmt.width.unwrap_or(0), b"", &core, out);
 }
 
