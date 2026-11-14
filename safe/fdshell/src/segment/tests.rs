@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+use super::marks::is_stray_closer;
 use super::*;
 use crate::keywords::{Closer, Place};
 use crate::scan::Quotes;

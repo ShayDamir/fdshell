@@ -1418,8 +1418,8 @@ bash's grammar has a rule for a lone `}` — it refuses the line at rc 2 and run
 nothing — so the decision answers it like the other closers at the house rc 1
 (`tests/group.rs::a_lone_brace_closer_reports_like_the_other_closers`); the
 `comment` walk's recorder keeps not recording braces (its pairing counts exact
-brace words, so a glued definer's `{` keeps no depth), while the run path of
-`segment.rs` asks the decision directly. Argument-position and claimed-span
+brace words, so a glued definer's `{` keeps no depth), while the run path's mark
+(`segment/marks.rs`) asks the decision directly. Argument-position and claimed-span
 rows keep their old answers. A `time [-p]`
 prefix written in front of the closer is transparent: the report names the closer
 behind it. When no closer of the block's **own** kind is left, the line is the

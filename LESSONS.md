@@ -7605,7 +7605,7 @@ says
    nothing run; house rc 1): the decision answers the brace like the other
    closers, and the boundary moved from `decision` to the **two ask-sites** —
 the
-   run path of `segment.rs` asks it directly and is where the stray `}`
+   run path's mark (`segment/marks.rs`) asks it directly and is where the stray `}`
 reports,
    while the `comment` walk's recorder `Pairing::observe` keeps not recording
    braces (its pairing counts exact brace words only, so a glued definer's `{`
