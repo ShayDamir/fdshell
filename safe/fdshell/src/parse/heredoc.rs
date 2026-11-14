@@ -1,8 +1,11 @@
+// mutants: -C --lib -C --test -C heredoc -- -E 'test(/^parse::heredoc::/) | binary(heredoc)'
+
 //! Heredoc parsing: extracting the bodies of `<<` operators from a line and
 //! turning the operator tokens into stdin redirects.
 
 mod eof;
 mod operator;
+mod operator_at;
 mod strip;
 
 use super::Token;
@@ -14,7 +17,8 @@ use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
 
-pub(crate) use operator::{delimiter_token_indices, is_operator, operator_count, operators};
+pub(crate) use operator::{delimiter_token_indices, is_operator, operator_count};
+pub(crate) use operator_at::operators;
 
 /// One parsed heredoc, in command order.
 #[derive(Clone)]
@@ -32,7 +36,7 @@ pub(crate) fn layout(
     line: &[u8],
     tokens: &[Token],
 ) -> Result<Vec<HeredocBody>, Report<ParseError>> {
-    let ops = operator::operators(line, tokens)?;
+    let ops = operator_at::operators(line, tokens)?;
     if ops.is_empty() {
         return Ok(Vec::new());
     }
@@ -91,7 +95,7 @@ pub(crate) fn parse_operator(
     i: usize,
     spec: &HeredocBody,
 ) -> Result<(RedirectDef, usize), Report<ParseError>> {
-    let (op, extra) = operator::operator_at(line, tokens, i)?;
+    let (op, extra) = operator_at::operator_at(line, tokens, i)?;
     Ok((
         RedirectDef::here_doc(op.fd, spec.body.clone(), spec.expand),
         extra,

@@ -2761,7 +2761,7 @@ not "fix" the integration tests toward 127 to match the `-c` quirk.
 A token whose suffix from the first `>`/`<` byte is exactly `>`, `>>`, `<`,
 `<>` (an optional all-digit fd prefix precedes it) consumes the **next** token
 as its path operand (`parse/redirect/bare.rs`), mirroring the bare `<<`
-delimiter (`parse/heredoc/operator.rs::operator_at`, `extra = 1`) and the bare
+delimiter (`parse/heredoc/operator_at.rs::operator_at`, `extra = 1`) and the bare
 `<<<` (`parse/here_string.rs`). Test bare-ness on the operator *suffix*: `>>`
 and `<>` have a one-byte (`>`) `after_op`, which the attached path's
 `redirect_op` rejects as `InvalidRedirect` — that is why `cmd >> file` was a
@@ -2776,7 +2776,7 @@ is bare *by* an emptiness test, and is one operator with one open: see
 
 The operand guard is literally **one function**,
 `scan/heredoc::op::invalid_delimiter`, imported by
-`parse/heredoc/operator.rs`, `parse/redirect/bare.rs` and
+`parse/heredoc/operator_at.rs`, `parse/redirect/bare.rs` and
 `parse/bg_redirect/bare.rs`: lockstep is structural, not a copy — a
 byte-identical private duplicate is what drifts, and it did:
 `parse/here_string.rs`'s `is_bare_operand` read the post-quote-removal
@@ -6124,7 +6124,7 @@ by task #336's rows of `parse/case_clause/tests.rs` and
 - **The third `|`-text reader is `scan/heredoc/op.rs`, and it owns its rule**
 (task #347). `invalid_delimiter`'s `;`/`|` arms read the operand's **text**,
 gated on `mask::quoted_at(mask, 0)` — the mask every caller already owns; the
-raw-span flag (`parse/heredoc/operator.rs` passes
+raw-span flag (`parse/heredoc/operator_at.rs` passes
 `word_quoted(word, start, end)`) is the **empty** arm's input alone since task
 #530. For a word whose text is the **one-byte** separator that span test *is*
 the quote-mask decision the task asked for: span longer than text ⇔ the span

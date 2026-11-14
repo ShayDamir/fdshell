@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-use super::operator::operator_at;
+use super::operator_at::operator_at;
 use super::{delimiter_token_indices, is_operator, layout, operator_count};
 use crate::error::parse::ParseError;
 use crate::parse::token::tokenize_statement;
