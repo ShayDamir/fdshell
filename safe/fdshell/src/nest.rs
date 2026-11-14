@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^nest::/)'
+
 use error_stack::{Report, ResultExt, bail, ensure};
 use sys::fork_cell::ForkCell;
 
@@ -14,6 +16,11 @@ pub(crate) const MAX_NESTING: u32 = 100;
 /// Fails with `limit` if entering the level would exceed [`MAX_NESTING`] or
 /// if the state cannot be borrowed (an internal bug at these call sites).
 /// The depth is restored before `f`'s result is returned.
+///
+/// Stays a free function (task #567): the receiver is `sys`'s `ForkCell`, and
+/// Rust forbids an inherent impl on a type from another crate even when a
+/// generic argument is local (E0116) — the receiver's own crate owns its
+/// inherent methods.
 pub(crate) fn deeper<E, T, F>(cell: &ForkCell<ShellState>, limit: E, f: F) -> Result<T, Report<E>>
 where
     E: core::error::Error + Send + Sync + 'static,

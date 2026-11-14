@@ -11490,3 +11490,15 @@ rows in `tests/loops.rs`
 `a_line_continuation_join_at_the_c_style_for_gap_matches_bash`),
 `tests/cond_blocks.rs::a_line_continuation_join_at_a_block_head_gap_matches_bash`
 and `tests/backslash.rs::a_join_at_a_word_start_happens_before_the_word`.
+
+## A method can only be added to a type this crate defines (task #567)
+
+The standalone-function-to-method chore stops at a crate boundary: an
+inherent `impl` on another crate's type is E0116 even when a generic
+argument is local — the orphan-rule relaxation covers *trait* impls, not
+inherent ones: the defining crate owns its type's inherent methods. So
+`impl sys::fork_cell::ForkCell<ShellState>` in fdshell does not compile,
+and a helper whose receiver is `sys`'s type stays a free function (or
+takes a local extension trait, when the call syntax earns its keep).
+`safe/fdshell/src/nest.rs::deeper` is such a helper; its own comment
+records the rejection.
