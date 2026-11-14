@@ -10510,7 +10510,7 @@ list written right next to it, `for name in; do`, iterates **zero** times —
 that neighbour is what makes the rule: both rows reach the run layer with an
 empty `words`, so the distinction cannot live in the word list. The parse
 carries it as a field of the block
-(`parse/for_block.rs::words_default_to_positional`, read by
+(`parse/for_block/types.rs::words_default_to_positional`, read by
 `for_run.rs::positional_words`), per LESSONS:
 "A condition slice **cuts** the `&`: the job fact travels as a parsed-block field (task #356)".
 
