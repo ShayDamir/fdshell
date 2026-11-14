@@ -1,7 +1,8 @@
 // mutants: -C --lib -C --test -C umask -- -E 'test(/^parse::umask_mode::/) | binary(umask)'
 
-//! The symbolic mode's AST, its evaluation, and the `-S` line (task #554) — the
-//! rules of bash's `builtins/umask.def`, pinned by bash 5.3.9 measurements.
+//! The symbolic mode's AST and its evaluation, with the parser in `parse` and the
+//! `-S` line in `text` (task #554) — the rules of bash's `builtins/umask.def`,
+//! pinned by bash 5.3.9 measurements.
 //!
 //! bash computes everything on the complement of the mask ("All work is done with
 //! the complement of the umask"): the allowed bits start at `!mask & 0777`, each
@@ -13,9 +14,10 @@
 //! are accepted and do nothing.
 
 mod parse;
+mod text;
 
-use alloc::format;
-use alloc::string::String;
+pub(crate) use text::symbolic_text;
+
 use alloc::vec::Vec;
 
 /// The parsed mode: comma-separated clauses, each with its own `who`.
@@ -110,23 +112,6 @@ fn copy(initial: u32, class: u32) -> u32 {
 /// directory test above cannot apply to a umask).
 fn x_perm(initial: u32) -> u32 {
     if initial & 0o111 == 0 { 0 } else { 0o111 }
-}
-
-/// The body of a `-S` line, bash's `print_symbolic_umask`: a letter per allowed bit.
-pub(crate) fn symbolic_text(mask: u32) -> String {
-    let (u, g, o) = (class(mask, 0o700), class(mask, 0o070), class(mask, 0o007));
-    format!("u={u},g={g},o={o}")
-}
-
-/// One class of that line: `r`, `w`, `x` for every bit the mask leaves clear.
-fn class(mask: u32, class: u32) -> String {
-    let mut text = String::new();
-    for (bit, letter) in [(0o444, 'r'), (0o222, 'w'), (0o111, 'x')] {
-        if mask & (bit & class) == 0 {
-            text.push(letter);
-        }
-    }
-    text
 }
 
 #[cfg(test)]
