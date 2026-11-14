@@ -79,6 +79,62 @@ fn escaped_newline_stays_in_the_word() {
     );
 }
 
+// Task #570: the pair is dropped only at a **word start**, where bash's
+// pre-tokenization join puts it. Both bytes go, and the word's raw range starts
+// after the pair.
+#[test]
+fn a_pair_at_a_word_start_is_joined() {
+    let w = full(b"\\\necho a");
+    assert_eq!(w.len(), 2);
+    assert_eq!(w[0].word, ShortCStr::from(c"echo"));
+    assert_eq!(
+        (w[0].start, w[0].end),
+        (2, 6),
+        "the word starts on the byte after the joined pair"
+    );
+    assert_eq!(w[1].word, ShortCStr::from(c"a"));
+}
+
+// A word whose `""` pair contributed no byte has still *started* a word, so the
+// escape pair is inside it and stays in the word text for the folding surfaces.
+#[test]
+fn a_pair_after_an_empty_quoted_word_stays_in_the_word_text() {
+    let w = words(b"\"\"\\\nx");
+    assert_eq!(w.len(), 1);
+    assert_eq!(w[0].0, ShortCStr::from(c"\\\nx"));
+    assert_eq!(w[0].1, vec![Unquoted, Unquoted, Unquoted]);
+}
+
+// The join gate is the newline, not the word start: a word-start pair whose
+// second byte is any other byte is an ordinary word byte pair, and a word-start
+// backslash at end of line keeps only the backslash.
+#[test]
+fn a_word_start_pair_joins_only_before_a_newline() {
+    assert_eq!(
+        text(b"echo \\x"),
+        vec![ShortCStr::from(c"echo"), ShortCStr::from(c"\\x")]
+    );
+    assert_eq!(
+        text(b"echo a \\"),
+        vec![
+            ShortCStr::from(c"echo"),
+            ShortCStr::from(c"a"),
+            ShortCStr::from(c"\\")
+        ]
+    );
+}
+
+// A `;` and a joined pair and a keyword are the plain one-`;` spelling: the
+// separator token survives, so the block builders see the tokens the spaced
+// spelling produced.
+#[test]
+fn a_joined_pair_after_a_separator_keeps_the_separator_token() {
+    assert_eq!(
+        text(b";\\\ndo"),
+        vec![ShortCStr::from(c";"), ShortCStr::from(c"do")]
+    );
+}
+
 // An escaped `#` is a word byte, so it never starts a comment.
 #[test]
 fn escaped_hash_is_a_word_byte() {

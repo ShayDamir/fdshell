@@ -11445,3 +11445,48 @@ tests, with bash 5.3.9's measured values), whose
 `nested_paren_inside_a_brace_region_is_expanded` row is the one pin this task
 moved to parity; the residuals it lists are task #174 (reader) and task #571
 (quoted zero-byte span inside a `${…}` body).
+
+## A `\`+newline pair at a word start is joined by the tokenizer (task #570)
+
+bash removes every `\<newline>` pair *before* tokenization, so such a pair can
+never be word bytes. fdshell keeps a pair in the word text (see
+LESSONS: "POSIX #4.1 escapes") because a word's `start`/`end` index the **raw**
+line and the folding surfaces (`bytes/fold/raw.rs::fold_impl`,
+`bytes/fold.rs::fold_mask`, `substitute/arg/escape.rs::unquoted`) are what drop
+it from the text they consume: a tokenizer-wide drop would move every raw offset
+a word surface reads. So the join is gated on the **word start** — the
+tokenizer's `b'\'` arm calls `parse/token/escape.rs::read_line_continuation`,
+which consumes the pair only when no byte has been pushed for the current word
+and no quote has started it (`cur.is_empty() && !word_quoted`) and re-anchors
+`start` after the pair. Mid-word pairs stay exactly as they were.
+
+What the join buys is the plain spelling the gap rules already accept: a `;`
+token, then the body keyword. Accepted at bash's rc 0 (measured, bash 5.3.9):
+`for i in 1 2 ;\` + row + `do …`, the glued `;\`, a space after the joined row,
+a blank row, a tab-only row, a comment row, a body-side here-doc on the same
+shape, and the `if`/`while`/`until`/C-style-`for` twins. Still rejected (bash's
+rc-2 class, fdshell rc 1): the **no-`;`** spellings — the join cannot rescue a
+head with no control operator, which task #559's gap rule owns — a second `;`,
+and the `&`. A pair behind an empty quoted word (`""\` + row + `x`) has already
+started a word, so it stays word text; the shell-visible answer is still bash's,
+because the folding surface drops the pair at expansion — the unit pin pins the
+tokenizer's text, not the expansion.
+
+The residual is the closing-keyword family (`for …; do echo a; \` + row + `done`,
+`if …; then echo a; \` + row + `fi`, `case …;; \` + row + `esac`, `done\` + row
++ `;`): those report `'for' is missing its closing 'done'` at
+`script/unclosed.rs:20`, because the *scan* layer consumes the pair as one unit
+(rule 1 of LESSONS: "POSIX #4.1 escapes") and never sees the line break; task
+#573 owns it.
+
+Pins: `parse/token/tests.rs::a_pair_at_a_word_start_is_joined` (the raw range
+starts after the pair),
+`parse/token/tests.rs::a_pair_after_an_empty_quoted_word_stays_in_the_word_text`
+(the `word_quoted` gate), `parse/token/tests.rs::a_word_start_pair_joins_only_before_a_newline`,
+`parse/token/tests.rs::a_joined_pair_after_a_separator_keeps_the_separator_token`,
+next to the mid-word `escaped_newline_stays_in_the_word`; and the bash-parity
+rows in `tests/loops.rs`
+(`a_line_continuation_join_at_the_word_for_gap_matches_bash`,
+`a_line_continuation_join_at_the_c_style_for_gap_matches_bash`),
+`tests/cond_blocks.rs::a_line_continuation_join_at_a_block_head_gap_matches_bash`
+and `tests/backslash.rs::a_join_at_a_word_start_happens_before_the_word`.

@@ -1286,6 +1286,14 @@ an operator is not such a separator — it belongs to the operator (POSIX #2.9's
 AND-IF/OR-IF terminator), so the list continues onto the next line there as
 one command (task **#492**, "Pipelines and lists").
 
+A `\`+newline pair **at the start of a word** is bash's line-continuation join,
+which bash performs before tokenization, so the tokenizer drops both bytes and
+the head is the plain spelling its gap rule already accepts: `for i in 1 2 ;\` +
+newline + `do …`, `while false ;\` + newline + `do …` and `if true ;\` + newline
++ `then …` run at rc 0 as bash does (task **#570**). The pair stays word bytes
+**inside** a word — the folding surfaces drop it there — and a join in front of a
+**closing** keyword is the scan layer's, not the tokenizer's (task **#573**).
+
 A `for` **word list** is read as **words**: no keyword scores inside it, so
 `for i in done`, `for i in esac`, `for i in { 1 2` and `for i in }` are ordinary
 words and the block runs from its own `do` to its own `done` —

@@ -1494,6 +1494,48 @@ fn a_terminator_run_before_the_word_for_body_matches_bash() {
     }
 }
 
+/// A `\`+newline pair at the end of the head row is bash's **join**, which bash
+/// performs *before* tokenization, so the head becomes the plain one-`;`
+/// spelling the test above accepts (task #570: the tokenizer drops a pair at a
+/// word start, `parse/token/escape.rs::read_line_continuation`). Every accepted
+/// row measured against `bash -c` (5.3.9) at rc 0: the `;` and the pair sharing
+/// the row, a glued `;`, a space after the joined row, a blank row, a tab-only
+/// row, a comment row, and a body-side here-doc on the same shape (the masked
+/// copy of `tokenize_statement`). The reject rows are bash's rc-2 class, fdshell
+/// rc 1: the no-`;` spellings — the join cannot rescue a head with no control
+/// operator, the rule task #559 pinned — plus a second `;` and the `&`.
+#[test]
+fn a_line_continuation_join_at_the_word_for_gap_matches_bash() {
+    for (script, want) in [
+        ("for i in 1 2 ;\\\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2;\\\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2 ;\\\n do echo a; done", "a\na\n"),
+        ("for i in 1 2 ;\\\n\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2 ;\\\n\t\ndo echo a; done", "a\na\n"),
+        ("for i in 1 2 ;\\\n# c\ndo echo a; done", "a\na\n"),
+        (
+            "cat <<EOF; for i in 1 2 ;\\\ndo echo a; done\nx\nEOF",
+            "x\na\na\n",
+        ),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            (want, 0),
+            "{script}: bash parity: {err}"
+        );
+    }
+    for script in [
+        "for i in 1 2\\\ndo echo a; done",
+        "for i in 1 2 \\\ndo echo a; done",
+        "for i in 1 2 ;\\\n; do echo a; done",
+        "for i in 1 2 ;\\\n& do echo a; done",
+    ] {
+        let (out, _, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
+    }
+}
+
 /// fdshell parses and runs **statement by statement**, so the statement before a
 /// failing loop has already run when the loop's parse fails: stdout `a`, rc 1,
 /// where bash parses the whole script first and prints nothing (rc 2).
@@ -1958,6 +2000,39 @@ fn c_style_for_a_terminator_run_before_the_body_matches_bash() {
     ] {
         let (out, err, rc) = run(script);
         assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The same `\`+newline join as the word-form pin above
+/// (`a_line_continuation_join_at_the_word_for_gap_matches_bash`, task #570):
+/// bash joins the row before tokenization, so the head is the plain one-`;`
+/// spelling this test's rows above already accept. Measured against `bash -c`
+/// (5.3.9) at rc 0. The no-`;` row is the control that needs no join (the
+/// arithmetic `for` gap is a newline run on its own, task #400). The last two
+/// rows are bash's rc-2 class, fdshell rc 1: a second `;` and the `&`.
+#[test]
+fn a_line_continuation_join_at_the_c_style_for_gap_matches_bash() {
+    for (script, want) in [
+        ("for ((i=0;i<2;i++)) ;\\\ndo echo a; done", "a\na\n"),
+        ("for ((i=0;i<2;i++));\\\ndo echo a; done", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\\\n do echo a; done", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\\\n\ndo echo a; done", "a\na\n"),
+        ("for ((i=0;i<2;i++)) ;\\\n# c\ndo echo a; done", "a\na\n"),
+        ("for ((i=0;i<2;i++)) \\\ndo echo a; done", "a\na\n"),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!(
+            (out.as_str(), rc),
+            (want, 0),
+            "{script}: bash parity: {err}"
+        );
+    }
+    for script in [
+        "for ((i=0;i<2;i++)) ;\\\n; do echo a; done",
+        "for ((i=0;i<2;i++)) ;\\\n& do echo a; done",
+    ] {
+        let (out, _, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("", 1), "{script}: bash rc 2");
     }
 }
 

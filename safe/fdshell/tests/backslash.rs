@@ -225,6 +225,22 @@ fn escaped_newline_is_a_line_continuation() {
     assert_eq!(out, "xy");
 }
 
+/// The same join **at a word start** (task #570): bash removes the pair before
+/// tokenization, so the tokenizer drops both bytes itself
+/// (`parse/token/escape.rs::read_line_continuation`) and the row is the plain
+/// command line that follows. The mid-word pin above is the folding surfaces'
+/// path; the word-start gate is pinned in `parse/token/tests.rs`. Measured
+/// against `bash -c` (5.3.9).
+#[test]
+fn a_join_at_a_word_start_happens_before_the_word() {
+    let (out, err, code) = run("\\\nprintf %s ok");
+    assert_eq!((out.as_str(), code), ("ok", 0), "{err}");
+    // The word had already started (the empty `""` pair is a word of its own),
+    // so the pair is word text and the folding surface drops it.
+    let (out, err, code) = run("printf %s \"\"\\\nx");
+    assert_eq!((out.as_str(), code), ("x", 0), "{err}");
+}
+
 /// Task #555 lands the same arm in the folding machine, so every mask-surface
 /// word now joins across the pair and matches bash: word 0, the `builtin` and
 /// `command` name words, the replacer (`exec`), and the redirect target. The

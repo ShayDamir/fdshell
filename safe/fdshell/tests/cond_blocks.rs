@@ -2454,3 +2454,36 @@ fn the_operator_that_opens_a_line_keeps_its_boundaries() {
         assert!(err.contains("expected command after"), "{script}: {err}");
     }
 }
+
+/// A `\`+newline pair at the end of a block head's gap row is bash's
+/// **join**, performed before tokenization, so the head is the plain one-`;`
+/// spelling every builder here already accepts (task #570: the tokenizer drops a
+/// pair at a word start, `parse/token/escape.rs::read_line_continuation`). Every
+/// row measured against `bash -c` (5.3.9) at rc 0 with the body running: the `;`
+/// and the pair sharing the row, a glued `;`, a space after the joined row, a
+/// blank row, a comment row — and the loop twins, whose bodies run zero times
+/// (`while false`) or once (`until false`). The closer rows of the same shape
+/// (`then echo a; \` + row + `fi`) stay rejected: they fail in the *scan* layer,
+/// not the tokenizer, and are task #573's (LESSONS names the split).
+#[test]
+fn a_line_continuation_join_at_a_block_head_gap_matches_bash() {
+    for (script, want) in [
+        ("if true ;\\\nthen echo a; fi", "a\n"),
+        ("if true;\\\nthen echo a; fi", "a\n"),
+        ("if true ;\\\n then echo a; fi", "a\n"),
+        ("if true ;\\\n\nthen echo a; fi", "a\n"),
+        ("if true ;\\\n# c\nthen echo a; fi", "a\n"),
+        ("while false ;\\\ndo echo a; done", ""),
+        ("while false;\\\ndo echo a; done", ""),
+        ("while false ;\\\n\ndo echo a; done", ""),
+        ("while false ;\\\n# c\ndo echo a; done", ""),
+        ("until false ;\\\ndo echo a; break; done", "a\n"),
+    ] {
+        let (out, err, code) = run(script);
+        assert_eq!(
+            (out.as_str(), code),
+            (want, 0),
+            "{script}: bash parity: {err}"
+        );
+    }
+}

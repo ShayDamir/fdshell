@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C loops -C --test -C backslash -C --test -C cond_blocks -- -E 'test(/^parse::/) | binary(loops) | binary(backslash) | binary(cond_blocks)'
+
 mod keyword;
 mod sep;
 
@@ -61,10 +63,14 @@ impl State {
             }
             // An unquoted escape pair: the pair is a word byte pair, so an
             // escaped `#` never starts a comment and a leading `\if` is never
-            // a keyword token.
+            // a keyword token — except at the start of a word, where
+            // `\<newline>` is bash's line-continuation join
+            // ([`super::escape`]).
             b'\\' => {
-                self.word_start();
-                self.read_escape(bytes)?;
+                if !self.read_line_continuation(bytes) {
+                    self.word_start();
+                    self.read_escape(bytes)?;
+                }
             }
             // A metacharacter ends a **keyword word** (task #396): the one
             // word-break set, applied only to the reserved list so every other
