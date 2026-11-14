@@ -1,6 +1,7 @@
+// mutants: -C --lib -- -E 'test(/^segment::/)'
+
 use crate::scan::heredoc;
 use crate::segment::book::Book;
-use crate::segment::line;
 use block::group_block;
 use core::cmp::Ordering;
 
@@ -28,7 +29,7 @@ pub(super) fn open<'a>(line: &'a [u8], book: &mut Book<'a>) {
     // flush claims only the line's heredoc bodies scanned so far. The book's
     // mid-run flag is `false` here: an unclosed mid-run span resumes at the end
     // of input, so no group opener follows it.
-    let pre_resume = line::flush::flush_line(book, line, line_start, brace);
+    let pre_resume = book.flush_line(line, line_start, brace);
     let span_start = prefix::span_start(line, run_start, brace);
     let (segment, resume, floor) = group_block(
         line,

@@ -3,6 +3,8 @@
 //! block, a `{ …; }` group) takes the state as one argument and rewinds it
 //! itself, keeping `segment.rs` a plain scan loop.
 
+// mutants: -C --lib -- -E 'test(/^segment::/)'
+
 use crate::scan::Boundary;
 use crate::scan::ScanState;
 use crate::segment::Segment;
@@ -50,7 +52,7 @@ pub(super) struct Book<'a> {
     /// (POSIX #2.9, task #492) since the last flush, in scan order — recorded by the
     /// `Join` arm of the loop, never by the comment arm (a comment's own newline ends
     /// comment text, so it stays a newline). Each one falls inside the bytes of the run
-    /// of the flush it belongs to; [`crate::segment::line::flush::flush_line`] hands it to that
+    /// of the flush it belongs to; [`Book::flush_line`] hands it to that
     /// run's segment, and the runner writes it as a space
     /// (`script/merge/chain.rs`).
     pub(super) sep_joins: Vec<usize>,
@@ -77,13 +79,13 @@ impl<'a> Book<'a> {
     /// Resume the cursor past the separator at `sep`: a `#` **ends the physical
     /// line**, so it takes the line's whole end-of-line bookkeeping (flush of
     /// its runs with its own body regions, the jump past every region the line
-    /// claimed) in [`crate::segment::line::end_comment`] — it is not a skip.
+    /// claimed) in [`Book::end_comment`] — it is not a skip.
     /// Any other separator starts the next run just past it. A flush that
     /// resumed further on (a heredoc body region, a block's line floor) wins,
     /// and never adds a second byte on top of it.
     pub(super) fn resume_past(&mut self, sep: usize, kind: Boundary, deferred: bool, line: &[u8]) {
         if kind == Boundary::Comment {
-            crate::segment::line::end_comment(self, line);
+            self.end_comment(line);
             return;
         }
         // A `;;` pair separates runs exactly like a plain separator (task #423):

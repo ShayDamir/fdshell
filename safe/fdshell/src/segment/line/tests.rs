@@ -2,7 +2,6 @@
 
 #![allow(clippy::indexing_slicing)]
 
-use super::flush::flush_line;
 use crate::segment::Segment;
 use crate::segment::book::{Book, Run};
 use alloc::vec;
@@ -71,7 +70,7 @@ fn flush_line_attaches_bodies_in_operator_order() {
     //  0       7  8 9 10      17  18                 24 25 26            32 33
     let line = b"cat <<A && cat <<B\nbodyA\nA\nbodyB\nB";
     let mut book = book_with(vec![run(b"cat <<A", 0), run(b"cat <<B", 11)]);
-    let resume = flush_line(&mut book, line, 0, 18);
+    let resume = book.flush_line(line, 0, 18);
     assert_eq!(book.segments.len(), 2);
     match &book.segments[0] {
         Segment::Statement {
@@ -112,7 +111,7 @@ fn flush_line_semicolon_terminated_line() {
     //  0       8  9        19     20           24      25     28
     let line = b"cat <<EOF; echo done\nbody\nEOF";
     let mut book = book_with(vec![run(b"cat <<EOF", 0)]);
-    let resume = flush_line(&mut book, line, 0, 20);
+    let resume = book.flush_line(line, 0, 20);
     check_statement(&book.segments[0], b"cat <<EOF", 0, &[b"body\nEOF".to_vec()]);
     assert_eq!(resume, 29);
 }
@@ -125,7 +124,7 @@ fn flush_line_semicolon_terminated_line() {
 /// gate no real scan carries a region-claiming line's runs here: a line that
 /// claims a body region ends itself with the region attached, so the deferral
 /// never reaches a flush with a cross-line run. A trailing `#` comment no
-/// longer reaches here: `super::end_comment` flushes a comment-terminated
+/// longer reaches here: `Book::end_comment` flushes a comment-terminated
 /// line's runs **on** it, with that line's regions (task #333). This is *not*
 /// about a run whose own text spans lines: such a run is flushed on its line
 /// and claims its region stream, pinned by
@@ -137,7 +136,7 @@ fn flush_line_multi_line_runs_are_body_less() {
     // line 1's end (`line_start` 10, `line_end` 18).
     let line = b"cat <<EOF\n& echo x\nbody\nEOF";
     let mut book = book_with(vec![run(b"cat <<EOF", 0)]);
-    let resume = flush_line(&mut book, line, 10, 18);
+    let resume = book.flush_line(line, 10, 18);
     check_statement(&book.segments[0], b"cat <<EOF", 0, &[]);
     assert_eq!(resume, 18);
 }
@@ -155,7 +154,7 @@ fn flush_line_a_multi_line_run_claims_its_line_stream() {
     let line = b"true && while :; do cat <<T; break; done\nbodyT\nT";
     let mut book = book_with(vec![run(b"true && while :; do cat <<T; break; done", 0)]);
     // `line_end` is the newline that closes `done`: the run's own line.
-    let resume = flush_line(&mut book, line, 0, 40);
+    let resume = book.flush_line(line, 0, 40);
     check_statement(
         &book.segments[0],
         b"true && while :; do cat <<T; break; done",
@@ -176,7 +175,7 @@ fn flush_line_no_operator_run_gets_no_bodies() {
     //  0       5  6    7      15    16  17         21      22     25
     let line = b"echo x; cat <<EOF\nbody\nEOF";
     let mut book = book_with(vec![run(b"echo x", 0), run(b"cat <<EOF", 8)]);
-    let resume = flush_line(&mut book, line, 0, 17);
+    let resume = book.flush_line(line, 0, 17);
     assert_eq!(book.segments.len(), 2);
     match &book.segments[0] {
         Segment::Statement {
@@ -221,7 +220,7 @@ fn flush_line_indexes_the_line_stream_globally() {
     let line = b"cat <<A & cat <<B\nx\nA\ny\nB";
     // The `&` flush: the prefix run, window `[0, amp)`.
     let mut book = book_with(vec![run(b"cat <<A", 0)]);
-    let resume = flush_line(&mut book, line, 0, 8);
+    let resume = book.flush_line(line, 0, 8);
     check_statement(&book.segments[0], b"cat <<A", 0, &[b"x\nA\n".to_vec()]);
     assert_eq!(resume, 21, "the newline ending the last delimiter line");
 
@@ -229,7 +228,7 @@ fn flush_line_indexes_the_line_stream_globally() {
     // operator index (`cat <<B` follows one operator written before the `&`)
     // picks region 1 of the same stream.
     let mut book = book_with(vec![run(b"cat <<B", 10)]);
-    let resume = flush_line(&mut book, line, 0, 17);
+    let resume = book.flush_line(line, 0, 17);
     check_statement(&book.segments[0], b"cat <<B", 10, &[b"y\nB".to_vec()]);
     assert_eq!(resume, 25, "past the line's last region");
 }
@@ -243,7 +242,7 @@ fn flush_stamps_the_books_midrun_flag() {
     for flag in [false, true] {
         let mut book = book_with(vec![run(b"echo a", 0), run(b"true && { echo g", 8)]);
         book.midrun_open = flag;
-        flush_line(&mut book, b"echo a; true && { echo g", 0, 24);
+        book.flush_line(b"echo a; true && { echo g", 0, 24);
         assert_eq!(stamps(&book), vec![flag, flag], "flag {flag}");
     }
 }
@@ -259,7 +258,7 @@ fn flush_line_stamps_only_the_run_the_join_decision_made_for() {
     let line = b"echo a ; cat <<B &&\nbody\nB\necho tail";
     let mut book = book_with(vec![run(b"echo a", 0), run(b"cat <<B &&", 9)]);
     book.join_next = true;
-    flush_line(&mut book, line, 0, 19);
+    book.flush_line(line, 0, 19);
     assert_eq!(book.segments.len(), 2);
     for (index, want) in [(0, false), (1, true)] {
         match &book.segments[index] {
@@ -284,7 +283,7 @@ fn flush_hands_each_run_its_own_join_points() {
     let line = b"echo a ; echo b &&\necho c";
     let mut book = book_with(vec![run(b"echo a", 0), run(b"echo b &&\necho c", 9)]);
     book.sep_joins = vec![18];
-    flush_line(&mut book, line, 0, 18);
+    book.flush_line(line, 0, 18);
     assert_eq!(book.segments.len(), 2);
     for (index, want) in [(0, Vec::new()), (1, vec![9])] {
         match &book.segments[index] {
@@ -296,4 +295,50 @@ fn flush_hands_each_run_its_own_join_points() {
             Segment::StrayCloser { .. } => panic!("expected Statement"),
         }
     }
+}
+
+/// The span a run claims within is `off + bytes.len()` (task #492), so the run
+/// **ahead of** the join point keeps its hands off it even when its own bytes
+/// start before the neighbour's: the point belongs to the run whose text the
+/// newline sits inside, and the run before it — here an indented `;`-separated
+/// one — flushes with no join points of its own.
+#[test]
+fn flush_keeps_a_join_point_outside_a_runs_own_bytes() {
+    //     e c h o   a  ;  e c h o   b  && \n e c h o   c
+    //     4      10 11 12       18 19  21
+    let line = b"    echo a; echo b &&\necho c";
+    let mut book = book_with(vec![run(b"echo a", 4), run(b"echo b &&\necho c", 12)]);
+    book.sep_joins = vec![21];
+    book.flush_line(line, 0, 21);
+    assert_eq!(join_points(&book), vec![Vec::new(), vec![9]]);
+}
+
+/// The terminator newline a run's own text ends **on** is not inside that run:
+/// the flush's last run carries the join **flag** (task #492), never a join
+/// point, so the recorded newline at the run's end belongs to no run's list and
+/// both runs flush with empty ones.
+#[test]
+fn flush_does_not_claim_a_join_point_at_a_runs_end() {
+    //   e c h o   a  ;  e c h o   b  && \n e c h o   c
+    //   012345 6 7 89        17 18  19
+    let line = b"echo a ; echo b &&\necho c";
+    let mut book = book_with(vec![run(b"echo a", 0), run(b"echo b &&", 9)]);
+    book.sep_joins = vec![18];
+    book.flush_line(line, 0, 18);
+    assert_eq!(join_points(&book), vec![Vec::new(), Vec::new()]);
+}
+
+/// The `joins` of every statement the book flushed, in flush order.
+fn join_points(book: &Book<'_>) -> Vec<Vec<usize>> {
+    book.segments
+        .iter()
+        .map(|seg| match seg {
+            Segment::Statement { joins, .. } => joins.clone(),
+            Segment::Block { .. } => panic!("expected Statement"),
+            Segment::AsyncInvalid => panic!("expected Statement"),
+            Segment::UnexpectedSemiSemi => panic!("expected Statement"),
+            Segment::LeadingSeparator => panic!("expected Statement"),
+            Segment::StrayCloser { .. } => panic!("expected Statement"),
+        })
+        .collect()
 }

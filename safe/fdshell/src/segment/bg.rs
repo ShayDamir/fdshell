@@ -9,7 +9,6 @@
 
 use super::Segment;
 use super::book::Book;
-use super::line::flush::flush_line;
 use crate::scan::heredoc;
 
 pub(super) mod split;
@@ -25,7 +24,7 @@ use split::Split;
 /// the **mid-line** `&`'s. A line-opening `&` whose line above claims a body
 /// region never reaches this function: region lines are data, the `&` is not
 /// an operator there, and the gate at the deferral decisions
-/// (`segment.rs`, `line::end_comment`) owns that case.
+/// (`segment.rs`, `Book::end_comment`) owns that case.
 pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
     let amp = book.i;
     // One computation of the index just past the `&`, shared by both consumers —
@@ -50,7 +49,7 @@ pub(super) fn mark<'a>(line: &'a [u8], book: &mut Book<'a>) {
         // book's mid-run flag is never set at this flush: an unclosed mid-run
         // span resumes at the end of input, so no `&` follows it (task #294).
         let line_start = book.line_start;
-        let resume = flush_line(book, line, line_start, amp).max(book.body_floor);
+        let resume = book.flush_line(line, line_start, amp).max(book.body_floor);
         // The flush's resume is past every body region the physical line
         // claims, so no later flush of this line may resume below it.
         book.body_floor = resume;

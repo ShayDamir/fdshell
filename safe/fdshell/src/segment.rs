@@ -162,7 +162,7 @@ pub(crate) fn scan_segments(line: &[u8], in_block: bool) -> Vec<Segment<'_>> {
                 deferred = line.get(book.i) == Some(&b'\n')
                     && bg::async_ahead(line, book.i)
                     && heredoc::skip(line, book.line_start, book.i).is_none();
-                book.i = line::end_line(&mut book, line, deferred).max(book.body_floor);
+                book.i = book.end_line(line, deferred).max(book.body_floor);
             }
             book.resume_past(sep, kind, deferred, line);
         }
