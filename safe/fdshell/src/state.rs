@@ -14,6 +14,7 @@ use frames::VarFrame;
 use jobs::Jobs;
 
 pub use fds::{FdArrayEntry, FdVar};
+pub(crate) use traps::TrapDisposition;
 
 pub struct ShellState {
     pub(crate) fds: HashMap<ShortCStr, FdVar>,
@@ -80,6 +81,12 @@ pub struct ShellState {
     pub(crate) hash_table: HashMap<ShortCStr, ShortCStr>,
     pub(crate) aliases: HashMap<ShortCStr, ShortCStr>,
     pub(crate) functions: HashMap<ShortCStr, ShortCStr>,
+    /// The trap table: condition number → disposition (task #583). The key is a
+    /// signal number, or [`traps::EXIT`] — a table entry, and the only one never
+    /// `sigaction`ed. An **absent** entry means [`TrapDisposition::Default`],
+    /// empty actions are stored as [`TrapDisposition::Ignore`], and the map's
+    /// ascending order is the list form's print order (`EXIT` first).
+    pub(crate) traps: BTreeMap<i32, TrapDisposition>,
 }
 
 impl ShellState {
@@ -113,6 +120,7 @@ pub(crate) mod jobs;
 mod options;
 mod setters;
 mod shell_arrays;
+mod traps;
 
 #[cfg(test)]
 mod tests;

@@ -7,7 +7,9 @@
 //! `ShellState::new` and `Default` both land here, so the seed is one list and
 //! has one owner.
 
-use alloc::collections::VecDeque;
+// mutants: -C --lib -- -E 'test(/^state::/)'
+
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 
@@ -89,5 +91,6 @@ pub(crate) fn build() -> ShellState {
         hash_table: HashMap::new(),
         aliases: HashMap::new(),
         functions: HashMap::new(),
+        traps: BTreeMap::new(),
     }
 }
