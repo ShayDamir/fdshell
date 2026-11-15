@@ -11546,3 +11546,35 @@ Pins: the append-side equality neighbour
 (zero-width region, `s == end`, the newline stays), the `<`-side neighbours
 by the existing append/extension pins of the same file, and the allowlist
 record for `parse/part_text.rs:55:43`.
+
+## A real signal handler relies on glibc's `sigaction` to fill the restorer (task #582)
+
+`sys::signal::set_action` installs a flag-setting handler with `sa_flags: 0`, an
+empty `sa_mask` and `sa_restorer: None` — the shape a C program hands glibc —
+and it works on x86-64 because glibc's `sigaction` **wrapper** fills in the
+restorer (and `SA_RESTORER`) for a real handler; the SAFETY note on
+`reset_sigpipe` covers only `SIG_DFL`, which never returns. The handler is a
+`no_std` `extern "C" fn` declaring only `sig` — the standard System V shape, the
+kernel passes three arguments — and it is async-signal-safe because its body is
+that one atomic op: no allocation, no syscall, no libc call, so the trap body
+runs later in the executor (the dash `onsig` / bash `trap_handler` pattern).
+`SA_RESTART` stays off on purpose: an interrupted syscall failing with `EINTR`
+is what that pattern assumes, and restarting is the consumer's decision.
+Per-signal bits, not one shared flag: the pending mask is an `AtomicU64` with
+bit `sig - 1` for signals `1..=64`, so a poll says *which* trap fired, and
+`fetch_or`/`swap` are single lock-free instructions here.
+
+Test corollary: a disposition is **process-global**, so a row that installs,
+delivers or queries one does all three inside a forked child and reports over a
+pipe (the `child_reports` pattern) — the child's own copy of the mask is what it
+measures, so rows cannot disturb each other. Self-`kill` delivery is definite
+only across a syscall boundary, and POSIX lets the `kill` call itself answer
+`EINTR` without `SA_RESTART`: assert the recorded flag, never the call's result.
+
+Pins: `unsafe/sys/tests/sigaction.rs::flag_handler_records_the_signal` (the
+handler runs, the exact bit, and it *returns* — a broken restorer crashes the
+child), `unsafe/sys/tests/sigaction.rs::poll_consumes`,
+`unsafe/sys/tests/sigaction.rs::per_signal_flags_distinguish`,
+`unsafe/sys/tests/sigaction.rs::ignore_disposition_observed` and
+`unsafe/sys/tests/sigaction.rs::default_disposition_observed` (read-back through
+a `sigaction` query), `unsafe/sys/tests/sigaction.rs::invalid_signal_errors_via_cvt`.
