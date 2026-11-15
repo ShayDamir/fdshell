@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C block_bodies -C --test -C block_closers -C --test -C block_conditions -C --test -C block_redirect -- -E 'test(/^parse::block_tail::/) | binary(block_bodies) | binary(block_closers) | binary(block_conditions) | binary(block_redirect)'
+
 //! The **`&>` arm** of the keyword block's tail walk (task #409): a `&>` / `&>>`
 //! written after the closing keyword — bare, attached, glued to the closer, in
 //! either operator order with another redirect — belongs to the **whole** block,

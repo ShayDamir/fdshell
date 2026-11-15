@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C heredoc -- -E 'test(/^parse::cond_bodies::/) | test(/^parse::part_text::/) | binary(heredoc)'
+
 //! Attach a token slice's claimed heredoc bodies to its verbatim text. In
 //! **append** mode (a single-line block: the bodies sit past the closing
 //! keyword, so the slice's text stops at its last token) the body bytes are

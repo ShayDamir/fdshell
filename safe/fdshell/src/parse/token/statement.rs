@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C loops -C --test -C backslash -C --test -C cond_blocks -- -E 'test(/^parse::/) | binary(loops) | binary(backslash) | binary(cond_blocks)'
+
 //! Statement tokenization: the heredoc-aware entry point of the tokenizer.
 
 use super::super::Token;

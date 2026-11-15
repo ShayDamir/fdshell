@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C brace_expand -- -E 'test(/^brace_expand::/) | binary(brace_expand)'
+
 //! bash's `worddef` rule applied to the brace-expansion rewrite: a redirection
 //! operand expanded to more than one word — or to none — is bash's
 //! `ambiguous redirect`, and the pair *(word as written, expanded words)*

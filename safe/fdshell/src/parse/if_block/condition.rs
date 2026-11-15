@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::/)'
+
 //! The condition phase of `parse/if_block.rs`: what sits between `if` and the
 //! first `then` — its text slice, the heredoc bodies it claims, and its
 //! background flag.

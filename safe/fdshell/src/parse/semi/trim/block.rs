@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C semi_semi -- -E 'test(/^parse::semi::/) | binary(semi_semi)'
+
 //! The two **non-empty** validators of a body/condition slice: each owns its
 //! own `ParseError` argument and the bash-rc-2 rationale for rejecting the
 //! empty slice. The slicing rules they run first live in `trim.rs`.

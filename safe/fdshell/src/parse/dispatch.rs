@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^parse::/)'
+
 use super::{
     Token, case_block, for_block, function_block, group_block, if_block, wait_block, while_block,
     word_quoted::keyword_word,

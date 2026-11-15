@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C block_redirect -C --test -C loops -- -E 'test(/^parse::/) | binary(block_redirect) | binary(loops)'
+
 mod escape;
 mod mask;
 mod single;
