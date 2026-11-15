@@ -5,3 +5,21 @@
 
 # Tasks #534, #551 and #540 resolved the records their commits name: each site
 # is now killed by a named test or gone from `--list`; git keeps the proofs.
+
+[[allow]]
+file = "safe/fdshell/src/parse/part_text.rs"
+line = 55
+column = 43
+mutant = "replace < with <= in owned_span"
+reason = """
+The equality case is structurally unreachable: terminator_spans emits only
+sized spans (its own `stop > start` filter, scan/heredoc/regions.rs), and
+`s == end` would need the slice's last token to end ON the newline byte that
+opens the terminator line — and the tokenizer never delivers a token ending
+on a bare newline (words flush before it, trimmed separators drop out,
+blanked body words emit no tokens). The only zero-width shapes on that
+boundary — `(len, len)` end-of-file regions — pass both predicates
+identically, and their behaviour on the append side is pinned by
+parse/part_text/tests.rs::a_region_starting_exactly_at_the_slice_end_still_appends.
+Census proof (task #563): the mutant applied as source left the whole suite
+green; the reusable rule is in LESSONS.md."""

@@ -253,3 +253,17 @@ keeps the reusable proof. A "registry" below means that allowlist.
     Measured on `cond.rs`'s `||` short-circuit `let after = i + 2;` (`+`→`-`),
     killed by `tests/run.rs::the_or_gate_skips_from_behind_the_operator_not_the_left_word`
     (left word `a";"`, verified by applying the mutant and re-running the pin).
+
+29. **Census the equality class of a boundary comparison before accepting its
+    mutant.** Rule 3 says to feed a boundary comparison its equality case; when
+    no input can produce equality — the producer's own filter admits only sized
+    results, and the byte-level shape shows the equality input can never arrive —
+    the mutant is an accepted equivalent and the census **is** the proof. Verify
+    it: apply the mutant as source, run the suite, and name the producer rule;
+    keep the comparison (it carries the rule — this is not rule 6's dead arm) and
+    pin the equality input that *does* exist (a zero-width pass-through) at its
+    consumer. Measured on `parse/part_text.rs`'s `owned_span` filter, `<'→`<=`
+    (task #563): sized spans, no token ends on a bare newline, and the append-side
+    equality neighbour
+    `parse/part_text/tests.rs::a_region_starting_exactly_at_the_slice_end_still_appends`
+    keeps the newline.

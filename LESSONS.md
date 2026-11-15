@@ -11517,3 +11517,27 @@ and a helper whose receiver is `sys`'s type stays a free function (or
 takes a local extension trait, when the call syntax earns its keep).
 `safe/fdshell/src/nest.rs::deeper` is such a helper; its own comment
 records the rejection.
+
+## A boundary comparison with an unproducible equality class is accepted-equivalent at that boundary
+
+When a comparison earns its keep (both neighbours of `<` are pinned and
+behave differently), but its **equality input cannot be produced**, the
+mutant that stretches it (`<'→`<=`, and the `>`/`>=` mirror) is an accepted
+equivalent: the census that shows no input reaches `s == end` **is** the
+proof; do not invent a test for an input that cannot exist. Mechanism on
+`parse/part_text.rs::owned_span`: the producer `scan::heredoc/regions.rs
+::terminator_spans` emits only **sized** spans (its own `stop > start`
+filter), so `s == end` would need the slice's last token to end ON the
+newline byte that opens the terminator line — and the tokenizer never
+delivers a token ending on a bare newline (words flush before it, trimmed
+separators drop out, blanked body words emit no tokens). Equality therefore
+forces a zero-width span, and zero-width shapes (`(len, len)` end-of-file
+regions) pass both predicates identically. Unlike
+"Redundant boundary ±1 produces equivalent mutants", the comparison here is
+**not** redundant — keep the source, record the proof.
+
+Pins: the append-side equality neighbour
+`parse/part_text/tests.rs::a_region_starting_exactly_at_the_slice_end_still_appends`
+(zero-width region, `s == end`, the newline stays), the `<`-side neighbours
+by the existing append/extension pins of the same file, and the allowlist
+record for `parse/part_text.rs:55:43`.
