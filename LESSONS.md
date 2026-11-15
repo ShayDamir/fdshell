@@ -454,15 +454,16 @@ i.e. a quote *after* the
   slash), the short-mask padding `unwrap_or(false)` → `unwrap_or(true)` (kills
 bare `~`), and `any` →
   `all` (kills `~"/*"`, whose `~` bit is `false`).
-- **Accepted equivalent mutants (the arm was going to take the same branch anyway):**
-a quoted character
-  **inside a `~user` prefix** (`~ro"ot"/x`); and treating `\X` as a quoted
-prefix byte (`~\/x`,
-  `~\*`) — POSIX counts `\X` as quoted and fdshell agrees on every observable
-row by construction, so
-  a backslash branch in `prefix_quoted` is unobservable. Read `~"a"/x`,
-`~a"b"/x` and `~\/x` as
-  documentation pins of the agreement, not as kill pins.
+- **Resolved by task #569 (the accepted rows are measured now, not argued):** the
+  quoted-character **inside a `~user` prefix** (`~ro"ot"/x`) is pinned at helper
+  level by the unit rows in `substitute/tilde/tests.rs` — each row feeds the
+  guard the text the program rejects and asserts the guard's own answer
+  (rule 19), so `== → !=` on the slash, the disjunction's `|| → &&` and
+  `<= → >` fail on it; the file gained the mutants map naming those rows plus
+  the `env_assign`/`loops`/`quotes` e2e rows. The backslash branch is gone from
+  `prefix_quoted` ("deliberately not consulted"), so the `\X` half of the old
+  claim has no site. Read `~"a"/x`, `~a"b"/x` and `~\/x` as documentation pins
+  of the agreement, not as kill pins.
 - **Resolved by task #513:** the no-slash fallback `position(...) → None`,
 written
   `unwrap_or(bytes.len())` → `unwrap_or(0)` — the old
@@ -962,7 +963,7 @@ three sibling rows (measured by hand). The same invariant is why the guard
 needs no pattern-exhausted special case: an exhausted pattern with a fully
 consumed name is a match regardless of star state.
 
-## `dot_blocked`'s `[`-arm span test is equivalent at `true` — a literal `[` never matches a leading dot
+## `dot_blocked`'s `[`-arm is pinned on both answers — a literal `[` never matches a leading dot
 The glob dot rule's quote test is **one** gate:
 `name.first() != Some(&b'.') || dotglob || bracket::quoted(mask, 0)` returns
 early and each arm states only its own rule (task #455 hoisted the test out of
@@ -972,15 +973,18 @@ what killed the old `&&`→`||` acceptance: that proof
 covered the *quoted* half of the disjunction, and the hoisted gate now refuses
 a quoted pattern byte before any arm runs — measured by hand, `109:36` and
 `109:47` `||`→`&&`, `109:21` `!=`→`==`, and both `delete match arm` rows fail
-the existing dot/dotglob rows. What **stays** accepted is the `[`-arm's span
-test taken `with true`: an **unclosed** leading `[` is the literal byte `[`
-for the matcher, so the name fails to match in both builds and no test can
-tell them apart (measured: the whole `-p fdshell` suite is green under it).
-The other direction is pinned —
-`glob/match/tests.rs::dot_rule_blocks_leading_bracket_class` kills
+the existing dot/dotglob rows. The `[`-arm is pinned on **both** answers now
+(task #569): `glob/match/tests.rs::the_bracket_arm_answers_only_for_a_closed_class`
+asserts the closed class blocks the dot name and the **unclosed** leading `[`
+answers `false`, leaving the matcher to read the literal byte — the shape the
+old `with true` acceptance called unkillable at program level (no name can
+match a literal `[` as a leading dot, so no program-level test tells the
+builds apart; the helper-level rows measure the arm's answer instead, rules
+2/9). `glob/match/tests.rs::dot_rule_blocks_leading_bracket_class` kills
 `with false`. Rule: when a guard's disjunct decides a byte class the matcher
-can never match on the name, only the *blocking* direction is observable;
-record the `with true` mutant and stop chasing it.
+can never match on the name, only the *blocking* direction is observable at
+program level; pin that answer at the helper and stop chasing it at the
+program.
 
 ## A heredoc body is an opaque span — every multi-line byte scanner must skip it
 
@@ -1554,8 +1558,10 @@ sum of two spaces. Their `+`→`*` mutants over-reserve the recv control buffer
 (e.g. `MAX_CTRL` 320 → 11200), and `recvmsg` hands the kernel the *needed*
 size as `msg_controllen` (computed from `max_fds`, not from `MAX_CTRL`) while
 the kernel writes only as much control data as the message actually carries,
-so over-allocation is invisible — those four `+` mutants were recorded as
-accepted equivalents, not chased. The `+`→`-` twins are different animals:
+so over-allocation is invisible — which is why the four `+` mutants were
+accepted, not chased, at the time; re-checked against `--list` for task #569
+and no site of that old arithmetic remains. The `+`→`-` twins are different
+animals:
 `cred_space` `-` (→16) truncates the cred cmsg in a combined fd+cred receive
 and is killed by `test_recvmsg_creds_with_fd`; `MAX_CTRL` `-` (→240 < the 280
 a 64-fd rights cmsg needs) is a **silent stack overflow, verified unkillable**
@@ -1740,7 +1746,9 @@ to its own output pipe and `cat | cat` deadlocked. A saturating clamp is the
 wrong tool for "the element before index `i`": it collapses the boundary case
 onto the first element. Write the relation so it cannot hold at the boundary
 (`j + 1 == i`) — the extra `i > 0` guard that looks clarifying is dead logic,
-and both of its mutants (`> → >=`, `&& → ||`) are equivalent. A cheap,
+and both of its mutants (`> → >=`, `&& → ||`) were equivalent on the old
+spelling; re-checked against `--list` for task #569, the guard is gone from
+the source and the family left with it. A cheap,
 hang-free regression probe for a miswired fd: have a builtin `statx` (or any
 non-reading inspector) report `/proc/self/fd/0` as the *first* pipeline stage
 and assert on `kind=`/`size=` — a read-based probe can only fail by
@@ -8729,14 +8737,15 @@ The tokenizer emits a `;` **token** for a `;` byte, a newline **and** `)`
 byte. So every body-slice rule that wants bash's *same-line* semantics must
 test `line[token.start] == b';'` — `do echo a & ; done` is bash's rc 2 while
 `do echo a &\ndone` is bash's rc 0, and the two differ **only** in a byte the
-token list spells identically. The "obvious" additions are provably equivalent
-mutants: a "newline in the gap" test cannot fire (a newline emits its own `;`
-token, so no newline can sit between the `&` and the glued `;`), and the
-`;`-byte arm vs the `&` arm are observably equivalent in the body's scan (a
-trailing `;`/newline byte in body text is inert for it). Record them as
-equivalences and kill the predicate's arms with **body-text unit pins**
-(`parse/semi/trim/tests.rs` asserts the slice's text, never the rc) —
-rc/output pins cannot see a kept `;`.
+token list spells identically. A "newline in the gap" test cannot fire (a
+newline emits its own `;` token, so no newline can sit between the `&` and
+the glued `;`), and the body's own scan stays inert to a trailing
+`;`/newline byte in body text — so rc/output pins cannot see a kept `;` and
+**body-text unit pins** measure the predicate's arms
+(`parse/semi/trim/tests.rs` asserts the slice's text, never the rc).
+Re-measured for task #569: both maps (`preceded.rs`, `trim/background.rs`)
+run with no miss, and the equivalence record this entry used to carry is
+gone.
 
 `;;` is a **glued** pair (`head.end == tail.start`), `; ;` is not, and the
 glue is what distinguishes a `case` clause separator from a statement
@@ -10459,8 +10468,9 @@ exactly where bash rejects them at rc 2; those rows moved from the divergence
 pins into the family.
 `tests::run::an_operator_opening_a_part_reports_before_anything_runs` is the
 same shape at unit level (it asserts the report and that nothing ran); the
-loop's `is_empty_part` guard no longer answers these rows, and if that loop is
-ever split, re-derive `cond.rs`'s accepted-equivalent list, because that test
+loop's `is_empty_part` guard answers these rows — re-measured for task #569,
+the helper's mutants die on the pinned rows — and if that loop is ever split,
+re-derive `cond.rs`'s equivalence list, because that test
 was the only pin walking an empty head.
 
 **A text that begins mid-line is the tail of a line whose head another layer claimed**,
@@ -10820,9 +10830,10 @@ then sees a real `;` and reports the empty-clause error, but the filtered
 suite was green. Broadening the filter to the module prefix
 (`test(/^parse::case_block::/)`) ran 20 tests and killed the `-` twin;
 `a_separator_before_in_is_trimmed_out_of_the_word_slot` pins the accepted trim
-directly. The `*` twin (`in_idx * 1`) is the accepted equivalent: the slot
-starts at the `in` keyword, never a `;` byte, so the guard's answer cannot
-change; it is in `tools/mutants_allowlist.toml`. Rule: a per-file filter must
+directly. The `*` twin (`in_idx * 1`) no longer sits in the registry:
+re-running this map for task #569 caught it on the current tree, so its old
+equivalence claim (the slot starts at the `in` keyword, never a `;` byte, so
+the guard's answer cannot change) no longer holds. Rule: a per-file filter must
 anchor at the module (or the crate), not at its `tests` submodule, or the gate
 silently under-tests every nested test module.
 
@@ -10839,8 +10850,12 @@ not just the validator underneath it — is observable. The sibling
 `CmdError::Never => TimeoutError::Never` arm is the invariant fallback:
 `command_word::expand` reaches `CmdError::Never` only through internal
 `ForkCell` borrow or `ShortCStr` failures, and `timeout` calls it with no
-outstanding borrow, so no script reaches the arm; deleting it leaves the whole
-suite green and is recorded in `tools/mutants_allowlist.toml`. Rule: test the
+outstanding borrow, so no script reaches the arm — but a unit row can:
+holding an active shared borrow on the cell feeds the fallible producer, and
+`a_held_shared_borrow_answers_the_never_arm` pins the arm's own mapping at
+the boundary (rule 9's in-process probe, task #570; the registry record this
+entry used to carry was retired by task #569 after re-running the file's
+map). Rule: test the
 error conversion at the function that owns it, and allowlist only a fallback
 whose producer is unreachable from that call path.
 
