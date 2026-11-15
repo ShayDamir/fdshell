@@ -34,6 +34,13 @@ pub(crate) enum ParseError {
     /// array assignment is missing its closing ')'
     ArrayLiteralMissingCloseParen,
     /// internal invariant violated
+    // Truly never: the parse layer's words are NUL-free — every point that ingests
+    // outside bytes owns its own variant — so no `from_vec`/`as_bytes` arm can fire,
+    // every `get`/subslice bound is computed by the parser from the same slice, and
+    // the `while_block.rs`, `detect.rs` and `array_literal.rs` arms are gated by their
+    // callers' predicates.
+    // LESSONS: "A NUL byte is reachable only at the entry points that ingest outside bytes"
+    // Chore #565: excluded from later respawns.
     Never,
     /// not a valid octal number
     InvalidOctal,

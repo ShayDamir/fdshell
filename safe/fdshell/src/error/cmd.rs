@@ -70,6 +70,15 @@ pub enum CmdError {
     /// nesting too deep; reduce the depth of nested blocks or command substitutions
     NestingTooDeep,
     /// impossible error state (should never occur)
+    // Truly never: every producer sits in a proven class — a ForkCell borrow (a clash
+    // needs a borrow held across a nested borrow of the same cell), ShortCStr
+    // bookkeeping like `as_bytes()` (only `BadState`), a §4.11 bounds guard on read
+    // counts and parser-computed offsets, or a dispatch-completeness arm. The
+    // alias-drift `get()` pair in `alias_expand/expand_at.rs` stays in range because
+    // its drift counter is signed.
+    // LESSONS: "Never hold a ForkCell borrow across a recursive call that re-borrows"
+    // LESSONS: "A text-replacement drift counter must be signed when replacements can shrink"
+    // Chore #565: excluded from later respawns.
     Never,
     /// invalid {arg}
     InvalidArgument { arg: &'static str },

@@ -40,6 +40,14 @@ pub(crate) enum ResolveError {
     /// resolution failed
     Resolve,
     /// impossible error state (should never occur)
+    // Truly never: the `write!`/`push_byte` arms can only fail on a NUL, and every
+    // written value is a number (`$$`, `$#`, `$?`, an fd number, a length) or a span
+    // already cleared at the ingestion point — `substitute/mask.rs` is where a NUL
+    // answers `NulByte`; `arith/binop.rs`'s arm is dispatch completeness and
+    // `param_op/pattern.rs`/`glob.rs` are bounds/bookkeeping. Pinned by
+    // `arith/tests.rs::arith_binop_rejects_non_binary_ops`.
+    // LESSONS: "A NUL byte is reachable only at the entry points that ingest outside bytes"
+    // Chore #565: excluded from later respawns.
     Never,
 }
 

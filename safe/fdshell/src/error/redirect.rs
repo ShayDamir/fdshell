@@ -35,6 +35,13 @@ pub(crate) enum OpenRedirectError {
     /// failed to close redirection target fd {n}
     CloseFd { n: i32 },
     /// internal invariant violated
+    // Truly never: the sites are ForkCell borrows, `as_bytes()` bookkeeping (only
+    // `BadState`), `one_name`'s `first()` guarded by its own `len() == 1` arm,
+    // `target.rs`'s `RedirectSource::Path` arm that callers route Path sources into,
+    // and `resolve/arms.rs`'s `(None, None)` invariant — the open pass leaves an fd
+    // for every ordinary def; only a magic entry has none.
+    // LESSONS: "Never hold a ForkCell borrow across a recursive call that re-borrows"
+    // Chore #565: excluded from later respawns.
     Never,
 }
 

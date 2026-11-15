@@ -1,3 +1,5 @@
+// mutants: -C --test -C syscall_error -- -E 'binary(syscall_error)'
+
 //! Typed syscall error — bridges raw errno to the type system.
 //!
 //! `SyscallError` replaces raw `i32` errnos in `unsafe/sys/` return types so that
@@ -21,6 +23,16 @@ pub enum SyscallError {
     ENOSYS(&'static str),
     EPERM(&'static str),
     /// impossible state (indexing invariant violation)
+    // Truly never: every producer is a bounds/clamp guard proven in place — the three
+    // `net/getsockname.rs` arms, `net/addr.rs` behind its own `SUN_PATH_MAX`/`EINVAL`
+    // gate, `fsverity.rs` where the buffer is the sha512 maximum, the partial-I/O
+    // loops of `localfd/rw.rs` and `importedfd/rw.rs`, `env/getcwd.rs`,
+    // `net/sendmsg.rs`'s unix-stream `sent == 0` invariant, and `localfd/reopen.rs`
+    // (a decimal fd number carries no NUL). Pinned by `tests/syscall_error.rs`
+    // (`display_never`, `display_renders_standard_descriptions`,
+    // `from_errno_unknown`) and `tests/fsverity.rs::sha512_enable_measure_roundtrip`.
+    // LESSONS: "A pid-derived test port is a shared name"
+    // Chore #565: excluded from later respawns.
     Never,
     Other {
         errno: i32,

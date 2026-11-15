@@ -43,6 +43,15 @@ pub enum BuiltinError {
     /// test: expression nested too deeply; reduce the nesting of `( )` groups and `!`
     TestNestedTooDeep,
     /// impossible error state (should never occur)
+    // Truly never: the crate has zero producers of its own — the proof is a repo-wide
+    // grep, and AGENTS.md's `dead_code` allowance keeps the variant. The producers in
+    // the `child/` layer are §4.11 bounds (`get(..n)` read/ioctl counts, `split_eq`'s
+    // own `find_byte`, hex-pair and `dump_read` chunk bounds), dispatch-completeness
+    // `_` arms gated by the caller's predicate, the `Ok(())` arm of an always-`Err`
+    // result, `NoNul` pushes and CStr-derived bytes. Pinned by
+    // `child/test/tests.rs::unknown_ops_are_never`.
+    // LESSONS: "A NUL byte is reachable only at the entry points that ingest outside bytes"
+    // Chore #565: excluded from later respawns.
     Never,
 }
 
