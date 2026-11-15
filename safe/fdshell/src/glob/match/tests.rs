@@ -290,6 +290,23 @@ fn unclosed_bracket_is_literal() {
     assert!(!m(b"[abc", b"a"));
 }
 
+/// The dot rule's bracket arm, probed at the helper (rules 2/9) on **both** of
+/// its answers: a closed class spanning the pattern's first byte blocks the dot
+/// name, an unclosed `[` has no span and answers `false`, leaving the matcher to
+/// read the literal byte. Only the closed row can flip when the arm is deleted,
+/// so it is pinned here; the unclosed row documents the shape an older record
+/// called unkillable, and the rest keep the hoisted gate's answers (task #455).
+#[test]
+fn the_bracket_arm_answers_only_for_a_closed_class() {
+    assert!(super::dot_blocked(b"[a]", &[], b".a", false));
+    assert!(!super::dot_blocked(b"[a", &[], b".a", false));
+    // The early return owns these, not the arm: a dot-less name, dotglob on, and
+    // a quoted leading byte (whose mask bit is set, so the byte is word data).
+    assert!(!super::dot_blocked(b"[a]", &[], b"ax", false));
+    assert!(!super::dot_blocked(b"[a]", &[], b".a", true));
+    assert!(!super::dot_blocked(b"[a]", &[Quoted], b".a", false));
+}
+
 #[test]
 fn dot_rule_blocks_pattern_leads_on_dot_names() {
     assert!(!m(b"*", b".hidden"));

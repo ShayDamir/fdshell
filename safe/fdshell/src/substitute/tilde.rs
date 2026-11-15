@@ -1,5 +1,7 @@
 //! Leading-`~` expansion — `$HOME` when a tilde starts a word.
 
+// mutants: -C --lib -C --test -C env_assign -C --test -C loops -C --test -C quotes -- -E 'test(/^substitute::/) | binary(env_assign) | binary(loops) | binary(quotes)'
+
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ShortCStr;
@@ -85,3 +87,6 @@ pub(super) fn expand(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
