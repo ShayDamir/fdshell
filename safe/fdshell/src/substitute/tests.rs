@@ -19,6 +19,7 @@ use super::fields::word_fields;
 use super::mask::Counting;
 use super::origin::Origin;
 use super::substitute_arg;
+use super::surface::PercentArm;
 
 fn fdvar(fd: sys::LocalFd) -> FdVar {
     FdVar {
@@ -271,8 +272,16 @@ fn expand_marked_cached(
     mask: &[MaskBit],
     spans: &[usize],
 ) -> (ShortCStr, Vec<MaskBit>, bool) {
-    let (text, out_mask, origin) =
-        substitute_arg_marked(word, mask, spans, Join::Args, cache, cell).unwrap();
+    let (text, out_mask, origin) = substitute_arg_marked(
+        word,
+        mask,
+        spans,
+        Join::Args,
+        PercentArm::Fires,
+        cache,
+        cell,
+    )
+    .unwrap();
     (text, out_mask, !origin.is_empty())
 }
 
@@ -2886,6 +2895,9 @@ fn var_name_consumption_keeps_mask_alignment() {
 
 #[test]
 fn percent_expansion_inherits_trigger_mask_bit() {
+    // Task #252: the arm runs only for an **unquoted** trigger byte, so the
+    // bit an expansion inherits is the unquoted one; the pin keeps the
+    // inheritance mechanism on the spelling the arm can actually run.
     let cell = ForkCell::new(ShellState::new());
     let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
     cell.borrow_mut()
@@ -2896,7 +2908,7 @@ fn percent_expansion_inherits_trigger_mask_bit() {
     let mut cache = HashMap::new();
     let (res, mask_out) = substitute_arg(
         &arg,
-        &[Unquoted, Quoted, Quoted, Quoted, Quoted],
+        &[Unquoted, Unquoted, Unquoted, Unquoted, Unquoted],
         &[],
         &mut cache,
         &cell,
@@ -2912,8 +2924,38 @@ fn percent_expansion_inherits_trigger_mask_bit() {
         mask_out
             .iter()
             .enumerate()
-            .all(|(i, b)| i == 0 || b.quoted())
+            .all(|(i, b)| i == 0 || !b.quoted())
     );
+}
+
+#[test]
+fn a_quoted_percent_with_bound_fd_stays_literal() {
+    // Task #252's decision: the `%` arm is gated on the trigger byte's mask
+    // bit, so a quoted `%name` with the fd **bound** stays the literal text —
+    // bash, which has no fd namespace, prints `%_fd` and fdshell now agrees.
+    // The unquoted spelling still substitutes (the row below, bash-measured
+    // by task #252: `echo "[%s]"` is `[%s]` where the old build printed the
+    // fd number).
+    let cell = ForkCell::new(ShellState::new());
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"_fd"), fdvar(dev_null));
+    let arg = ShortCStr::from(c"a%_fd");
+    let (res, mask_out, expanded) = expand_marked(&cell, &arg, &[Quoted; 5], &[]);
+    assert_eq!(res.as_bytes().unwrap(), b"a%_fd");
+    assert_eq!(mask_out, vec![Quoted; 5]);
+    assert!(!expanded, "a quoted `%` runs no arm");
+    let (res, _, expanded) = expand_marked(&cell, &arg, &[Unquoted; 5], &[]);
+    let bytes = res.as_bytes().unwrap();
+    assert!(
+        bytes.first() == Some(&b'a')
+            && bytes.len() > 1
+            && bytes[1..].iter().all(|b| b.is_ascii_digit()),
+        "an unquoted `%name` with the fd bound still substitutes, got {bytes:?}"
+    );
+    assert!(expanded, "the arm ran on the unquoted trigger");
 }
 
 // --- the `#`/`##`/`%`/`%%` pattern operators (task #106) ---
@@ -3626,7 +3668,9 @@ fn positional_digit_run_stops_at_the_closing_quote() {
 
 #[test]
 fn percent_name_stops_at_the_closing_quote() {
-    // `"%v"b`: the fd name is capped at the region, the literal `b` follows.
+    // `%v"b"`: the arm runs only for an unquoted trigger byte (task #252) and
+    // the name is capped at the trigger's region, so the name is the one byte
+    // inside the unquoted run, the quoted `b` stays a literal and follows.
     // A seeded cache entry fixes the fd number, so the bytes are exact.
     let cell = dummy_cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
@@ -3635,23 +3679,24 @@ fn percent_name_stops_at_the_closing_quote() {
         &cell,
         &mut cache,
         &ShortCStr::from(c"%vb"),
-        &[Quoted, Quoted, Unquoted],
+        &[Unquoted, Unquoted, Quoted],
         &[],
     );
     assert_eq!(res.as_bytes().unwrap(), b"1000b");
-    assert_eq!(mask, vec![Quoted, Quoted, Quoted, Quoted, Unquoted]);
+    assert_eq!(mask, vec![Unquoted, Unquoted, Unquoted, Unquoted, Quoted]);
     assert!(expanded);
 }
 
 #[test]
 fn percent_at_region_end_is_literal_and_consumes_nothing() {
-    // `"%v"` region ends at the `%`: the name is empty, so the arm is the
-    // literal `%` escape and the `v` is handed to the loop as a literal byte.
+    // `%"v"`: the trigger's region ends at the `%` (task #252 put the arm in
+    // the unquoted region), so the name is empty, the arm is the literal `%`
+    // escape and the `v` is handed to the loop as a quoted literal byte.
     let cell = dummy_cell();
     let (res, mask, expanded) =
-        expand_marked(&cell, &ShortCStr::from(c"%v"), &[Quoted, Unquoted], &[]);
+        expand_marked(&cell, &ShortCStr::from(c"%v"), &[Unquoted, Quoted], &[]);
     assert_eq!(res.as_bytes().unwrap(), b"%v");
-    assert_eq!(mask, vec![Quoted, Unquoted]);
+    assert_eq!(mask, vec![Unquoted, Quoted]);
     assert!(
         expanded,
         "the `%` arm ran, so its byte reaches the splitter"
@@ -3720,7 +3765,16 @@ fn expand_origin(
     mask: &[MaskBit],
 ) -> (ShortCStr, Vec<MaskBit>, Origin) {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    substitute_arg_marked(word, mask, &[], Join::Args, &mut cache, cell).unwrap()
+    substitute_arg_marked(
+        word,
+        mask,
+        &[],
+        Join::Args,
+        PercentArm::Fires,
+        &mut cache,
+        cell,
+    )
+    .unwrap()
 }
 
 fn splittable_all(origin: &Origin, len: usize) -> Vec<bool> {
@@ -3782,6 +3836,7 @@ fn percent_arm_records_its_fd_number() {
         &[Unquoted; 5],
         &[],
         Join::Args,
+        PercentArm::Fires,
         &mut cache,
         &cell,
     )
@@ -3908,7 +3963,8 @@ fn word_fields_are_the_pre_glob_step_of_substitute_args() {
     ] {
         let w = ShortCStr::from(word);
         let mut cache = HashMap::new();
-        let fields = word_fields(&w, &[], &[], false, &mut cache, &cell).unwrap();
+        let fields =
+            word_fields(&w, &[], &[], false, PercentArm::Fires, &mut cache, &cell).unwrap();
         let mut want: Vec<ShortCStr> = Vec::new();
         for (field, mask) in &fields {
             // `substitute_args::push_word`: a fully quoted field is kept
@@ -3927,6 +3983,48 @@ fn word_fields_are_the_pre_glob_step_of_substitute_args() {
     }
 }
 
+// --- task #371: the `%` arm's per-surface policy, at the helper level ---
+
+/// The redirect target enters the shared field pipeline with the `%` arm
+/// **off** (task #371, bash 5.3.9 measured: `echo hi > a%log$(echo x)` opens
+/// the literal `a%logx`). A bound name reaches the field as its own text; the
+/// other trigger — the `$var` arm — still expands (`var` → `value`, the seeded
+/// `dummy_cell`). The argument policy, the other half of the same data,
+/// substitutes the bound name (the twin row).
+#[test]
+fn the_off_policy_leaves_a_bound_percent_literal() {
+    let cell = dummy_cell();
+    let dev_null = sys::openat2::open(c"/dev/null", 0).unwrap();
+    cell.borrow_mut()
+        .unwrap()
+        .fds
+        .insert(ShortCStr::from(c"log"), fdvar(dev_null));
+    let w = ShortCStr::from(c"a%log$var");
+    let mut cache = HashMap::new();
+    let fields = word_fields(&w, &[], &[], false, PercentArm::Off, &mut cache, &cell).unwrap();
+    let texts: Vec<Vec<u8>> = fields
+        .iter()
+        .map(|(f, _)| f.as_bytes().unwrap().to_vec())
+        .collect();
+    assert_eq!(texts, vec![b"a%logvalue".to_vec()], "the `%` arm is off");
+    let mut cache = HashMap::new();
+    let fields = word_fields(&w, &[], &[], false, PercentArm::Fires, &mut cache, &cell).unwrap();
+    let texts: Vec<Vec<u8>> = fields
+        .iter()
+        .map(|(f, _)| f.as_bytes().unwrap().to_vec())
+        .collect();
+    assert_eq!(texts.len(), 1);
+    let text = &texts[0];
+    let middle = text[1..text.len() - 5].to_vec();
+    assert!(
+        text.starts_with(b"a")
+            && text.ends_with(b"value")
+            && !middle.is_empty()
+            && middle.iter().all(|b| b.is_ascii_digit()),
+        "the argument surface's arm fires, got {text:?}"
+    );
+}
+
 // --- task #561: the word of a colon operator is a word, so it is expanded ---
 
 /// The fields of one word, as text lists — the pipeline the argument pass runs,
@@ -3939,11 +4037,19 @@ fn colon_field_texts(
     quoted: bool,
 ) -> Vec<Vec<u8>> {
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    word_fields(word, mask, spans, quoted, &mut cache, cell)
-        .unwrap()
-        .iter()
-        .map(|(f, _)| f.as_bytes().unwrap().to_vec())
-        .collect()
+    word_fields(
+        word,
+        mask,
+        spans,
+        quoted,
+        PercentArm::Fires,
+        &mut cache,
+        cell,
+    )
+    .unwrap()
+    .iter()
+    .map(|(f, _)| f.as_bytes().unwrap().to_vec())
+    .collect()
 }
 
 /// The `:?` bail's message word: the arm bails, so the plain helper cannot

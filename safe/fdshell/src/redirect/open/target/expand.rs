@@ -1,6 +1,8 @@
 //! The redirect target word **with** an expansion trigger: the word pipeline,
 //! then the redirect's own glob policy, then bash's one-name rule (task #278).
 
+// mutants: -C --lib -C --test -C strict -- -E 'test(/^redirect::open::/) | binary(strict)'
+
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use hashbrown::HashMap;
@@ -12,19 +14,25 @@ use sys::fork_cell::ForkCell;
 use crate::error::redirect::OpenRedirectError;
 use crate::mask::MaskBit;
 use crate::state::ShellState;
+use crate::substitute::PercentArm;
 
 use super::{ban_absolute, one_name};
 
 /// Expand the target word to its fields and glob every field at the
 /// redirect's own `base`, then apply the one-name rule.
 ///
-/// The two deltas from an argument word's pipeline, and the reason the target
-/// calls [`word_fields`] instead of `substitute_args`: the glob is rooted at
-/// the strict `%CWD` fd (`glob::matches(…, base)`, the base `target.rs` is
-/// handed) and not at the process CWD, and a pattern with **no** match keeps
-/// its literal word — `nullglob` and `failglob` do not apply to a redirect
-/// target (task #369 owns that decision, measured against bash). So
-/// `> $(true)` yields 0 names and `n="a b"; > $n` yields 2, both
+/// The word arrives here only with a trigger byte of a **live** arm (the gate
+/// in `target.rs` keeps `%` out: bash expands no `%` form in a redirection
+/// word, task #278), and it is the one caller entering the shared pipeline
+/// with the `%` arm **off** (task #371): a `%` byte in a path word is
+/// file-name data, so `> a%log$(echo x)` writes the literal `a%logx` as bash
+/// does. The two deltas from an argument word's pipeline, and the reason the
+/// target calls [`word_fields`] instead of `substitute_args`: the glob is
+/// rooted at the strict `%CWD` fd (`glob::matches(…, base)`, the base
+/// `target.rs` is handed) and not at the process CWD, and a pattern with
+/// **no** match keeps its literal word — `nullglob` and `failglob` do not
+/// apply to a redirect target (task #369 owns that decision, measured against
+/// bash). So `> $(true)` yields 0 names and `n="a b"; > $n` yields 2, both
 /// `ambiguous redirect` as bash reports, while `> zzz*` still creates `zzz*`.
 pub(super) fn target(
     path: &ShortCStr,
@@ -35,8 +43,9 @@ pub(super) fn target(
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<ShortCStr, Report<OpenRedirectError>> {
-    let fields = crate::substitute::word_fields(path, mask, spans, quoted, cache, cell)
-        .change_context(OpenRedirectError::TargetExpand)?;
+    let fields =
+        crate::substitute::word_fields(path, mask, spans, quoted, PercentArm::Off, cache, cell)
+            .change_context(OpenRedirectError::TargetExpand)?;
     let mut names: Vec<ShortCStr> = Vec::new();
     for (field, field_mask) in &fields {
         // The ban is evaluated on the **expansion**, before the walk: strict

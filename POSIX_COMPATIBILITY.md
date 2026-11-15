@@ -18,21 +18,23 @@ to names and expands them in words, arguments and redirection targets:
 - `%name` expands to the number of the descriptor bound to `name`; an unbound
   `%name` stays literal text.
 - A literal `%` immediately before the name of a bound descriptor is written
-  `\%` (outside quotes). `%%` is **not** an escape: both bytes reach the
-  command, so `printf '%%'` still prints `%`.
+  `\%` (outside quotes) or inside quotes (task #252). `%%` is **not** an
+  escape: both bytes reach the command, so `printf '%%'` still prints `%`.
 - A capture word `cmd %>%var` is not passed to `cmd` as an argument: it
   stores the descriptor `cmd` returns in `%var`. `%tag>%var` and
   `%>%arr[N]` are the tagged and array forms.
 - `>|%var` and `&>%var` redirect to the descriptor, where POSIX would treat
   `%var` as a file name.
-- The fd-variable **target** is the byte right after the operator, and only
-  while it is **unquoted**: quoting the `%` makes the target the POSIX
-  file-name word — `> "%v"`, `> '%v'`, `>| "%v"`, `>> "%v"` and `&> "%v"`
-  create/open the file `%v`, exactly as bash (task #329). The **word**
-  layer is the twin where quoting is *not* an escape: a **bound** `%name`
-  expands inside quotes (`echo "%name"` prints the fd number, bash prints
-  `%name`), `\%` is the only escape, and gating that arm on the mask too is
-  task #252's open decision.
+- The fd-variable arm — target and word alike — fires only while the `%` is
+  **unquoted**: quoting the `%` makes the byte an ordinary byte, exactly as
+  bash, so `> "%v"`, `> '%v'`, `>| "%v"`, `>> "%v"` and `&> "%v"` create/open
+  the file `%v` (task #329), `echo "%name"` prints `%name` and
+  `printf "%s\n" hi` prints `hi` even with fd `s` bound (task #252). The
+  **redirect target** goes one step further: the `%` arm is off for the whole
+  surface (task #371), so a `%` byte in a target word is file-name data even
+  beside another trigger — `> a%log$(echo x)` writes the file `a%logx`, as
+  bash does. The parse-time attached forms `>%var` and `&>%var` keep their
+  own rule (see "Operators are recognized at word starts").
 - The dup word `2>&%var` is deliberately **mask-blind**: bash answers
   `ambiguous redirect` rc 1 for `2>&%v` and `2>&"%v"` alike — with an
   io-number a `>&word` operand is never a file name — so no quoting rule

@@ -16,6 +16,7 @@ use crate::substitute::arg::substitute_arg_marked;
 use crate::substitute::mask::Counting;
 use crate::substitute::origin::Origin;
 use crate::substitute::split::split_word;
+use crate::substitute::surface::PercentArm;
 
 use super::{handle, scan_body};
 
@@ -41,8 +42,16 @@ fn body(input: &[u8]) -> Option<Vec<u8>> {
 fn expand(word: &ShortCStr, mask: &[MaskBit]) -> (ShortCStr, Vec<MaskBit>, bool) {
     let cell = cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    let (text, out_mask, origin) =
-        substitute_arg_marked(word, mask, &[], Join::Args, &mut cache, &cell).unwrap();
+    let (text, out_mask, origin) = substitute_arg_marked(
+        word,
+        mask,
+        &[],
+        Join::Args,
+        PercentArm::Fires,
+        &mut cache,
+        &cell,
+    )
+    .unwrap();
     (text, out_mask, !origin.is_empty())
 }
 
@@ -50,8 +59,16 @@ fn expand(word: &ShortCStr, mask: &[MaskBit]) -> (ShortCStr, Vec<MaskBit>, bool)
 fn fields(word: &ShortCStr, mask: &[MaskBit]) -> Vec<ShortCStr> {
     let cell = cell();
     let mut cache: HashMap<ShortCStr, ExportedFd> = HashMap::new();
-    let (text, out_mask, origin) =
-        substitute_arg_marked(word, mask, &[], Join::Args, &mut cache, &cell).unwrap();
+    let (text, out_mask, origin) = substitute_arg_marked(
+        word,
+        mask,
+        &[],
+        Join::Args,
+        PercentArm::Fires,
+        &mut cache,
+        &cell,
+    )
+    .unwrap();
     assert!(
         !origin.is_empty(),
         "the backtick arm must produce splittable bytes"

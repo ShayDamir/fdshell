@@ -16,15 +16,16 @@ use crate::state::ShellState;
 use crate::substitute::Join;
 use crate::substitute::mask::Counting;
 use crate::substitute::origin::Origin;
+use crate::substitute::surface::PercentArm;
 
 /// The state of one word's substitution, shared by every arm of the loop:
 /// `peek` hands out the word's bytes and counts them, `idx` is the word index
 /// the input `mask` is read at, and `out`/`out_mask`/`origin` accumulate the
-/// output. `mask`, `spans`, `join`, `cache` and `cell` are the run's inputs,
-/// fixed for the whole word: carrying them here keeps each arm's signature down
-/// to the arguments that arm alone moves. `spans` (task #561) is the input-side
-/// zero-byte quote-span list the tilde gate and a nested operator word read;
-/// the loop's own arm consumes it, so it lives here.
+/// output. `mask`, `spans`, `join`, `percent`, `cache` and `cell` are the
+/// run's inputs, fixed for the whole word: carrying them here keeps each arm's
+/// signature down to the arguments that arm alone moves. `spans` (task #561)
+/// is the input-side zero-byte quote-span list the tilde gate and a nested
+/// operator word read; the loop's own arm consumes it, so it lives here.
 pub(crate) struct Ex<'a> {
     pub peek: Counting<'a>,
     pub idx: usize,
@@ -36,6 +37,7 @@ pub(crate) struct Ex<'a> {
     pub mask: &'a [MaskBit],
     pub spans: &'a [usize],
     pub join: Join,
+    pub percent: PercentArm,
 }
 
 /// `Ex`'s fields as borrows, in field order: the eight pieces an arm moves,

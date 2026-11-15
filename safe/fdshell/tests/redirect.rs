@@ -2766,10 +2766,10 @@ fn exec_target_expands_and_stays() {
 ///
 /// The two rows with a **live** `%log` fd are what pins the gate: `%` alone
 /// never triggers the expansion, so `> a%log` keeps its bytes (bash agrees, and
-/// expanding the fd would create `a<fd>`), while a word carrying *another*
-/// trigger reaches the `%name` arm — the accepted leak task #371 owns, pinned
-/// here in the shape that actually diverges (`a<fd>x`, where bash writes
-/// `a%logx`).
+/// expanding the fd would create `a<fd>`), and a word carrying *another*
+/// trigger reaches the pipeline with the `%` arm **off** — task #371's
+/// per-surface policy, so `> a%log$(echo x)` writes the literal `a%logx`
+/// exactly as bash does.
 #[test]
 fn percent_bytes_in_a_target_stay_file_name_data() {
     let dir = seeded("sub_percent");
@@ -2781,15 +2781,16 @@ fn percent_bytes_in_a_target_stay_file_name_data() {
     for (script, want) in [
         ("echo hi > a%b", &["a%b"][..]),
         // `%log` unset: the fd name collapses to nothing, so bash and fdshell
-        // agree on `a%logx` and the leak is invisible here — the live-fd row
-        // below is what pins it.
+        // agree on `a%logx` here — the live-fd row below pins the same rule
+        // with the fd bound.
         ("echo hi > a%log$(echo x)", &["a%logx"]),
         ("echo hi > $(echo \"%log\")", &["%log"]),
         // The `%fd` target the shell *does* own is a parse-time variable
         // source (the attached `>%name` form), never a word to expand.
         (&format!("{OPEN} %>%log; echo x >%log"), &["log"]),
-        // `%` is the word's only trigger byte: no expansion, so the fd variable
-        // name stays file-name data. `target_trigger -> true` creates `a<fd>`.
+        // `%` is the word's only trigger byte: no live arm on this surface, so
+        // no expansion and the fd variable name stays file-name data. A gate
+        // that kept `%` (`has_trigger -> true`) creates `a<fd>`.
         (
             &format!("{OPEN} %>%log; echo hi > a%log"),
             &["a%log", "log"],
@@ -2801,27 +2802,16 @@ fn percent_bytes_in_a_target_stay_file_name_data() {
         let want: Vec<String> = want.iter().map(|w| w.to_string()).collect();
         assert_eq!(created(&files), want, "{script}");
     }
-    // The #371 divergence, with the fd **open**: a `$` trigger puts the whole
-    // word through substitution, so the `%log` name resolves to its fd number.
-    // bash writes the literal `a%logx`; fdshell writes `a<fd>x` (the fd number
-    // depends on how many fds the process holds, so the shape is asserted).
+    // Task #371: with the fd **open** and a `$` trigger putting the whole word
+    // through substitution, bash writes the file `a%logx` — and fdshell now
+    // agrees: the `%` arm is off on this surface, so only the `$(echo x)` half
+    // expands (`log` is the file the `openat2` command itself creates).
     clean(dir);
     let (out, err, code, files) = run_ls(dir, &format!("{OPEN} %>%log; echo hi > a%log$(echo x)"));
     assert_eq!((out.as_str(), code), ("", 0), "stderr={err:?}");
-    let names = created(&files);
-    assert_eq!(names.len(), 2, "the target plus `log`: {names:?}");
-    let name = names
-        .iter()
-        .find(|f| f.starts_with('a'))
-        .unwrap()
-        .to_string();
-    let fd_number = name
-        .strip_prefix('a')
-        .and_then(|n| n.strip_suffix('x'))
-        .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
-    assert!(
-        fd_number.is_some(),
-        "the fd number replaces the `%log` name, where bash writes `a%logx`: {name}"
+    assert_eq!(
+        created(&files),
+        vec!["a%logx".to_string(), "log".to_string()]
     );
     clean(dir);
     let (out, err, code, files) = run_ls(dir, "echo hi > a%CWD/x");
@@ -3976,8 +3966,8 @@ fn the_dup_word_files_only_without_an_io_number() {
 }
 
 /// A **bound** fd variable does not capture the quoted target: the target
-/// word's expansion is gated by `substitute::target_trigger`, which excludes
-/// `%`, so `>"%v"` reaches the opener as literal file-name data (the same
+/// word's gate is `substitute::has_trigger` with the `%` arm **off** (task
+/// #371), so `>"%v"` reaches the opener as literal file-name data (the same
 /// gate `> a%log` pins in `percent_bytes_in_a_target_stay_file_name_data`).
 /// bash, with no fd layer at all, creates the file `%v` (rc 0) — parity.
 #[test]

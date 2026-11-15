@@ -1,6 +1,8 @@
 //! One word-0 word expanded to its bash fields: substitution, IFS splitting,
 //! pathname expansion — the same pipeline an argument word goes through.
 
+// mutants: -C --lib -C --test -C cmd_subst -- -E 'test(/^command_word::/) | binary(cmd_subst)'
+
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -12,6 +14,7 @@ use crate::error::cmd::CmdError;
 use crate::mask::MaskBit;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
+use crate::substitute::PercentArm;
 
 use super::args::{consume, leading_args};
 
@@ -20,7 +23,7 @@ use super::args::{consume, leading_args};
 /// command name (`echo`, `ls`, `cd`) borrowed — no allocation at all.
 pub(super) fn passes_through(word: &ShortCStr, mask: &[MaskBit]) -> bool {
     word.as_bytes().is_ok_and(|bytes| {
-        !crate::substitute::has_trigger(bytes)
+        !crate::substitute::has_trigger(bytes, PercentArm::Fires)
             && !bytes.contains(&b'\\')
             && !crate::glob::has_unquoted_pattern(bytes, mask)
     })
@@ -44,7 +47,7 @@ pub(crate) fn fields(
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, Report<CmdError>> {
     let bytes = word.as_bytes().change_context(CmdError::Never)?;
-    if !crate::substitute::has_trigger(bytes) {
+    if !crate::substitute::has_trigger(bytes, PercentArm::Fires) {
         let (folded, folded_mask) = fold_word(word, mask).change_context(CmdError::Never)?;
         return crate::glob::expand(&folded, &folded_mask, cell).change_context(CmdError::Resolve);
     }

@@ -8,6 +8,8 @@
 //! `$@` word boundaries make, and a take-first (`Join::Pattern`, task #319).
 //! LESSONS: "`$@` has two join rules".
 
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 use alloc::vec::Vec;
 use error_stack::Report;
 use hashbrown::HashMap;
@@ -22,6 +24,7 @@ use crate::state::ShellState;
 use super::Join;
 use super::arg::substitute_arg_marked;
 use super::split::split_word;
+use super::surface::PercentArm;
 
 /// One `case` pattern clause element as the `(pattern text, parallel mask)`
 /// `glob::match_component` matches with. The expanded text is cut on the
@@ -36,8 +39,15 @@ pub(crate) fn word(
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<(ShortCStr, Vec<MaskBit>), Report<ResolveError>> {
-    let (text, text_mask, origin) =
-        substitute_arg_marked(text, mask, spans, Join::Pattern, cache, cell)?;
+    let (text, text_mask, origin) = substitute_arg_marked(
+        text,
+        mask,
+        spans,
+        Join::Pattern,
+        PercentArm::Fires,
+        cache,
+        cell,
+    )?;
     // The **empty** `IFS` is the boundary-only cut: with no `IFS` bytes,
     // `split_word` splits nothing and only the `$@` boundaries close a field.
     // This caller never reads the shell's `IFS` — the pattern's `IFS` reading

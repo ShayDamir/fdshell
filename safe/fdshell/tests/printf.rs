@@ -293,17 +293,15 @@ fn printf_double_percent_survives_as_argument() {
 
 #[test]
 fn printf_double_percent_with_bound_fd_name() {
-    // Accepted divergence, pinned (README + task #252): with fd `s` bound the
-    // second `%` starts a name lookup, so the format becomes `%<fdnum>` —
-    // printf reports it as a missing format character at rc 1 with empty
-    // stdout, where bash's `printf '%%s' x` prints `%s` at rc 0. The master
-    // collapsing reading (`printf '%%s' x` → `x`) is gone, and an unquoted fd
-    // reference in a non-format word still substitutes.
+    // Task #252's quoting gate, now implemented: the `%` arm is gated on the
+    // trigger byte's mask bit, so `printf '%%s' x` with fd `s` bound keeps the
+    // format whole — `%%` reaches the printf builtin, which interprets it — and
+    // fdshell prints `%s` at rc 0, exactly as bash (measured 2026-11, bash
+    // 5.3.9). An unquoted fd reference in a non-format word still substitutes
+    // (README "File descriptor variables").
     let open = "builtin openat2 --flags O_RDONLY /dev/null %>%s; ";
     let (out, err, code) = run(&format!("{open}printf '%%s' x"));
-    assert_eq!(code, 1);
-    assert!(out.is_empty(), "stdout={out:?}");
-    assert!(err.contains("invalid format string"), "stderr={err:?}");
+    assert_eq!((out.as_str(), code), ("%s", 0), "stderr={err:?}");
     let (out, _err, code) = run(&format!("{open}printf '%s' %s"));
     assert_eq!(code, 0);
     assert!(

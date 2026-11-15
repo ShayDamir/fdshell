@@ -52,13 +52,13 @@ operations.
 - `%?` is the descriptor that became ready, inside a `wait` arm.
 - A `%name` that is not bound stays literal text (`%nosuchfd` is
   `%nosuchfd`). A literal percent sign is written `\%`.
-- Quoting is the escape at the **redirect-target** layer: the `%` right
-  after the operator names the descriptor only while **unquoted**, so
-  `> "%name"` (and `'%name'`, `>| "%name"`, `>> "%name"`, `&> "%name"`)
-  opens the **file** named `%name`, as bash does. At the **word** layer
-  quoting is *not* an escape: a bound `%name` expands inside quotes too
-  (`echo "%name"` prints the number), and `\%` is the escape there —
-  task #252 owns that decision
+- Quoting is the escape at **both** layers (task #252): a quoted `%` is an
+  ordinary byte, so `> "%name"` (and `'%name'`, `>| "%name"`, `>> "%name"`,
+  `&> "%name"`) opens the **file** named `%name`, as bash does, and at the
+  **word** layer a bound `%name` inside quotes stays literal too —
+  `echo "%name"` prints `%name`, `printf "%s\n" hi` prints `hi` even with fd
+  `s` bound. Only the unquoted spelling expands, and `\%` is the escape
+  outside quotes
   ([POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md#is-a-file-descriptor-namespace)).
 
 ### Passing file descriptors to a subprocess
@@ -428,7 +428,10 @@ and never suppresses a substitution region: only `'` does.
 
 The fd target forms are decided at parse time — the attached `>%var` and the
 `>&N` duplicate word — so a `%` byte inside a target word is file-name data:
-`> a%b` creates `a%b`. A `/dev/fd/N` target is an ordinary word at parse time;
+`> a%b` creates `a%b`, and the `%` arm stays off for that word even when
+another trigger puts the whole word through the pipeline — `> a%log$(echo x)`
+writes the literal `a%logx` (task #371; task #252 keeps a quoted `%` literal
+everywhere else). A `/dev/fd/N` target is an ordinary word at parse time;
 the magic reading runs at open time on the **final expanded name** (task #337,
 task #479) — a word that merely *expands* to the magic form (`2> $p`,
 `2> /dev/fd/$((1))`, escape-folded or globbed) is opened as the magic path
@@ -734,7 +737,9 @@ and in [POSIX_COMPATIBILITY.md](POSIX_COMPATIBILITY.md).
 A command is a sequence of words separated by spaces (and tabs). `'…'` is a
 fully literal single-quoted span, `"…"` is a double-quoted span in which `$`,
 backticks and `\` keep working, and `\x` outside quotes removes the special
-meaning of `x`:
+meaning of `x`. Quoting a byte never suppresses a substitution **region**
+(`"$(echo f)"` expands); it does gate the `%` fd namespace (task #252) —
+a quoted `%` is an ordinary byte, `echo "%s"` prints `%s` even with `s` bound:
 
 ```shell
 echo 'a   b'      # a   b        (spaces are data)

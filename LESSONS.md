@@ -5866,15 +5866,20 @@ mutually exclusive.
 `substitute/tests.rs::percent_double_percent_keeps_the_quote_mask`.
 * The literal-`%` escape is the POSIX #4.1 pair **outside** quotes
   (`\%s` → `%s`, pinned by `percent_escaped_percent_with_bound_fd_is_literal`
-  and `tests/quotes.rs::percent_bytes_are_data_in_a_span`). Inside a span
-there
-  is no escape pair, so a quoted `%name` is substituted too: with fd `s` bound
-  `printf '%%s' x` becomes the format `%<fdnum>` and printf reports
-  `invalid format string` at rc 1 where bash prints `%s` at rc 0 — pinned as
-an
-  accepted divergence by
-`tests/printf.rs::printf_double_percent_with_bound_fd_name`
-  and tracked by task #252 (the `b'%' if !quoted` gate).
+  and `tests/quotes.rs::percent_bytes_are_data_in_a_span`). Task #252 closed
+the
+  open decision: the `%` arm fires only on an **unquoted** trigger byte
+  (`b'%' if !quoted` in `substitute/arg/arms.rs::dispatch`), so a quoted
+  `%name` is an ordinary byte exactly as bash: with fd `s` bound
+  `printf '%%s' x` prints `%s` at rc 0 and `printf "%s\n" hi` prints `hi` —
+  pinned by `tests/printf.rs::printf_double_percent_with_bound_fd_name`
+  and the quote-table rows in `tests/quotes.rs`. The two gate levels stay
+  distinct: the **word-level** raw-text gate `substitute.rs::has_trigger`
+  must never read the mask (a masked-out trigger byte still enters the
+  pipeline — `"$(echo ls)"` must expand), while the **arm-level** gate reads
+  the mask bit; on the redirect-target surface the whole arm is off
+  (task #371), decided once at the surface's entry point and threaded to the
+  arm as data.
 * An undocumented "feature" pinned only by a unit test is a divergence to fix,
   not a contract to preserve: `percent_double_percent_is_literal` asserted the
   collapse (`a%%b` → `a%b`) and nothing in the README ever documented it.

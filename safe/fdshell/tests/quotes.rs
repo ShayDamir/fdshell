@@ -857,10 +857,13 @@ fn region_body_drops_the_span_quote_bytes() {
 }
 
 /// Task #155: the shell performs no percent escaping — `%%` is data in every
-/// spelling. bash prints `%%` for `echo '%%'` and for `echo "%%"`; the only
-/// literal-`%` escape is the POSIX #4.1 pair outside quotes, and with fd `s`
-/// bound bash's `echo [\%s]` prints `[%s]` (fdshell has no `%name` feature to
-/// escape from, so it prints the same).
+/// spelling. bash prints `%%` for `echo '%%'` and for `echo "%%"`; the
+/// literal-`%` escapes are the POSIX #4.1 pair outside quotes and — task #252 —
+/// quoting the `%` itself. With fd `s` bound, a quoted `%s` runs no arm:
+/// `echo [\%s]`, `echo "[%s]"`, `echo "a\%s"` and the `printf '%s\n'` /
+/// `printf "%s\n"` formats all answer exactly as bash does (every row below is
+/// bash 5.3.9's own output), and only the unquoted, unescaped spelling
+/// substitutes the fd number.
 #[test]
 fn percent_bytes_are_data_in_a_span() {
     for (script, want) in [("echo '%%'", "%%\n"), ("echo \"%%\"", "%%\n")] {
@@ -869,6 +872,25 @@ fn percent_bytes_are_data_in_a_span() {
     }
     let (out, err, code) = run("builtin openat2 --flags O_RDONLY /dev/null %>%s; echo [\\%s]");
     assert_eq!((out.as_str(), code), ("[%s]\n", 0), "stderr={err:?}");
+    // Task #252 with fd `s` bound: the mask bit gates the arm.
+    let open = "builtin openat2 --flags O_RDONLY /dev/null %>%s; ";
+    for (script, want) in [
+        ("printf \"%s\\n\" hi", "hi\n"),
+        ("printf '%s\\n' hi", "hi\n"),
+        ("echo \"[%s]\"", "[%s]\n"),
+        (r#"echo "a\%s""#, "a\\%s\n"),
+    ] {
+        let (out, err, code) = run(&format!("{open}{script}"));
+        assert_eq!((out.as_str(), code), (want, 0), "{script}: stderr={err:?}");
+    }
+    // The unquoted spelling keeps fdshell's substitution — the contrast the
+    // quoting rule is measured against (bash would print `%s`).
+    let (out, err, code) = run(&format!("{open}echo %s"));
+    assert!(
+        !out.is_empty() && out.trim_end().bytes().all(|b| b.is_ascii_digit()),
+        "the fd number, where bash prints `%s`: stdout={out:?} stderr={err:?}"
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
 }
 
 /// Task #207: a here-doc delimiter word is a word, so it gets POSIX quote

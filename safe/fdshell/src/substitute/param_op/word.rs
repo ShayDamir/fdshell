@@ -23,6 +23,7 @@ use crate::state::ShellState;
 use crate::substitute::Join;
 use crate::substitute::arg::substitute_arg_marked;
 use crate::substitute::origin::Origin;
+use crate::substitute::surface::PercentArm;
 
 mod truncated;
 
@@ -76,8 +77,15 @@ impl Word<'_> {
         };
         let spans = rebased(self.spans, self.start, end);
         let mut cache = HashMap::new();
-        let (text, _word_mask, origin) =
-            substitute_arg_marked(self.literal, mask, &spans, self.join, &mut cache, self.cell)?;
+        let (text, _word_mask, origin) = substitute_arg_marked(
+            self.literal,
+            mask,
+            &spans,
+            self.join,
+            PercentArm::Fires,
+            &mut cache,
+            self.cell,
+        )?;
         Ok(Expanded { text, origin })
     }
 

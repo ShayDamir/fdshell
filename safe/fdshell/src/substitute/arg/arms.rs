@@ -18,13 +18,18 @@ use crate::substitute::dollar::{self, Region};
 use crate::substitute::mask::{push_byte, realign};
 use crate::substitute::percent::percent_subst;
 use crate::substitute::subst_paren;
+use crate::substitute::surface::PercentArm;
 
 use super::Ex;
 use super::escape;
 
 impl Ex<'_> {
     /// One byte of the word, dispatched to its arm. `quoted` is the trigger
-    /// byte's mask bit and picks the `\` arm; `limit` caps a name arm's read.
+    /// byte's mask bit: it picks the `\` arm and gates the `%` arm on the bit
+    /// (task #252 — a quoted `%` is an ordinary literal byte, the same shape
+    /// LESSONS "a quoted region is a unit for *every* byte scanner" prescribes);
+    /// `self.percent` is the per-surface policy of task #371. `limit` caps a
+    /// name arm's read.
     pub(super) fn dispatch(&mut self, b: u8) -> Result<(), Report<ResolveError>> {
         let quoted = quoted_at(self.mask, self.idx);
         // A name arm (`$name`, `%name`, `$N`) reads at most the quote region of
@@ -34,7 +39,7 @@ impl Ex<'_> {
         self.idx += 1;
         match b {
             b'\\' => self.backslash(quoted)?,
-            b'%' => self.percent(limit, quoted)?,
+            b'%' if !quoted && self.percent == PercentArm::Fires => self.percent(limit)?,
             b'$' if self.peek.peek() == Some(&b'(') => {
                 self.peek.next();
                 self.paren(quoted)?;
@@ -76,17 +81,20 @@ impl Ex<'_> {
         }
     }
 
-    /// The `%` arm: `%name` fd substitution. The arm consumes the trigger byte
+    /// The `%` arm: `%name` fd substitution. The dispatch guard runs it only
+    /// for an **unquoted** trigger byte on a surface where the arm is live
+    /// (tasks #252, #371), so `quoted` is always false here and every output
+    /// byte carries the unquoted bit. The arm consumes the trigger byte
     /// and at most the name; a following `%` or non-name byte is literal, so
     /// `%%` reaches argv intact — the `printf` builtin owns `%%` (task #155).
     /// The state borrow ends before the mask realign, and `realign` keeps the
     /// mask 1:1 for the literal `%`.
-    fn percent(&mut self, limit: usize, quoted: bool) -> Result<(), Report<ResolveError>> {
+    fn percent(&mut self, limit: usize) -> Result<(), Report<ResolveError>> {
         let (peek, _, out, _, _, cell, cache, _) = self.parts();
         let before = out.len();
         let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
         percent_subst(peek, cache, &state, out, limit)?;
-        self.resync(before, quoted);
+        self.resync(before, false);
         Ok(())
     }
 

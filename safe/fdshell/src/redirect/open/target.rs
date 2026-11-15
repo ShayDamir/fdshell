@@ -15,6 +15,7 @@ use crate::bytes::fold::fold_word;
 use crate::error::redirect::OpenRedirectError;
 use crate::mask::MaskBit;
 use crate::state::ShellState;
+use crate::substitute::PercentArm;
 use error_stack::{Report, ResultExt, bail};
 use hashbrown::HashMap;
 use sys::ExportedFd;
@@ -52,7 +53,7 @@ pub(super) fn resolve(
         return Err(Report::new(OpenRedirectError::Never));
     };
     let bytes = path.as_bytes().change_context(OpenRedirectError::Never)?;
-    if !crate::substitute::target_trigger(bytes) {
+    if !crate::substitute::has_trigger(bytes, PercentArm::Off) {
         return literal(path, mask, base, cell);
     }
     expand::target(path, mask, spans, *quoted, base, cache, cell)

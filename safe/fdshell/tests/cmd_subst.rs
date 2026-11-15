@@ -940,17 +940,26 @@ fn word0_scoped_ifs_divergence() {
 /// Word-0 leading fields are ordinary argv words, so they take the global argv
 /// `%fd` substitution rule (README "Passing file descriptors to subprocess";
 /// the literal form is `\%var`): with `%s` bound by `signalfd`,
-/// `signalfd %s 10; w="%s"; $(echo ./ea; echo "$w")` runs `./ea` with the fd
-/// *number*, where bash (no fd vars) passes the text `%s`.
+/// `signalfd %s 10; w=%s; $(echo ./ea; echo "$w")` runs `./ea` with the fd
+/// *number*, where bash (no fd vars) passes the text `%s`. Task #252 moved the
+/// quoted spelling to bash's side — the arm is gated on the trigger byte's
+/// mask bit, so `w="%s"` stays the literal text and the field runs as `%s`
+/// (measured against bash 5.3.9: `./ea %s`).
 #[test]
 fn word0_leading_fields_take_the_argv_fd_substitution() {
     let (dir, _scratch) = word0_scratch();
-    let (out, err, rc) = run_in(&dir, r#"signalfd %s 10; w="%s"; $(echo ./ea; echo "$w")"#);
+    let (out, err, rc) = run_in(&dir, r#"signalfd %s 10; w=%s; $(echo ./ea; echo "$w")"#);
     assert_eq!(rc, 0, "stderr={err}");
     let fields = out.trim_end().strip_prefix("ran ").unwrap_or_default();
     assert!(
         !fields.is_empty() && fields.chars().all(|c| c.is_ascii_digit()),
         "the leading field must be substituted with the fd number, stdout={out:?}"
+    );
+    let (out, err, rc) = run_in(&dir, r#"signalfd %s 10; w="%s"; $(echo ./ea; echo "$w")"#);
+    assert_eq!(rc, 0, "stderr={err}");
+    assert_eq!(
+        out, "ran %s\n",
+        "bash: a quoted `%` is no trigger, the field stays literal"
     );
 }
 

@@ -1,5 +1,7 @@
 //! Word-level substitution: per-argument expansion, IFS splitting, globbing.
 
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 use alloc::vec::Vec;
 use error_stack::Report;
 use hashbrown::HashMap;
@@ -12,6 +14,7 @@ use crate::mask::MaskBit;
 use crate::state::ShellState;
 
 use super::fields::word_fields;
+use super::surface::PercentArm;
 
 /// The argument pipeline, one word at a time: [`word_fields`] expands the word
 /// and splits it on IFS, and every field is pathname-expanded **here** —
@@ -30,7 +33,15 @@ pub fn substitute_args(
         let mask = args_mask.get(i).cloned().unwrap_or_default();
         let spans = args_span.get(i).cloned().unwrap_or_default();
         let quoted = args_quoted.get(i).copied().unwrap_or(false);
-        for (word, word_mask) in word_fields(arg, &mask, &spans, quoted, &mut cache, cell)? {
+        for (word, word_mask) in word_fields(
+            arg,
+            &mask,
+            &spans,
+            quoted,
+            PercentArm::Fires,
+            &mut cache,
+            cell,
+        )? {
             push_word(&mut result, &word, &word_mask, cell)?;
         }
     }

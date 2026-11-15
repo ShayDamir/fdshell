@@ -55,11 +55,19 @@ fn fields_of(
     cell: &ForkCell<ShellState>,
 ) -> Vec<ShortCStr> {
     let mut cache = HashMap::new();
-    crate::substitute::word_fields(word, mask, &[], quoted, &mut cache, cell)
-        .unwrap()
-        .into_iter()
-        .map(|(field, _)| field)
-        .collect()
+    crate::substitute::word_fields(
+        word,
+        mask,
+        &[],
+        quoted,
+        crate::substitute::PercentArm::Fires,
+        &mut cache,
+        cell,
+    )
+    .unwrap()
+    .into_iter()
+    .map(|(field, _)| field)
+    .collect()
 }
 
 #[test]
@@ -249,15 +257,32 @@ fn nounset_bails_on_an_unresolved_element_only() {
     cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
     let (w, mask) = word(b"${a[3]}", Unquoted);
     let mut cache = HashMap::new();
-    let e = crate::substitute::word_fields(&w, &mask, &[], false, &mut cache, &cell).unwrap_err();
+    let e = crate::substitute::word_fields(
+        &w,
+        &mask,
+        &[],
+        false,
+        crate::substitute::PercentArm::Fires,
+        &mut cache,
+        &cell,
+    )
+    .unwrap_err();
     assert!(matches!(
         e.current_context(),
         ResolveError::UnboundVariable { var } if var.as_bytes().unwrap() == b"a[3]"
     ));
     let (w, mask) = word(b"${q[@]}", Unquoted);
     assert!(
-        crate::substitute::word_fields(&w, &mask, &[], false, &mut cache, &cell)
-            .unwrap()
-            .is_empty()
+        crate::substitute::word_fields(
+            &w,
+            &mask,
+            &[],
+            false,
+            crate::substitute::PercentArm::Fires,
+            &mut cache,
+            &cell
+        )
+        .unwrap()
+        .is_empty()
     );
 }

@@ -3,6 +3,8 @@
 //! every field; the redirect target calls this directly because it globs at
 //! its own base with its own policy (task #278).
 
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::Report;
@@ -21,6 +23,7 @@ use super::array_fields;
 use super::borrow_state;
 use super::positional::expand_positional_word;
 use super::split::split_word;
+use super::surface::PercentArm;
 
 /// One word as the field list a caller globs: `$( … )`, `` ` … ` ``,
 /// `$(( … ))`, `$name`, `%fd` and `~` are substituted, the result is split on
@@ -32,12 +35,15 @@ use super::split::split_word;
 /// The fields are **not** pathname-expanded here: the caller owns the glob
 /// (arguments glob CWD-rooted with the `nullglob`/`failglob` policy, a
 /// redirect target globs at the strict `%CWD` base and keeps its literal
-/// pattern on no match).
+/// pattern on no match). `percent` is the calling surface's `%`-arm policy,
+/// decided once at that entry point and threaded to the arm (task #371); the
+/// argument pipeline enters with `Fires`, the redirect target with `Off`.
 pub(crate) fn word_fields(
     word: &ShortCStr,
     mask: &[MaskBit],
     spans: &[usize],
     quoted: bool,
+    percent: PercentArm,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<(ShortCStr, Vec<MaskBit>)>, Report<ResolveError>> {
@@ -57,7 +63,7 @@ pub(crate) fn word_fields(
         return array_fields::fields(&name, is_star, fq, quoted, cell);
     }
     let (text, text_mask, origin) =
-        substitute_arg_marked(word, mask, spans, Join::Args, cache, cell)?;
+        substitute_arg_marked(word, mask, spans, Join::Args, percent, cache, cell)?;
     // A fully quoted word is exactly one word — kept even when the expansion
     // is empty (`"${Y:+a}"` → one empty argument).
     let mut fields = if fq && text.is_empty() {
