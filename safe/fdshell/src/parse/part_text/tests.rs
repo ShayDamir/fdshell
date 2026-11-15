@@ -89,6 +89,26 @@ fn part_text_of_an_end_of_file_region_travels_with_the_slice() {
     assert_eq!(part.data.as_bytes().unwrap(), b"cat <<T\nbodyT");
 }
 
+/// The discriminator's equality case, fed to it directly: a whole-text slice
+/// whose single operator's first region is the end-of-file shape `(len, len)` —
+/// the region **starts exactly at the slice's end** (`s == end`). The original
+/// comparison (`s < end`) is false on equality, so the text takes the append
+/// path and gains the newline; `<=` would take the extension path and return
+/// the verbatim slice without it — the equality side of the pins that probe
+/// `<` from both neighbours.
+#[test]
+fn a_region_starting_exactly_at_the_slice_end_still_appends() {
+    let line = b"cat <<T \"a\nb\nc\nD\"";
+    let text = block_text(line);
+    let tokens = tokenize_statement(line).unwrap();
+    let part = part_text(&text, &tokens).unwrap();
+    assert_eq!(
+        part.data.as_bytes().unwrap(),
+        b"cat <<T \"a\nb\nc\nD\"\n",
+        "s == end keeps the append path's newline"
+    );
+}
+
 fn block_text(line: &[u8]) -> ScriptText {
     ScriptText::new(
         ShortCStr::from_vec(line.to_vec()).unwrap(),
