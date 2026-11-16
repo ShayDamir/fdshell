@@ -13,6 +13,7 @@ pub(crate) const SHELL_CMDS: &[(&[u8], &[u8])] = &[
     (b"exit", b"Exit shell (alias: quit)"),
     (b"export", b"Set or list exports"),
     (b"export_fd", b"Export fd to variable"),
+    (b"getopts", b"Get the next option argument"),
     (b"hash", b"Show or cache path lookups"),
     (b"let", b"Evaluate arithmetic expressions"),
     (b"local", b"Declare function-scoped variables"),

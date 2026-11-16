@@ -62,6 +62,7 @@ mod eval_cmd;
 mod exit;
 mod export_fd;
 mod exports;
+pub(crate) mod getopts;
 mod hash_cmd;
 mod last_arg_frame;
 mod let_cmd;

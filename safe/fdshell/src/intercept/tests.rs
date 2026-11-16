@@ -687,3 +687,19 @@ fn wait_falls_back_to_the_command_word_without_fields() {
     );
     assert_eq!(last_arg(&cell).as_deref(), Some(b"wait".as_slice()));
 }
+
+/// Task #589: `getopts` is **intercepted** — its dispatch arm claims it, so
+/// `run/parent.rs` never sends it down the forked launch path, where it used to fail
+/// `failed to resolve command path`. The handler's own pins are in
+/// `intercept/getopts/tests.rs`.
+#[test]
+fn try_intercept_getopts_is_handled() {
+    let line = make_line("getopts", &["a", "o"]);
+    let cmdline = make_cmdline(b"getopts", &["a", "o"]);
+    let cell = make_cell();
+    assert!(
+        try_intercept(&text(&line), &cmdline, &cell)
+            .unwrap()
+            .is_some()
+    );
+}

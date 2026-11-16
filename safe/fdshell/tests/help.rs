@@ -18,6 +18,7 @@ const SHELL_COMMANDS: &[&str] = &[
     "exit",
     "export",
     "export_fd",
+    "getopts",
     "hash",
     "let",
     "local",

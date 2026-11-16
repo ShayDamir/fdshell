@@ -17,6 +17,7 @@ pub(crate) const INTERCEPTED_COMMANDS: &[&[u8]] = &[
     b"exit",
     b"export",
     b"export_fd",
+    b"getopts",
     b"hash",
     b"let",
     b"local",

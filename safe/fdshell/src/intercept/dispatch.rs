@@ -52,6 +52,7 @@ pub(crate) fn dispatch(
         b"send_fd" => super::send_fd::run_send_fd(line, cmdline, cell).map(super::handled),
         b"sendmsg" => super::sendmsg::run_sendmsg(line, cmdline, cell).map(super::handled),
         b"recvmsg" => super::recvmsg::run_recvmsg(line, cmdline, text, cell).map(super::handled),
+        b"getopts" => super::getopts::run_getopts(line, cmdline, cell).map(super::handled),
         _ => Ok(None),
     }
 }
