@@ -6,6 +6,7 @@ use sys::fork_cell::ForkCell;
 use sys::signalfd::{SIGPIPE, SIGUSR1};
 
 use crate::command_word::expand;
+use crate::intercept::getopts::{DEFAULT_OPTIND, counter};
 use crate::mask::MaskBit;
 use crate::parse::{BuiltinPrefix, CommandLine};
 
@@ -235,9 +236,12 @@ fn an_unbound_name_leaves_both_stores_alone() {
 /// 5.3.9), so `$IFS` answers the default split set bytes whether or not the
 /// parent exported the name, and the value's provenance is the shell, not the
 /// environment. Without this seed `$IFS` answers empty in a clean environment
-/// and the parent's bytes in an inheriting one.
+/// and the parent's bytes in an inheriting one. `OPTIND` is the store's other
+/// startup row (task #589): bash 5.3.9 measures `set` answering `OPTIND=1`, so the
+/// seed is a real visible variable — and the store alone, which is why no child
+/// environment ever sees the row.
 #[test]
-fn the_string_store_is_seeded_with_the_default_ifs() {
+fn the_string_store_is_seeded_with_ifs_and_optind() {
     let state = ShellState::new();
     let seed = state.strings.get(&ShortCStr::from(c"IFS")).unwrap();
     assert!(
@@ -245,7 +249,75 @@ fn the_string_store_is_seeded_with_the_default_ifs() {
         "the default split set, byte for byte"
     );
     assert!(matches!(seed.trace.origin, Origin::Shell));
+    let optind = state.strings.get(&ShortCStr::from(c"OPTIND")).unwrap();
+    assert!(optind.value.eq_bytes(b"1"), "bash prints `OPTIND=1`");
+    assert!(matches!(optind.trace.origin, Origin::Shell));
+    assert_eq!(
+        seeded_strings().len(),
+        2,
+        "exactly the two startup seeds, no other row"
+    );
     assert!(seeded_strings().contains_key(&ShortCStr::from(c"IFS")));
+    assert!(seeded_strings().contains_key(&ShortCStr::from(c"OPTIND")));
+}
+
+/// The counter starts at **1** — the value bash measures, and the value the store's
+/// startup row prints (task #589).
+#[test]
+fn the_counter_starts_at_one() {
+    assert_eq!(DEFAULT_OPTIND, 1);
+    assert_eq!(ShellState::new().optind, DEFAULT_OPTIND);
+}
+
+/// `OPTIND=3` through the ordinary assignment path moves the **field** and the
+/// visible name together, mirroring the `IFS` sync (task #589).
+#[test]
+fn an_optind_assignment_moves_the_counter() {
+    let mut state = ShellState::new();
+    let name = ShortCStr::from(c"OPTIND");
+    state.set_var(name.clone(), ImportedStr::shell(c"3".into()));
+    assert_eq!(state.optind, 3, "the exact decimal moves the counter");
+    assert!(
+        state.strings.get(&name).unwrap().value.eq_bytes(b"3"),
+        "the name answers the same value"
+    );
+}
+
+/// `unset OPTIND` resets the counter to its default and leaves the name **unbound**
+/// — bash 5.3.9 measures `unset OPTIND; echo "[$OPTIND]"` as `[]` while its scan
+/// still starts at argument 1 (task #589).
+#[test]
+fn unset_optind_resets_the_counter_and_loses_the_name() {
+    let mut state = ShellState::new();
+    let name = ShortCStr::from(c"OPTIND");
+    state.set_var(name.clone(), ImportedStr::shell(c"3".into()));
+    state.unset_var(&name);
+    assert_eq!(
+        state.optind, DEFAULT_OPTIND,
+        "the counter is back at its seed"
+    );
+    assert!(!state.strings.contains_key(&name), "the name is unbound");
+}
+
+/// An unparseable value **keeps** the counter (bash's integer `OPTIND` lands on `0`
+/// there, yet its scan still starts at argument 1 — measured), while the store keeps
+/// the assigned bytes, so `$OPTIND` prints them. The two stores are deliberately
+/// split (task #589); bash's arithmetic-evaluator forms are #590's decision.
+#[test]
+fn an_unparseable_optind_keeps_the_counter_and_shows_the_bytes() {
+    let mut state = ShellState::new();
+    state.set_var(c"OPTIND".into(), ImportedStr::shell(c"abc".into()));
+    assert_eq!(state.optind, DEFAULT_OPTIND, "the counter keeps its seed");
+    assert!(
+        state
+            .strings
+            .get(&ShortCStr::from(c"OPTIND"))
+            .unwrap()
+            .value
+            .eq_bytes(b"abc"),
+        "the name keeps the assigned bytes"
+    );
+    assert_eq!(counter(&ShortCStr::from(c"abc"), DEFAULT_OPTIND), 1);
 }
 
 /// The seed of [`ShellState::ignored_on_entry`] (task #584): the signals the

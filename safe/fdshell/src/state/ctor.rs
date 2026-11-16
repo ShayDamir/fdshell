@@ -20,15 +20,20 @@ use sys::siginfo::WaitStatus;
 use super::{ShellState, jobs::Jobs};
 use crate::envfilter::EnvFilter;
 
-/// The seed of the string store: `IFS`, set to the default split set. POSIX XCU
+/// The seed of the string store: `IFS`, set to the default split set, and
+/// `OPTIND`, set to the counter's default (task #589). POSIX XCU
 /// 2.5.1 (bash 5.3.9, measured) has the shell set `IFS` to its default value at
 /// startup **whether or not the parent exported it**, so the store — not the
 /// `environ` snapshot — owns the value `$IFS` reports, and the store's absence
-/// keeps `unset IFS`'s meaning: the name is unbound afterwards.
+/// keeps `unset IFS`'s meaning: the name is unbound afterwards. bash 5.3.9 measures
+/// the same visible seed for `OPTIND` (`set` answers `OPTIND=1`), and the store is
+/// again the only owner: the seed is not exported, so no child sees the row.
 pub(super) fn seeded_strings() -> HashMap<ShortCStr, ImportedStr> {
     let mut strings = HashMap::new();
     let ifs: ShortCStr = c"IFS".into();
     strings.insert(ifs, ImportedStr::shell(ShellState::default_ifs()));
+    let optind: ShortCStr = c"OPTIND".into();
+    strings.insert(optind, ImportedStr::shell(ShortCStr::from(c"1")));
     strings
 }
 
@@ -75,7 +80,9 @@ pub(super) fn seeded_ignored_on_entry() -> u64 {
 /// rewritten by [`seeded_environ`]) and [`seeded_ignored_on_entry`] (a
 /// `sigaction` query per signal). The three `IFS` seeds — `ifs`,
 /// [`seeded_strings`] and the rewrite — are all [`ShellState::default_ifs`], the
-/// same value `unset IFS` restores.
+/// same value `unset IFS` restores. The two `OPTIND` seeds — the store row and the
+/// field — are both [`crate::intercept::getopts::DEFAULT_OPTIND`], the value
+/// `unset OPTIND` restores (task #589).
 pub(crate) fn build() -> ShellState {
     ShellState {
         fds: HashMap::new(),
@@ -102,6 +109,7 @@ pub(crate) fn build() -> ShellState {
         errexit_gated: false,
         eval_depth: 0,
         ifs: ShellState::default_ifs(),
+        optind: crate::intercept::getopts::DEFAULT_OPTIND,
         options: crate::options::DEFAULTS,
         interactive: false,
         capture_limit: crate::cmd_subst::MAX_CAPTURED,

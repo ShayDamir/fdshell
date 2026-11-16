@@ -72,6 +72,12 @@ pub struct ShellState {
     pub(crate) errexit_gated: bool,
     pub(crate) eval_depth: u32,
     pub(crate) ifs: ShortCStr,
+    /// The 1-based index of the next argument `getopts` processes (task #589). The
+    /// string store owns the visible `OPTIND` name — it is seeded at startup, so
+    /// `set` lists `OPTIND=1` and `$OPTIND` answers `1` — this field owns the
+    /// counter; [`ShellState::set_var`] and [`ShellState::unset_var`] keep the two
+    /// in step the way they keep `ifs` in step with `IFS`.
+    pub(crate) optind: u64,
     pub(crate) options: u32,
     /// The REPL's interactive flag: true when its stdin is a terminal (bash's
     /// "interactive shell"). Seeds the default `ignoreeof` and gates the EOF
