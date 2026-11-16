@@ -99,6 +99,7 @@ fn ifs_restored_after_local_ifs() {
 fn a_local_optind_restores_the_counter() {
     let mut state = ShellState::new();
     let caller_counter = state.optind;
+    state.optchar = 2; // mid-cluster, before the call (task #590)
     state.begin_frame();
     shadow(&mut state, &s(b"OPTIND"));
     set(&mut state, &s(b"OPTIND"), &s(b"3"));
@@ -110,6 +111,14 @@ fn a_local_optind_restores_the_counter() {
         "the frame writes the field back"
     );
     assert_eq!(strings(&state, &s(b"OPTIND")), Some(s(b"1")));
+    // The **asymmetry** (task #590 §3.2, measured on bash 5.3.9): the cursor is
+    // scan state, not a store mirror — the frame restores the counter but never
+    // the cursor, which only the OPTIND setter resets (the caller's scan resumes
+    // mid-cluster after the call: `set -- -ab x`, report `a`, call, resume `b`).
+    assert_eq!(
+        state.optchar, 0,
+        "the frame leaves the cursor where the setter put it"
+    );
 }
 
 #[test]
@@ -117,6 +126,7 @@ fn first_touch_keeps_the_caller_counter() {
     let mut state = ShellState::new();
     set(&mut state, &s(b"OPTIND"), &s(b"pre"));
     let caller_counter = state.optind;
+    state.optchar = 2; // mid-cluster, before the call (task #590)
     state.begin_frame();
     shadow(&mut state, &s(b"OPTIND"));
     set(&mut state, &s(b"OPTIND"), &s(b"3"));
@@ -128,6 +138,10 @@ fn first_touch_keeps_the_caller_counter() {
         "the first touch recorded the caller's value"
     );
     assert_eq!(strings(&state, &s(b"OPTIND")), Some(s(b"pre")));
+    // The cursor never enters the frame (task #590 §3.2): the frame records the
+    // counter on the first touch, never the cursor — what the OPTIND setter left
+    // is what the caller keeps.
+    assert_eq!(state.optchar, 0, "the frame never carried the cursor");
 }
 
 #[test]

@@ -55,13 +55,17 @@ impl ShellState {
     }
 
     /// Store a shell string variable, keeping `ifs` in sync when the name is `IFS`
-    /// and the `optind` counter in sync when it is `OPTIND` (task #589).
+    /// and the `optind` counter in sync when it is `OPTIND` (task #589). An
+    /// `OPTIND` assignment also resets the `optchar` cursor (task #590): bash
+    /// measures every `OPTIND` assignment — parseable or not — as a re-read from
+    /// the word's start.
     pub fn set_var(&mut self, name: ShortCStr, value: ImportedStr) {
         if name.eq_bytes(b"IFS") {
             self.ifs = value.value.clone();
         }
         if name.eq_bytes(b"OPTIND") {
             self.optind = crate::intercept::getopts::counter(&value.value, self.optind);
+            self.optchar = 0;
         }
         self.strings.insert(name, value);
     }
@@ -89,6 +93,7 @@ impl ShellState {
         }
         if name.eq_bytes(b"OPTIND") {
             self.optind = crate::intercept::getopts::DEFAULT_OPTIND;
+            self.optchar = 0;
         }
         let _ = self.strings.remove(name);
         self.remove_str_array(name);

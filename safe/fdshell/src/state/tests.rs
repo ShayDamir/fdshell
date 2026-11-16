@@ -262,11 +262,13 @@ fn the_string_store_is_seeded_with_ifs_and_optind() {
 }
 
 /// The counter starts at **1** — the value bash measures, and the value the store's
-/// startup row prints (task #589).
+/// startup row prints (task #589). The **cursor starts at 0** (word start — the
+/// scan's fresh-read marker, task #590).
 #[test]
 fn the_counter_starts_at_one() {
     assert_eq!(DEFAULT_OPTIND, 1);
     assert_eq!(ShellState::new().optind, DEFAULT_OPTIND);
+    assert_eq!(ShellState::new().optchar, 0);
 }
 
 /// `OPTIND=3` through the ordinary assignment path moves the **field** and the
@@ -275,12 +277,14 @@ fn the_counter_starts_at_one() {
 fn an_optind_assignment_moves_the_counter() {
     let mut state = ShellState::new();
     let name = ShortCStr::from(c"OPTIND");
+    state.optchar = 2; // mid-cluster (task #590 §3.2: the assignment resets it)
     state.set_var(name.clone(), ImportedStr::shell(c"3".into()));
     assert_eq!(state.optind, 3, "the exact decimal moves the counter");
     assert!(
         state.strings.get(&name).unwrap().value.eq_bytes(b"3"),
         "the name answers the same value"
     );
+    assert_eq!(state.optchar, 0, "and the assignment resets the cursor");
 }
 
 /// `unset OPTIND` resets the counter to its default and leaves the name **unbound**
@@ -291,12 +295,17 @@ fn unset_optind_resets_the_counter_and_loses_the_name() {
     let mut state = ShellState::new();
     let name = ShortCStr::from(c"OPTIND");
     state.set_var(name.clone(), ImportedStr::shell(c"3".into()));
+    state.optchar = 2; // mid-cluster — `unset OPTIND` resets it too (task #590)
     state.unset_var(&name);
     assert_eq!(
         state.optind, DEFAULT_OPTIND,
         "the counter is back at its seed"
     );
     assert!(!state.strings.contains_key(&name), "the name is unbound");
+    assert_eq!(
+        state.optchar, 0,
+        "bash re-reads word 1 from its start after `unset OPTIND` mid-cluster"
+    );
 }
 
 /// An unparseable value **keeps** the counter (bash's integer `OPTIND` lands on `0`
@@ -306,6 +315,7 @@ fn unset_optind_resets_the_counter_and_loses_the_name() {
 #[test]
 fn an_unparseable_optind_keeps_the_counter_and_shows_the_bytes() {
     let mut state = ShellState::new();
+    state.optchar = 2; // mid-cluster (task #590: an assignment resets the cursor)
     state.set_var(c"OPTIND".into(), ImportedStr::shell(c"abc".into()));
     assert_eq!(state.optind, DEFAULT_OPTIND, "the counter keeps its seed");
     assert!(
@@ -318,6 +328,10 @@ fn an_unparseable_optind_keeps_the_counter_and_shows_the_bytes() {
         "the name keeps the assigned bytes"
     );
     assert_eq!(counter(&ShortCStr::from(c"abc"), DEFAULT_OPTIND), 1);
+    assert_eq!(
+        state.optchar, 0,
+        "the cursor resets on any OPTIND assignment"
+    );
 }
 
 /// The seed of [`ShellState::ignored_on_entry`] (task #584): the signals the

@@ -117,15 +117,29 @@ fn apply_syncs_ifs_and_restore_reverts_it() {
 }
 
 /// Mirrors `apply_syncs_ifs_and_restore_reverts_it` for the `OPTIND` counter
-/// field (task #593).
+/// field (task #593). The cursor extension is task #590 §3.2: the apply goes
+/// through `set_var`, which resets the cursor (bash measures `OPTIND=1 f` as a
+/// re-read from the word's start), and the restore reverts the counter **only**
+/// — it never carried the cursor.
 #[test]
 fn apply_syncs_optind_and_restore_reverts_it() {
     let cell = cell_with(&[]);
+    cell.borrow_mut().unwrap().optchar = 2;
     let save = apply(&[assign("OPTIND", "3")], &cell).unwrap();
     assert_eq!(cell.borrow().unwrap().optind, 3, "set_var synced it");
+    assert_eq!(
+        cell.borrow().unwrap().optchar,
+        0,
+        "and the setter reset the cursor"
+    );
     restore(save, &cell).unwrap();
     assert_eq!(get(&cell, "OPTIND", "strings"), Some(c"1".into()));
     assert_eq!(cell.borrow().unwrap().optind, DEFAULT_OPTIND);
+    assert_eq!(
+        cell.borrow().unwrap().optchar,
+        0,
+        "the restore did not put the mid-cluster cursor back"
+    );
 }
 
 /// The driving pin: the entry loop restores through `set_var` and so syncs the
@@ -136,11 +150,20 @@ fn apply_syncs_optind_and_restore_reverts_it() {
 fn restore_reverts_the_counter_when_the_name_was_unbound() {
     let cell = cell_with(&[]);
     cell.borrow_mut().unwrap().unset_var(&c"OPTIND".into());
+    // Mid-cluster when the scoped assignment arrives (task #590 §3.2): the
+    // apply's setter resets the cursor and no frame carries it back.
+    cell.borrow_mut().unwrap().optchar = 2;
     let save = apply(&[assign("OPTIND", "3")], &cell).unwrap();
     assert_eq!(cell.borrow().unwrap().optind, 3, "set_var synced it");
+    assert_eq!(cell.borrow().unwrap().optchar, 0, "and reset the cursor");
     restore(save, &cell).unwrap();
     assert!(get(&cell, "OPTIND", "strings").is_none(), "bash answers []");
     assert_eq!(cell.borrow().unwrap().optind, DEFAULT_OPTIND);
+    assert_eq!(
+        cell.borrow().unwrap().optchar,
+        0,
+        "the cursor was never carried"
+    );
 }
 
 #[test]
@@ -341,7 +364,13 @@ fn drop_new_exports_persists_the_ifs_entry_and_the_split_field() {
 #[test]
 fn drop_new_exports_keeps_the_optind_entry_and_the_counter() {
     let cell = cell_with(&[]);
+    cell.borrow_mut().unwrap().optchar = 2; // mid-cluster (task #590 §3.2)
     let save = apply(&[assign("OPTIND", "3")], &cell).unwrap();
+    assert_eq!(
+        cell.borrow().unwrap().optchar,
+        0,
+        "the apply's setter reset the cursor"
+    );
     drop_new_exports(save, &cell).unwrap();
     assert_eq!(get(&cell, "OPTIND", "strings"), Some(c"3".into()));
     assert_eq!(
@@ -350,6 +379,11 @@ fn drop_new_exports_keeps_the_optind_entry_and_the_counter() {
         "the arm keeps the counter it moved"
     );
     assert_eq!(get(&cell, "OPTIND", "exports"), None);
+    assert_eq!(
+        cell.borrow().unwrap().optchar,
+        0,
+        "and keeps the cursor it reset"
+    );
 }
 
 #[test]

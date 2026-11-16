@@ -78,6 +78,13 @@ pub struct ShellState {
     /// counter; [`ShellState::set_var`] and [`ShellState::unset_var`] keep the two
     /// in step the way they keep `ifs` in step with `IFS`.
     pub(crate) optind: u64,
+    /// The `getopts` intra-word cursor: option characters consumed within the
+    /// word the counter names; **0 = word start** (task #590). The counter cannot
+    /// carry it — a cluster reports one option per call and stays on the word's
+    /// index — so it lives in the state copy a forked `$(…)` inherits, and only
+    /// an `OPTIND` assignment or `unset OPTIND` resets it (the setter arms of
+    /// task #589); no save/restore frame carries it (bash does not).
+    pub(crate) optchar: usize,
     pub(crate) options: u32,
     /// The REPL's interactive flag: true when its stdin is a terminal (bash's
     /// "interactive shell"). Seeds the default `ignoreeof` and gates the EOF

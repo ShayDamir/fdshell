@@ -1,9 +1,11 @@
 // mutants: -C --lib -- -E 'test(/^intercept::getopts::/)'
 
-//! `getopts <opts> name` — the plumbing (task #589): the name resolves as an
-//! in-shell intercept, and the shell state carries the `OPTIND` counter the scan
-//! will read. The optstring scanner lands in task #590, the variable settings,
-//! diagnostics and exit statuses in task #591.
+//! `getopts <opts> name` — the plumbing is task #589 (the dispatch arm, help and
+//! the `OPTIND` store), the parsing core is task #590 (optstring, word list,
+//! per-word scan, and committing the counter and the intra-word cursor). Writing
+//! the caller's variables, the diagnostics and the error statuses lands in task
+//! #591; the driver here resolves the words, runs the scan and sets the
+//! end-of-options status (bash 5.3.9: 1).
 
 use error_stack::{Report, ResultExt};
 
@@ -31,12 +33,17 @@ pub(crate) fn counter(value: &ShortCStr, current: u64) -> u64 {
     }
 }
 
-/// Claims `getopts` so the forked launch path stops resolving its command path —
-/// today `getopts a o` fails `failed to resolve command path` (POSIX gaps #6.9).
-/// The scan itself is task #590: this stub validates (the house rule for
-/// in-process commands) and reports success, so **the status is the stub's, not
-/// bash's** — bash's `getopts a o` with no operands exits 1. The pin below is
-/// marked to move with the scan.
+/// The byte of `word` at `offset`, `None` past its end — the per-byte helper the
+/// getopts modules share (no new `unsafe/sys` API, task #590 §5).
+pub(crate) fn byte_at(word: &ShortCStr, offset: usize) -> Option<u8> {
+    let byte = word.get(offset..offset + 1)?;
+    byte.as_bytes().ok()?.first().copied()
+}
+
+/// The scan entry: validate (the house rule for in-process commands), resolve
+/// the words, run the pure scan, commit the counter and the cursor, and set the
+/// end-of-options status. Variable writes and diagnostics are task #591's: this
+/// task's pins assert the committed counters and the status, not stderr.
 pub(crate) fn run_getopts(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
@@ -44,9 +51,54 @@ pub(crate) fn run_getopts(
 ) -> Result<bool, Report<CmdError>> {
     super::validation::validate_intercept_no_builtin(line, "getopts", cmdline)?;
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-    state.set_last_exit(0);
+    let optstring = cmdline.args.first().ok_or(Report::new(CmdError::Never))?;
+    let operands = cmdline.args.get(2..).ok_or(Report::new(CmdError::Never))?;
+    let words = words::Words::resolve(operands, &state.positional);
+    let parsed = optstring::Optstring::parse(optstring);
+    let index = words.normalize(state.optind);
+    let result = match words.word(index) {
+        Some(word) => {
+            let next = words.word(index + 1);
+            scan::scan(index, &word, state.optchar, &parsed, next.as_ref())
+        }
+        None => scan::Scan::End {
+            index: words.end_index(),
+        },
+    };
+    commit(&mut state, &result);
     Ok(true)
 }
+
+/// Commit the scan: Found/Presentation write the next position (counter and
+/// cursor), End writes the counter and the end-of-options status; bash 5.3.9
+/// measures status 0 for Found **and** the presentation errors, status 1 only at
+/// the end (task #591 owns the error rules the statuses will follow).
+fn commit(state: &mut ShellState, result: &scan::Scan) {
+    match result {
+        scan::Scan::Found {
+            next_index,
+            next_char,
+            ..
+        }
+        | scan::Scan::Presentation {
+            next_index,
+            next_char,
+            ..
+        } => {
+            state.optind = *next_index;
+            state.optchar = *next_char;
+            state.set_last_exit(0);
+        }
+        scan::Scan::End { index } => {
+            state.optind = *index;
+            state.set_last_exit(1);
+        }
+    }
+}
+
+mod optstring;
+mod scan;
+mod words;
 
 #[cfg(test)]
 mod tests;

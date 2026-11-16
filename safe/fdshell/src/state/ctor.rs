@@ -110,6 +110,7 @@ pub(crate) fn build() -> ShellState {
         eval_depth: 0,
         ifs: ShellState::default_ifs(),
         optind: crate::intercept::getopts::DEFAULT_OPTIND,
+        optchar: 0,
         options: crate::options::DEFAULTS,
         interactive: false,
         capture_limit: crate::cmd_subst::MAX_CAPTURED,
