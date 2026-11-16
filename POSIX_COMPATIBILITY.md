@@ -794,6 +794,47 @@ invocation name and keeps the operands as `$1..`, so
 `sh -c 'echo $0 $1' a b` prints `sh a`, not `a b`. A script file still sees
 its own path in `$0` as POSIX requires.
 
+## `getopts` follows bash's argument-presentation rules
+
+POSIX specifies `getopts` as a utility, and its presentation-error text reads
+like the other utilities' do. The shell measures differently, and fdshell
+follows the measurement (bash 5.3.9 on this host, 2026-11-16), in three places:
+
+- **The presentation rows**, the `?`/`:` split as implemented: verbose mode
+  answers `?` and writes `illegal option -- <letter>` / `option requires an
+  argument -- <letter>` to stderr, with `OPTARG` left **unbound** (the first
+  message is bash's `illegal` spelling, where POSIX's standard message says
+  `invalid option`; the second is the same in both); silent mode — the
+  optstring's leading `:` — prints nothing and answers in the variables
+  instead: the unknown option in `?` with the offender in `OPTARG`, the
+  missing option-argument in `:` — the one row whose name is not `?` — with
+  the option letter in `OPTARG`.
+- **Report and keep going.** POSIX gives a utility-argument error the standard
+  treatment: a diagnostic and a status above zero (a 2 for the colon row), the
+  utility stopping at the error. bash reports the row, sets the variables,
+  answers **0** for the reporting call and continues to the next word, and
+  fdshell measures the same.
+- **The `<prog>` spelling.** POSIX prefixes diagnostics with the utility name;
+  bash prefixes them with `$0` **as given** — and fdshell's `-c` mode keeps its
+  own `$0` (the section above), so the two documented layers stack: `-c` rows
+  read `sh: …` where bash writes `bash: …`, script-file rows read `<path>: …`.
+  The utility-name spelling survives exactly on the usage row
+  (`getopts: usage: getopts optstring name [arg ...]`, status 2, nothing
+  written), at full parity. And bash's `line N:` field on its internal-error
+  lines — the identifier row — is dropped here: fdshell's builtin diagnostics
+  carry no script-line prefix.
+
+Pinned in `safe/fdshell/tests/getopts.rs`: `silent_mode_answers_without_a_diagnostic`
+(rows and the single-call status of the colon row),
+`diagnostics_carry_the_shells_own_dollar_zero`,
+`a_script_file_names_itself_in_the_diagnostics` and
+`the_usage_line_has_no_shell_prefix_and_exits_two` — plus the unit pins of task
+#591: `intercept/getopts/tests.rs::the_error_walk_on_one_word_reports_per_character`,
+`intercept/getopts/tests.rs::processing_continues_after_a_presentation_error`,
+`intercept/getopts/tests.rs::a_missing_option_argument_reports_and_continues_to_the_end`,
+and `intercept/getopts/diagnostic/tests.rs::the_usage_line_has_no_shell_prefix`
+and `::the_identifier_message_keeps_bashs_shape_without_the_line_field`.
+
 ## Signals ignored on entry stay ignored
 
 POSIX XCU 2.15 gives a non-interactive shell one entry rule: a signal **ignored on

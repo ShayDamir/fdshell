@@ -853,6 +853,22 @@ write to a name the store holds replaces element 0, and a scalar answers index 0
 stays fdshell's fd form (`echo "[%a]"` prints `%a`, never the array). Pinned in
 `tests/arrays.rs`.
 
+`getopts` keeps two of these names as ordinary variables (epic #148): `OPTIND`
+is seeded to **1** at invocation, reads and writes like any other name (`set`
+lists `OPTIND=1`), and `OPTIND=1` restarts the scan for a new parameter set —
+the counter and the visible row move together. `OPTARG` is set **only** when an
+option-argument was found and is **unbound** otherwise, not empty:
+`getopts "ab:c" o` on `set -- -a` answers empty for `${OPTARG+set}` (and
+`set -u` reports the read). **Neither name is exported**; an explicit
+`export OPTIND` is the only exporter. **Functions share `OPTIND`** with the
+calling shell — a plain assignment inside a function leaks out, so save/restore
+is the caller's problem, exactly as POSIX says (the `local OPTIND` frame scopes
+it). Pinned in `tests/getopts.rs` (`the_startup_optind_is_visible_in_shell`,
+`optind_and_optarg_stay_out_of_the_child_environment`,
+`optargs_are_set_only_when_an_option_argument_was_found`,
+`a_function_shares_optind_with_the_calling_shell`, and
+`local_optind_is_restored_when_the_call_returns` for the `local` half).
+
 ### Parameter expansion
 
 | Form | Result |
