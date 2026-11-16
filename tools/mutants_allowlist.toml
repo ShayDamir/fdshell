@@ -26,7 +26,7 @@ green; the reusable rule is in LESSONS.md."""
 
 [[allow]]
 file = "safe/fdshell/src/state/ctor.rs"
-line = 64
+line = 69
 column = 18
 mutant = "replace | with ^ in seeded_ignored_on_entry"
 reason = """
@@ -35,4 +35,5 @@ written before: `mask | bit` and `mask ^ bit` agree on every reachable step and 
 input can separate them — the function takes no arguments, the bit index `sig - 1`
 is injective on `1..=64`, and the operators differ only where a bit is set twice,
 which this fold cannot produce. Census proof (task #584): the mutant applied as
-source left the whole suite green (6736 tests)."""
+source left the whole suite green (6736 tests). Coordinate moved 64 → 69 in
+task #589 (the `seeded_strings` rustdoc grew); same site, same proof."""
