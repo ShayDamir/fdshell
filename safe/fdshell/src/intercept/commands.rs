@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C alias -C --test -C cd_expand -C --test -C colon -C --test -C group -C --test -C hash -C --test -C help -C --test -C heredoc -C --test -C last_arg -C --test -C loops -C --test -C pipeline -C --test -C positional -C --test -C read -C --test -C recvmsg -C --test -C redirect_scope -C --test -C sendmsg -C --test -C set_cmd -C --test -C set_opts -C --test -C shopt -C --test -C signalfd -C --test -C source -C --test -C strict -C --test -C test -C --test -C timeout -C --test -C times -C --test -C trap -C --test -C ulimit -C --test -C unset -C --test -C wait -C --test -C wordsplit -C --test -C xtrace -- -E 'test(/^intercept::tests::/) | binary(alias) | binary(cd_expand) | binary(colon) | binary(group) | binary(hash) | binary(help) | binary(heredoc) | binary(last_arg) | binary(loops) | binary(pipeline) | binary(positional) | binary(read) | binary(recvmsg) | binary(redirect_scope) | binary(sendmsg) | binary(set_cmd) | binary(set_opts) | binary(shopt) | binary(signalfd) | binary(source) | binary(strict) | binary(test) | binary(timeout) | binary(times) | binary(trap) | binary(ulimit) | binary(unset) | binary(wait) | binary(wordsplit) | binary(xtrace)'
+
 //! Intercepted command names — the shell-command half of the `help` output.
 //!
 //! Every command matched in `intercept.rs::try_intercept` (except the
@@ -29,6 +31,7 @@ pub(crate) const INTERCEPTED_COMMANDS: &[&[u8]] = &[
     b"source",
     b"times",
     b"timeout",
+    b"trap",
     b"ulimit",
     b"unalias",
     b"wait",

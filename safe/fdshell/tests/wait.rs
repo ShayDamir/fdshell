@@ -110,3 +110,15 @@ fn builtin_wait_after_a_cond_operator_stays_the_builtin() {
     let out = run("builtin true &>&j; true && echo x && wait; builtin echo tail");
     assert_eq!(str::from_utf8(&out.stdout).unwrap(), "x\ntail\n");
 }
+
+/// The `waitpid` dispatch arm is the intercept: it reaps through the shell's own job
+/// table, so an empty operand list is allowed and the last status becomes 0. Without
+/// the arm, `waitpid` runs the forked builtin, which answers "no PIDs specified" with
+/// status 1 — the difference this pins (task #584's mutation gate).
+#[test]
+fn builtin_waitpid_with_no_operands_is_the_intercept() {
+    let out = run("waitpid; builtin echo tail=$?");
+    assert_eq!(str::from_utf8(&out.stdout).unwrap(), "tail=0\n");
+    assert_eq!(str::from_utf8(&out.stderr).unwrap(), "");
+    assert_eq!(out.status.code(), Some(0));
+}

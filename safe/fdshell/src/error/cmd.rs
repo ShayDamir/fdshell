@@ -124,6 +124,14 @@ pub enum CmdError {
     SignalfdBadFlag { value: sys::ShortCStr },
     /// signalfd: failed to create the signalfd
     SignalfdSyscall,
+    /// trap: usage: trap [action [condition ...]]
+    TrapUsage,
+    /// trap: '{value}': invalid signal specification
+    TrapBadCondition { value: sys::ShortCStr },
+    /// trap: '{value}': cannot be trapped or reset
+    TrapReservedSignal { value: sys::ShortCStr },
+    /// trap: failed to set the signal disposition
+    TrapSigaction,
     /// sendmsg: socket must be an fd variable or a valid fd number
     SendmsgBadSocket,
     /// sendmsg: unknown argument (usage: sendmsg %sock [--msg TEXT | --msgfd %var COUNT] [--fd %var]... [--passcred])

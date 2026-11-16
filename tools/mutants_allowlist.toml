@@ -23,3 +23,16 @@ identically, and their behaviour on the append side is pinned by
 parse/part_text/tests.rs::a_region_starting_exactly_at_the_slice_end_still_appends.
 Census proof (task #563): the mutant applied as source left the whole suite
 green; the reusable rule is in LESSONS.md."""
+
+[[allow]]
+file = "safe/fdshell/src/state/ctor.rs"
+line = 64
+column = 18
+mutant = "replace | with ^ in seeded_ignored_on_entry"
+reason = """
+The fold visits each signal exactly once, so the bit a step writes has never been
+written before: `mask | bit` and `mask ^ bit` agree on every reachable step and no
+input can separate them — the function takes no arguments, the bit index `sig - 1`
+is injective on `1..=64`, and the operators differ only where a bit is set twice,
+which this fold cannot produce. Census proof (task #584): the mutant applied as
+source left the whole suite green (6736 tests)."""

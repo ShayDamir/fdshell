@@ -32,6 +32,7 @@ const SHELL_COMMANDS: &[&str] = &[
     "source",
     "times",
     "timeout",
+    "trap",
     "ulimit",
     "umask",
     "unset",

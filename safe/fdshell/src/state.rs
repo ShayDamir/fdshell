@@ -14,7 +14,7 @@ use frames::VarFrame;
 use jobs::Jobs;
 
 pub use fds::{FdArrayEntry, FdVar};
-pub(crate) use traps::TrapDisposition;
+pub(crate) use traps::{EXIT, TrapDisposition};
 
 pub struct ShellState {
     pub(crate) fds: HashMap<ShortCStr, FdVar>,
@@ -87,6 +87,13 @@ pub struct ShellState {
     /// empty actions are stored as [`TrapDisposition::Ignore`], and the map's
     /// ascending order is the list form's print order (`EXIT` first).
     pub(crate) traps: BTreeMap<i32, TrapDisposition>,
+    /// The signals **ignored on entry** to this process: bit `sig - 1` for
+    /// `1..=64`, the same shape as `sys`'s pending mask. POSIX XCU 2.15's entry
+    /// rule — in a non-interactive shell a signal inherited as ignored "cannot be
+    /// trapped or reset, although no error need be reported" — is what makes
+    /// `trap` refuse those conditions (task #584). The set is not empty here the
+    /// way it is in bash: Rust's own runtime ignores `SIGPIPE`.
+    pub(crate) ignored_on_entry: u64,
 }
 
 impl ShellState {

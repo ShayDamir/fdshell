@@ -225,3 +225,19 @@ fn sixty_five_fd_vars_error() {
         "stderr={err:?}"
     );
 }
+
+/// The `send_fd` dispatch arm is the intercept — it answers through the shell's own
+/// state, so with no arguments its `FdPass` diagnostic is what the shell reports.
+/// Without the arm `send_fd` is an external lookup and answers `not found`, which is
+/// the difference this pins (task #584's mutation gate).
+#[test]
+fn send_fd_without_arguments_is_the_intercept() {
+    let out = Command::new(BIN).args(["-c", "send_fd"]).output().unwrap();
+    let err = str::from_utf8(&out.stderr).unwrap().to_string();
+    assert!(err.contains("fd pass-through failed"), "stderr={err:?}");
+    assert!(
+        !err.contains("not found"),
+        "the dispatch arm is gone: {err:?}"
+    );
+    assert_eq!(out.status.code(), Some(1));
+}

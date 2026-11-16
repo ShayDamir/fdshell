@@ -3,6 +3,7 @@ use alloc::vec;
 
 use sys::Origin;
 use sys::fork_cell::ForkCell;
+use sys::signalfd::{SIGPIPE, SIGUSR1};
 
 use crate::command_word::expand;
 use crate::mask::MaskBit;
@@ -245,6 +246,18 @@ fn the_string_store_is_seeded_with_the_default_ifs() {
     );
     assert!(matches!(seed.trace.origin, Origin::Shell));
     assert!(seeded_strings().contains_key(&ShortCStr::from(c"IFS")));
+}
+
+/// The seed of [`ShellState::ignored_on_entry`] (task #584): the signals the
+/// process **started** with already ignored. Rust's own runtime ignores `SIGPIPE`
+/// — the fact `unsafe/sys/tests/sigpipe.rs` pins at the `sys` layer — so this seed
+/// is not empty the way bash's is, and an ordinary signal stays clear. `trap`'s
+/// POSIX entry rule reads exactly this field.
+#[test]
+fn the_seed_records_the_signals_ignored_on_entry() {
+    let state = ShellState::new();
+    assert_ne!(state.ignored_on_entry & (1u64 << (SIGPIPE - 1)), 0);
+    assert_eq!(state.ignored_on_entry & (1u64 << (SIGUSR1 - 1)), 0);
 }
 
 /// The snapshot's `IFS` row keeps its place (the parent's export attribute

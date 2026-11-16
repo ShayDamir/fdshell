@@ -1,6 +1,9 @@
+// mutants: -C --lib -C --test -C alias -- -E 'binary(alias)'
+
 mod args;
 
 use crate::error::cmd::CmdError;
+use crate::intercept::quoting;
 use crate::state::ShellState;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail};
@@ -65,13 +68,7 @@ impl ShellState {
 pub(super) fn push_definition(name: &ShortCStr, value: &ShortCStr, out: &mut Vec<u8>) {
     out.extend_from_slice(b"alias ");
     out.extend_from_slice(name.as_bytes().unwrap_or(&[]));
-    out.extend_from_slice(b"='");
-    for &b in value.as_bytes().unwrap_or(&[]) {
-        if b == b'\'' {
-            out.extend_from_slice(b"'\\''");
-        } else {
-            out.push(b);
-        }
-    }
-    out.extend_from_slice(b"'\n");
+    out.extend_from_slice(b"=");
+    quoting::push_quoted(value.as_bytes().unwrap_or(&[]), out);
+    out.push(b'\n');
 }

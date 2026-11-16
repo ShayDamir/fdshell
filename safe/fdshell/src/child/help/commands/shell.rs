@@ -33,6 +33,7 @@ pub(crate) const SHELL_CMDS: &[(&[u8], &[u8])] = &[
     (b"source", b"Run a script file (alias: .)"),
     (b"times", b"Show shell and children CPU times"),
     (b"timeout", b"Run a command with a deadline"),
+    (b"trap", b"Set or list signal/EXIT actions"),
     (b"ulimit", b"Get or set resource limits"),
     (b"umask", b"Set or show file mode mask"),
     (

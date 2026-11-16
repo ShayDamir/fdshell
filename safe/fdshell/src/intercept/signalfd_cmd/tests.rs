@@ -2,9 +2,12 @@ use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::Report;
 use sys::ShortCStr;
-use sys::signalfd::{SFD_NONBLOCK, SIGINT, SIGTERM, SIGUSR1};
+use sys::signalfd::{
+    SFD_NONBLOCK, SIGHUP, SIGINT, SIGPIPE, SIGSTOP, SIGTERM, SIGTRAP, SIGUSR1, SIGUSR2,
+};
 
 use super::parse::{Parsed, parse};
+use super::signals::signal_name;
 use crate::error::cmd::CmdError;
 
 fn run(words: &[&str]) -> Result<Parsed, Report<CmdError>> {
@@ -136,4 +139,29 @@ fn all_signal_names_resolve() {
         let p = run(&["%s", name]).unwrap();
         assert!(!p.signals.is_empty(), "{name} must resolve to a signal");
     }
+}
+
+/// The reverse direction of the shared table (task #584 made it two-directional):
+/// every name the parser accepts spells back the same bytes, so the printer and the
+/// parser cannot drift. A number the table has no row for answers `None` — the
+/// printer's fallback is the decimal spelling (bash prints `32`, measured).
+#[test]
+fn every_name_spells_back_the_same_way() {
+    for (name, sig) in [
+        ("HUP", SIGHUP),
+        ("INT", SIGINT),
+        ("TRAP", SIGTRAP),
+        ("PIPE", SIGPIPE),
+        ("TERM", SIGTERM),
+        ("STOP", SIGSTOP),
+        ("USR1", SIGUSR1),
+        ("USR2", SIGUSR2),
+    ] {
+        assert_eq!(
+            signal_name(sig).map(|bytes| bytes.to_vec()),
+            Some(name.as_bytes().to_vec()),
+            "the name table must answer {name} for its own number"
+        );
+    }
+    assert_eq!(signal_name(32), None, "no row, no name");
 }

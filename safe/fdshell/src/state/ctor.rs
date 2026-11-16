@@ -52,11 +52,28 @@ pub(super) fn seeded_environ(
         .collect()
 }
 
+/// The seed of [`ShellState::ignored_on_entry`]: one `sigaction` query per signal
+/// in `1..=64`, bit `sig - 1` set for the ones the process already ignores (the
+/// same bit shape `sys`'s pending mask uses). A query that fails answers
+/// not-ignored, so the seed of a fresh shell never fails; in practice exactly one
+/// bit is set here — Rust's own `SIG_IGN` for `SIGPIPE`.
+pub(super) fn seeded_ignored_on_entry() -> u64 {
+    (1..=64).fold(0u64, |mask, sig| {
+        let ignored = sys::signal::disposition(sig).unwrap_or(0) == sys::signal::SIG_IGN;
+        if ignored {
+            mask | (1u64 << (sig - 1))
+        } else {
+            mask
+        }
+    })
+}
+
 /// The seed of a fresh shell: every field of [`ShellState`] spelled out once.
 ///
-/// The two values that are not literals are read from the process, not from
-/// this file: `shell_pid` (`getpid`) and `environ` (the environment snapshot,
-/// rewritten by [`seeded_environ`]). The three `IFS` seeds — `ifs`,
+/// The three values that are not literals are read from the process, not from
+/// this file: `shell_pid` (`getpid`), `environ` (the environment snapshot,
+/// rewritten by [`seeded_environ`]) and [`seeded_ignored_on_entry`] (a
+/// `sigaction` query per signal). The three `IFS` seeds — `ifs`,
 /// [`seeded_strings`] and the rewrite — are all [`ShellState::default_ifs`], the
 /// same value `unset IFS` restores.
 pub(crate) fn build() -> ShellState {
@@ -92,5 +109,6 @@ pub(crate) fn build() -> ShellState {
         aliases: HashMap::new(),
         functions: HashMap::new(),
         traps: BTreeMap::new(),
+        ignored_on_entry: seeded_ignored_on_entry(),
     }
 }

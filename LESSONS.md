@@ -11578,3 +11578,42 @@ child), `unsafe/sys/tests/sigaction.rs::poll_consumes`,
 `unsafe/sys/tests/sigaction.rs::ignore_disposition_observed` and
 `unsafe/sys/tests/sigaction.rs::default_disposition_observed` (read-back through
 a `sigaction` query), `unsafe/sys/tests/sigaction.rs::invalid_signal_errors_via_cvt`.
+
+## A list form promised as re-inputtable is parsed by the parser it prints into (task #584)
+
+A list form that must re-input as itself (POSIX's `eval "$(trap)"` round trip) has its
+format, its quoting and its condition spelling as **one** contract with the parser: the
+`--` end-of-options marker, the `'\''` single-quote style and the `SIG`-prefixed name
+spelling each exist so the printed line parses back. So the quoting rule has one owner —
+`safe/fdshell/src/intercept/quoting.rs`, shared with the `alias` definition printer — and
+the signal-name table has one owner for both directions:
+`safe/fdshell/src/intercept/signalfd_cmd/signals.rs` derives the parser and the printer
+from a single `[(name, sig)]` const table. A byte-identical private duplicate of either is
+what drifts: a printer that quotes differently, or a name its own parser cannot read back,
+breaks the round trip on inputs nobody tests. The table answers `None` for numbers it has
+no row for (glibc keeps 32 and 33 for itself on Linux), and the printer's fallback there is
+the decimal spelling — which is also what bash prints.
+
+Pins: `safe/fdshell/tests/trap.rs::the_list_form_re_inputs` (a quote inside the action, and
+the line re-inputs through `eval`), `parse_signal`/`signal_name` rows in
+`safe/fdshell/src/intercept/signalfd_cmd/tests.rs` (`every_name_spells_back_the_same_way`
+agrees in both directions, `all_signal_names_resolve` keeps the parser's), the expansion
+rows in `safe/fdshell/tests/trap.rs` — operands go through the shared substitution pipeline,
+so a `$name` value becomes the action and a quoted `*` stays itself.
+
+## fdshell's inherited-ignored set is not empty, so POSIX's entry rule is observable here (task #584)
+
+POSIX XCU 2.15: signals ignored on entry to a non-interactive shell cannot be trapped or
+reset, "although no error need be reported". In bash that set is empty and the rule never
+fires; in fdshell Rust's own runtime ignores `SIGPIPE`, so `trap 'x' PIPE` is refused in
+`-c` mode where bash traps it — and the refusal is silent with status 0: no registration,
+no `sigaction`, no diagnostic, and the reset form is refused the same way. The set is a
+snapshot taken once at startup (`ShellState::ignored_on_entry`, a `u64` bitmask with bit
+`sig - 1`, the same shape `sys`'s pending mask uses), not a per-registration query: after
+the first `trap` the process disposition is no longer the one the shell started with, so a
+live query would refuse conditions bash would accept.
+
+Pins: `safe/fdshell/src/state/tests.rs::the_seed_records_the_signals_ignored_on_entry` (the
+`SIGPIPE` bit set, an ordinary bit clear) with `unsafe/sys/tests/sigpipe.rs` pinning the
+same fact at the `sys` layer, and `safe/fdshell/tests/trap.rs::the_inherited_ignore_is_refused_silently`
+(prints nothing, status 0, and a signal not ignored on entry still traps).
