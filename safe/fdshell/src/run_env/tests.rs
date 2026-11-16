@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr, Trace};
 
+use crate::intercept::getopts::DEFAULT_OPTIND;
 use crate::mask::MaskBit;
 use crate::mask::MaskBit::{Quoted, Unquoted};
 use crate::parse::{Assign, BuiltinPrefix, CommandLine};
@@ -113,6 +114,33 @@ fn apply_syncs_ifs_and_restore_reverts_it() {
     // through `$IFS`). The split-set field above needs `old_ifs` for the same
     // undo — a field is not a per-name entry.
     assert_eq!(get(&cell, "IFS", "strings"), Some(c" \t\n".into()));
+}
+
+/// Mirrors `apply_syncs_ifs_and_restore_reverts_it` for the `OPTIND` counter
+/// field (task #593).
+#[test]
+fn apply_syncs_optind_and_restore_reverts_it() {
+    let cell = cell_with(&[]);
+    let save = apply(&[assign("OPTIND", "3")], &cell).unwrap();
+    assert_eq!(cell.borrow().unwrap().optind, 3, "set_var synced it");
+    restore(save, &cell).unwrap();
+    assert_eq!(get(&cell, "OPTIND", "strings"), Some(c"1".into()));
+    assert_eq!(cell.borrow().unwrap().optind, DEFAULT_OPTIND);
+}
+
+/// The driving pin: the entry loop restores through `set_var` and so syncs the
+/// field **only when an entry existed**; the `None` branch removes the name
+/// without the setter, and bash reaches exactly that branch after
+/// `unset OPTIND` (bash measures `[]` for the name, task #593).
+#[test]
+fn restore_reverts_the_counter_when_the_name_was_unbound() {
+    let cell = cell_with(&[]);
+    cell.borrow_mut().unwrap().unset_var(&c"OPTIND".into());
+    let save = apply(&[assign("OPTIND", "3")], &cell).unwrap();
+    assert_eq!(cell.borrow().unwrap().optind, 3, "set_var synced it");
+    restore(save, &cell).unwrap();
+    assert!(get(&cell, "OPTIND", "strings").is_none(), "bash answers []");
+    assert_eq!(cell.borrow().unwrap().optind, DEFAULT_OPTIND);
 }
 
 #[test]
@@ -304,6 +332,24 @@ fn drop_new_exports_persists_the_ifs_entry_and_the_split_field() {
     assert_eq!(get(&cell, "IFS", "strings"), Some(c":".into()));
     assert_eq!(cell.borrow().unwrap().ifs.as_bytes().unwrap_or(&[]), b":");
     assert_eq!(get(&cell, "IFS", "exports"), None);
+}
+
+/// The same arm for the `OPTIND` mirror: the omitted-command-name path **keeps**
+/// what the apply moved — entry and counter — and only drops the fresh export
+/// (POSIX 2.9.1, task #428); the asymmetry with `restore` stays written down
+/// (task #593).
+#[test]
+fn drop_new_exports_keeps_the_optind_entry_and_the_counter() {
+    let cell = cell_with(&[]);
+    let save = apply(&[assign("OPTIND", "3")], &cell).unwrap();
+    drop_new_exports(save, &cell).unwrap();
+    assert_eq!(get(&cell, "OPTIND", "strings"), Some(c"3".into()));
+    assert_eq!(
+        cell.borrow().unwrap().optind,
+        3,
+        "the arm keeps the counter it moved"
+    );
+    assert_eq!(get(&cell, "OPTIND", "exports"), None);
 }
 
 #[test]
