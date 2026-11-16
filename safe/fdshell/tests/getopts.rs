@@ -16,6 +16,10 @@
 //! OPTARG=z; builtin echo "[$OPTARG]"                     [z]         [z]
 //! OPTARG=z; unset OPTARG; builtin echo "[$OPTARG]"       []          []
 //! set -- -a; getopts a o  (stderr)                       (empty)     (empty)
+//! f(){ local OPTIND=3; }; f; builtin echo "[$OPTIND]"    [1]        [1]
+//! f(){ OPTIND=3; }; f; builtin echo "[$OPTIND]"          [3]        [3]
+//! OPTIND=3 env_print > /dev/null; builtin echo "[$OPTIND]"  [1]        [1]
+//! unset OPTIND; OPTIND=3 env_print > /dev/null; builtin echo "[$OPTIND]"  []  []
 //! ```
 //!
 //! The scan itself is task #590, so the last row pins only that `getopts` is
@@ -118,4 +122,42 @@ fn optarg_is_an_ordinary_variable_on_the_assignment_path() {
 fn getopts_no_longer_fails_to_resolve_its_path() {
     let (out, err, _code) = run("set -- -a; getopts a o");
     assert_eq!(err, "", "no diagnostic; stdout={out:?}");
+}
+
+/// A `local OPTIND=3` is undone when the call returns — the frame's counter
+/// mirror (`old_optind`) rides the same restore as the store entry. The plain
+/// assignment control has no frame entry and **leaks** (task #593, bash rows
+/// measured on this machine).
+#[test]
+fn local_optind_is_restored_when_the_call_returns() {
+    let (out, err, code) = run(r#"f(){ local OPTIND=3; }; f; builtin echo "[$OPTIND]""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[1]\n", "bash measures the same");
+
+    let (out, err, code) = run(r#"f(){ OPTIND=3; }; f; builtin echo "[$OPTIND]""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "[3]\n",
+        "no frame entry, so the assignment leaks, in bash too"
+    );
+}
+
+/// The scoped prefix is undone after the command (the visible half of
+/// `EnvSave::restore`; the plain-assignment control of #589 stays as pinned).
+#[test]
+fn a_scoped_optind_prefix_is_undone_after_the_command() {
+    let (out, err, code) = run(r#"OPTIND=3 env_print > /dev/null; builtin echo "[$OPTIND]""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[1]\n", "bash measures the same");
+}
+
+/// Unbound before the prefix, unbound after it: the name has no saved entry to
+/// restore, and only the saved counter brings the state back (bash answers `[]`,
+/// task #593).
+#[test]
+fn an_unbound_optind_stays_unbound_across_a_scoped_prefix() {
+    let (out, err, code) =
+        run(r#"unset OPTIND; OPTIND=3 env_print > /dev/null; builtin echo "[$OPTIND]""#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "[]\n", "bash measures the same");
 }
