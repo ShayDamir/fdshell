@@ -430,13 +430,14 @@ fn arith_increment_in_let() {
 }
 
 /// Postfix `++` in a `while` condition: the loop runs while the old value is
-/// below the bound, so the body sees 1, 2, 3. (The loop's own exit status is
-/// the failing condition's, a pre-existing `while` deviation from bash, so the
-/// status is not asserted here.)
+/// below the bound, so the body sees 1, 2, 3. The loop's own exit status is the
+/// body's last command — the `echo`, 0 — not the failing condition's (task
+/// #164's rule; bash agrees).
 #[test]
 fn arith_increment_in_loop() {
     let out = run("i=0; while ((i++ < 3)); do echo $i; done");
     assert_eq!(str::from_utf8(&out.stdout).unwrap().trim(), "1\n2\n3");
+    assert!(out.status.success(), "bash: rc 0 (task #164's rule)");
 }
 
 /// A `++`/`--` spaced away from its operand is still the increment token, so the

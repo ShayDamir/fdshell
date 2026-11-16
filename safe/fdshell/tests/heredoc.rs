@@ -3088,12 +3088,12 @@ fn function_body_heredoc_calls_in_a_loop_and_with_redirects() {
     }
 }
 
-/// Measured divergences that stay with their owners:
+/// Measured divergences that stay with their owners, and the loop row that is
+/// **parity** now:
 ///
-/// * the loop row: fdshell's `while` reports the **failing condition's** status
-///   (rc 1) where bash reports the last body command's (rc 0) — measured on
-///   master with a plain loop body, so it is the loop-status rule, not this
-///   task's; the here-doc itself prints `body` twice.
+/// * the loop row is bash parity since task **#164**: the body runs twice, the
+///   condition `[ $i != 2 ]` that ends the loop is only the test, and the loop
+///   reports its body's last command — the `i=$((i+1))` assignment, so rc 0.
 /// * the incomplete stream is parity now (task **#364**): the delimiter line
 ///   never arrives, the claim covers the body, and both shells print it at rc 0
 ///   with the end-of-file warning (fdshell's wording).
@@ -3105,8 +3105,8 @@ fn function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence() {
         run("f() { cat <<E; }; i=0; while [ $i != 2 ]; do f; i=$((i+1)); done\nbody\nE");
     assert_eq!(
         (out.as_str(), code),
-        ("body\nbody\n", 1),
-        "bash prints the same twice at rc 0"
+        ("body\nbody\n", 0),
+        "bash prints the same twice at rc 0 (task #164's rule)"
     );
     // The single-call starved row is parity now (task #364): bash prints the
     // body with its end-of-file warning at rc 0, fdshell matches (measured

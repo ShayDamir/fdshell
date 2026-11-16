@@ -1700,15 +1700,14 @@ fn a_stage_blocks_loop_control_stays_inside_the_fork() {
     }
 }
 
-/// The stage's loop reads the pipe: the first line arrives. The row keeps
-/// fdshell's pre-existing `read` divergence (the body runs once and the stage's
-/// status is the failed `read`, so the pipeline reports rc 1 where bash reports
-/// 0) — the `read` class owns that, it is measured for the `< file` twin on
-/// `master` too, and #292 changes only the block's position.
+/// The stage's loop reads the pipe: the first line arrives, the second `read` at
+/// EOF is the condition that ends the loop, so the status is the body's last
+/// command — bash parity (task #164's rule), which is what this row used to pin
+/// as the `read`-class divergence.
 #[test]
-fn a_stage_block_reads_the_pipe_with_the_read_divergence() {
+fn a_stage_block_reads_the_pipe_is_bash_parity() {
     let (out, err, rc) = run("echo a | while read l; do echo r-$l; done");
-    assert_eq!((out.as_str(), rc), ("r-a\n", 1), "{err}: bash rc 0");
+    assert_eq!((out.as_str(), rc), ("r-a\n", 0), "{err}: bash agrees");
 }
 
 /// The POSIX builtin `wait` behind a `|` opens **no** block span (the shared
@@ -1771,6 +1770,111 @@ fn a_block_stage_status_and_a_trailing_ampersand_are_bash_parity() {
         ["b", "started"],
         "the parent's line and the job stage's line are a race: {out}"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Task #164: the `while`/`until` exit status is the body's, not the condition's.
+//
+// POSIX #2.9.3: the status of a loop is the status of the last command its body
+// ran, zero when the body never ran. Every value below was measured against
+// bash 5.3.9 (`bash -c`) and this build; the shape was checked 2026-11-16.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The rule with a body status that is neither 0 nor the condition's: a body that
+/// leaves 7 makes the loop report 7 on both the `while` and the `until` side (the
+/// `until` exit test is a *true* one). Both rows use a body status the condition
+/// never produces, so a dropped status-tracking line, or an apply that zeroes, shows
+/// up here.
+#[test]
+fn the_loop_status_is_the_bodys_last_command() {
+    for (script, want) in [
+        (
+            "i=0; while ((i++<3)); do sh -c 'exit 7'; done; echo rc=$?",
+            "rc=7\n",
+        ),
+        (
+            "f() { return 7; }; n=0; until [ $n -ge 3 ]; do n=$((n+1)); f; done; echo rc=$?",
+            "rc=7\n",
+        ),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The granularity of "the body's **last** command": the pair below differs only in
+/// whether `false` runs last, and each shell reports the one that ran last (bash
+/// `rc=1` then `rc=0`). The `&&` row is the same status feeding the *list* rather
+/// than the shell's `rc`: bash runs `after` (fdshell used to skip it).
+#[test]
+fn the_last_command_of_the_body_is_what_the_loop_reports() {
+    for (script, want) in [
+        (
+            "i=0; while ((i++<3)); do echo hi; false; done; echo rc=$?",
+            "hi\nhi\nhi\nrc=1\n",
+        ),
+        (
+            "i=0; while ((i++<3)); do false; echo hi; done; echo rc=$?",
+            "hi\nhi\nhi\nrc=0\n",
+        ),
+        (
+            "i=0; while ((i++<3)); do echo hi; done && echo after; echo rc=$?",
+            "hi\nhi\nhi\nafter\nrc=0\n",
+        ),
+        // Task #110's shape: the body's last command is the `echo`, so the loop is 0.
+        (
+            "i=0; while ((i++<3)); do echo $i; done; echo rc=$?",
+            "1\n2\n3\nrc=0\n",
+        ),
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), (want, 0), "{script}: {err}");
+    }
+}
+
+/// The other half of the rule, the half the `!ran_body` tail owns: a loop whose
+/// **first** test fails never runs a body, so the loop reports 0 — even where the
+/// condition is a command that itself fails (`false`, a false `[ ]`, a false
+/// `((0))`, a command that does not exist). Every row is bash `rc=0`; the
+/// `nosuchcmdxyz` row's stderr is each shell's own wording, so it asserts stdout
+/// and status only. The `until` row runs a body and leaves through a `break`, which
+/// is the signal's own 0 (task #262's rule).
+#[test]
+fn a_loop_that_never_runs_its_body_reports_zero() {
+    for script in [
+        "while false; do :; done; echo rc=$?",
+        "while [ 1 -gt 2 ]; do :; done; echo rc=$?",
+        "while ((0)); do echo x; done; echo rc=$?",
+        "while false; do false; done; echo rc=$?",
+        "while nosuchcmdxyz; do :; done; echo rc=$?",
+        "n=0; until false; do n=$((n+1)); [ $n -ge 2 ] && break; done; echo rc=$?",
+    ] {
+        let (out, err, rc) = run(script);
+        assert_eq!((out.as_str(), rc), ("rc=0\n", 0), "{script}: {err}");
+    }
+}
+
+/// The rule reaches `set -e`: the loop's status is its body's last command (`echo`,
+/// 0), so the gate never fires and the shell prints its line — bash `hi`×3 `rc=0`.
+/// The condition itself is exempt from the gate (task #491), which is what lets the
+/// three iterations run at all.
+#[test]
+fn a_loop_status_of_zero_does_not_trip_errexit() {
+    let (out, err, rc) = run("set -e; i=0; while ((i++<3)); do echo hi; done; echo rc=$?");
+    assert_eq!((out.as_str(), rc), ("hi\nhi\nhi\nrc=0\n", 0), "{err}");
+}
+
+/// The trap boundary: a trap action does not move `$?` (pinned at
+/// `tests/trap.rs::the_action_sees_the_pre_trap_status_and_restore_is_exact`), so a
+/// loop that ends after a trapped signal still reports its body's last command —
+/// bash `body`, `body`, `rc=0` (measured 10 runs, no flake; `run_bounded` because a
+/// signal handling regression re-tests the condition forever).
+#[test]
+fn a_trap_action_at_a_loop_boundary_does_not_move_the_status() {
+    let (out, err, rc) = run_bounded(
+        "trap 'false' INT; i=0; while [ $i -lt 2 ]; do i=$((i+1)); echo body; if [ $i = 2 ]; then kill -INT $$; fi; done; echo rc=$?",
+    );
+    assert_eq!((out.as_str(), rc), ("body\nbody\nrc=0\n", 0), "{err}");
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -2257,17 +2361,15 @@ fn glued_arith_for_shapes_run_the_loop_like_bash() {
 
 /// The glued arith-condition keywords (task **#396**): `if((expr))`,
 /// `while((expr))` and `until((expr))` split at the `(` and the condition is
-/// the `((expr))` command, already implemented. The `if`/`until` rows are bash
-/// parity; the `while` row prints `bash parity's` two prints but exits rc 1 —
-/// the loop's last status is the failed condition test, fdshell's existing rule
-/// for a spaced `while ((expr))` too (bash returns the body's last status, rc
-/// 0): the row is pinned with the tree's value, not bash's.
+/// the `((expr))` command, already implemented. All three rows are bash parity
+/// now: the `while` row prints its two body lines and exits with its **body's**
+/// last status (task #164's rule), exactly as bash's does.
 #[test]
 fn glued_arith_conditions_land_on_the_arith_command_rule() {
     let (out, err, rc) = run("x=1; if((x));then echo y;fi");
     assert_eq!((out.as_str(), rc), ("y\n", 0), "{err}");
     let (out, err, rc) = run("i=0; while((i<2));do echo w; i=$((i+1)); done");
-    assert_eq!((out.as_str(), rc), ("w\nw\n", 1), "{err}");
+    assert_eq!((out.as_str(), rc), ("w\nw\n", 0), "{err}");
     let (out, err, rc) = run("until((0));do echo u;break;done");
     assert_eq!((out.as_str(), rc), ("u\n", 0), "{err}");
 }
@@ -2579,7 +2681,9 @@ fn closer_shaped_list_words_keep_the_measured_messages_and_the_seed_is_for_only(
 
 /// The body granularity of task #492: a loop body is re-scanned, so a
 /// line-ending `&&`/`||` inside one joins the list onto the next physical line
-/// (POSIX #2.9). Measured 2026-10-30 against bash 5.3.9 and this build.
+/// (POSIX #2.9). Measured 2026-10-30 against bash 5.3.9 and this build; the
+/// `while` row is bash parity now (task #164's rule: the loop reports its body's
+/// last command — here the `i=1` assignment, not the condition that ended it).
 #[test]
 fn a_line_ending_on_a_cond_operator_continues_a_loop_body() {
     for (script, want, rc) in [
@@ -2591,7 +2695,7 @@ fn a_line_ending_on_a_cond_operator_continues_a_loop_body() {
         (
             "i=0; while [ $i -eq 0 ]; do echo a ||\necho b; i=1; done",
             "a\n",
-            1,
+            0,
         ),
     ] {
         let (out, err, code) = run(script);

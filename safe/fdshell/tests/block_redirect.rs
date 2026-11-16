@@ -1054,16 +1054,16 @@ fn the_here_doc_tail_rows_that_keep_their_measured_values() {
     );
 
     // The stdin feed asserted through a builtin that reads it: the body lands in
-    // `read`, and the loop's **status** stays the pre-existing divergence —
-    // fdshell reports the failing condition's status (rc 1) where bash reports the
-    // last body command's (rc 0); the here-doc itself is parity.
+    // `read`, and the loop's **status** is bash's now (task #164's rule: the body's
+    // last command, `echo`, is the status — the failing `read` that ends the loop is
+    // only the test); the here-doc itself is parity.
     let dir = Scratch::new();
     let o = run(&dir, "while read l; do echo \"[$l]\"; done <<T\nbody\nT");
     assert_eq!(out(&o), "[body]\n", "bash agrees: stderr={}", err(&o));
     assert_eq!(
         rc(&o),
-        Some(1),
-        "bash rc 0 — the loop-status rule: stderr={}",
+        Some(0),
+        "bash agrees (task #164's rule): stderr={}",
         err(&o)
     );
 }

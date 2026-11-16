@@ -1660,6 +1660,16 @@ make && echo built || echo "build failed"
 for x in 1 2 3; do false; break; done; echo $?   # 0
 ```
 
+Every loop's own status — `while`, `until` and both `for` forms — is the status of
+the **last command its body ran**, and `0` when the body never ran (POSIX #2.9.3).
+`i=0; while ((i++ < 3)); do echo $i; done; echo $?` answers `0` after the three
+lines, and `i=0; while ((i++ < 3)); do sh -c 'exit 7'; done; echo $?` answers `7`,
+because the loop reports what its body left, never the condition's own status: the
+condition decides the test and nothing else. A loop whose **first** test fails
+printed no body and reports `0` (`while false; do :; done; echo $?`), and a trap
+action at the loop boundary does not move `$?` either ("Signals and traps"). Pinned
+in `tests/loops.rs::the_loop_status_is_the_bodys_last_command`.
+
 `set -e` treats these lists as exemptions: which failing command ends the shell
 is spelled out in "Pipelines and lists" below.
 

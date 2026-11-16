@@ -9537,8 +9537,7 @@ keyword-branch pins cover the arm; the function branch's pin asserts the mode
 
 **Measure the neighbours of the shape you fix — a plan's expectation column is a hypothesis.**
 Six rows a plan expected to reach parity did not, and each keeps its owner:
-the loop row's rc 1 is fdshell's `while` reporting the failing condition, a
-command-not-found is rc 1 here and 127 in bash, `{ cat <<E; }` and the nested
+a command-not-found is rc 1 here and 127 in bash, `{ cat <<E; }` and the nested
 `f() { { cat <<E; }; }` were **#315**'s (both closed), `f() { …; }; f | cat`
 is **#182**'s, the starved first operator (`f() { cat <<E; }; f` + body, no
 delimiter line) was **#429**'s — closed by **#364**'s accept-and-warn rule,
@@ -9551,7 +9550,9 @@ pinned in
 `tests/function_keyword.rs::a_redirection_before_the_opening_brace_is_a_parse_error`
 (**#180** is the accepted *trailing* form, `f(){ …; } > a`). Pin each as a
 measured divergence with the bash value beside it; the def-prefix row in
-particular reads as a fix and is a widening.
+particular reads as a fix and is a widening. The **loop row** of that heredoc
+test is the one member that has since closed — it is bash parity through
+LESSONS: "A loop's own status is the body's last command"
 
 ## A word-list rule lives at **two granularities**: the builder's `List`, and the byte scans' place **plus seed** (task #306)
 
@@ -10390,7 +10391,8 @@ and
 `tests/block_redirect.rs::the_here_doc_tail_rows_that_keep_their_measured_values`
 (every value measured against bash 5.3.9; each non-parity row names its owner:
 the glued closer, the `&&`-run granularity of the body allocation, the
-rc-1-vs-2 pair, the `wait` round, the loop-status rule),
+rc-1-vs-2 pair and the `wait` round; its loop-status row is bash parity (see
+LESSONS: "A loop's own status is the body's last command"),
 `tests/block_redirect.rs::the_pinned_divergences_behind_a_closer`,
 `tests/cond_blocks.rs::a_comment_at_a_block_edge_keeps_the_filed_divergences`,
 `tests/loops.rs::a_word_after_the_closing_keyword_is_a_parse_error`,
@@ -11698,3 +11700,50 @@ Pins: `safe/fdshell/tests/trap.rs::the_action_sees_the_pre_trap_status_and_resto
 `safe/fdshell/tests/trap.rs::a_blocked_signal_goes_to_the_signalfd_not_the_trap`,
 `safe/fdshell/tests/trap.rs::a_trap_crosses_into_a_forked_subshell` and
 `safe/fdshell/tests/trap.rs::a_backgrounded_builtin_runs_the_parents_action`.
+
+## A loop's own status is the body's last command, never the condition's (task #164)
+
+POSIX #2.9.3 gives `while`/`until` (and both `for` forms) the status of the last
+command their **body** ran, `0` when no iteration ran. `loop_.rs` had it backwards:
+the condition test wrote `last_status`, so a `while` ending on a false test reported
+the test's own 1 where bash reports 0, and an `until` ending on a true test reported
+the test's 0 where bash reports the body's 7. The mechanism is a **memory**, not a
+re-read: record the status right after each body run and apply it only at the exit
+the condition decided — the condition's status gates the test and is never the
+loop's status.
+
+The record happens **before** the trap boundary, because a trap action does not move
+`$?` (see LESSONS: "The deferred trap executor is the only runner; handlers flag, tables store")
+— pinned at
+`tests/trap.rs::the_action_sees_the_pre_trap_status_and_restore_is_exact`. So the
+body's last command owns the value the loop reports, and the trap boundary changes
+nothing at a loop edge.
+
+Three owners keep their own arms of the rule and must not be merged: this one, the
+condition-false-on-the-first-test zeroing (`!ran_body`, whose own rows are the ones
+that pin it), and the dispatch-site rule of
+LESSONS: "`break`/`continue` set the exit status where the signal is raised"
+
+`for_run/arith.rs` already had the rule — its
+clauses never touch `last_status`, so the body's value survives — which is what
+makes the pair of rows in
+`safe/fdshell/tests/loops.rs::c_style_for_status_rules_match_bash` green.
+
+The rule reaches further than the shell's `rc`: the status feeds a `&&`/`||` list
+(`…; done && echo after` runs `after`), `set -e` (the loop's status is what the gate
+sees; the condition itself stays exempt, task #491), and a pipeline **stage**
+(`echo a | while read l; do …; done` — the status is produced in the child and the
+fork reports it, so the `read` class no longer owns that row). Values are bash
+5.3.9's, measured 2026-11-16.
+
+Pins: `safe/fdshell/tests/loops.rs::the_loop_status_is_the_bodys_last_command`,
+`safe/fdshell/tests/loops.rs::the_last_command_of_the_body_is_what_the_loop_reports`
+(the pair that differs only in which command ran last),
+`safe/fdshell/tests/loops.rs::a_loop_that_never_runs_its_body_reports_zero`,
+`safe/fdshell/tests/loops.rs::a_loop_status_of_zero_does_not_trip_errexit`,
+`safe/fdshell/tests/loops.rs::a_trap_action_at_a_loop_boundary_does_not_move_the_status`,
+`safe/fdshell/tests/arith.rs::arith_increment_in_loop`, and the rows that reached
+parity: `tests/loops.rs::a_stage_block_reads_the_pipe_is_bash_parity`,
+`tests/loops.rs::glued_arith_conditions_land_on_the_arith_command_rule`,
+`tests/heredoc.rs::function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence`,
+`tests/block_redirect.rs::the_here_doc_tail_rows_that_keep_their_measured_values`.

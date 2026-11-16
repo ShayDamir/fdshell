@@ -42,6 +42,10 @@ fn run_loop_body(
     // loop-level, so every condition test below records its own job.
     let bg = block.cond_background;
     let mut ran_body = false;
+    // The status the body's last command left; `0` covers the loop that never ran a
+    // body iteration (task #164). Recorded after every body run, so the condition's
+    // own status decides the test but never the loop's status.
+    let mut body_status: i32 = 0;
     loop {
         // A `break`/`continue` raised inside the condition (an `if` then-body, a
         // `{ …; }` group, a `case` arm, a function called from it) is the loop's
@@ -70,12 +74,22 @@ fn run_loop_body(
             state.last_status.exit_code()
         };
         if (exit_code == 0) != invert {
+            // The condition ended the loop, so the loop reports what its body left
+            // (POSIX #2.9.3): the condition's status was for the test only.
+            if ran_body {
+                let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
+                state.set_last_exit(body_status);
+            }
             break;
         }
         ran_body = true;
         let control = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
             crate::repl::run_script(&block.body, cell)
         })?;
+        body_status = {
+            let state = cell.borrow().change_context(CmdError::Never)?;
+            state.last_status.exit_code()
+        };
         // Boundary after the body, same merge rule as the condition's.
         let control = crate::trap_exec::run_pending(cell)?.or(control);
         if let Some(control) = control {
