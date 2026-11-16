@@ -58,7 +58,9 @@ impl ShellState {
     /// and the `optind` counter in sync when it is `OPTIND` (task #589). An
     /// `OPTIND` assignment also resets the `optchar` cursor (task #590): bash
     /// measures every `OPTIND` assignment — parseable or not — as a re-read from
-    /// the word's start.
+    /// the word's start. The sync serves a **user** assignment only: `getopts`
+    /// writes its own counter and store row directly, and must not be routed
+    /// through here (task #591 — `intercept/getopts/vars.rs`, the cursor trap).
     pub fn set_var(&mut self, name: ShortCStr, value: ImportedStr) {
         if name.eq_bytes(b"IFS") {
             self.ifs = value.value.clone();

@@ -2,10 +2,10 @@
 
 //! `getopts <opts> name` — the plumbing is task #589 (the dispatch arm, help and
 //! the `OPTIND` store), the parsing core is task #590 (optstring, word list,
-//! per-word scan, and committing the counter and the intra-word cursor). Writing
-//! the caller's variables, the diagnostics and the error statuses lands in task
-//! #591; the driver here resolves the words, runs the scan and sets the
-//! end-of-options status (bash 5.3.9: 1).
+//! per-word scan, and committing the counter and the intra-word cursor). The
+//! caller's variables, the diagnostics and the statuses are task #591 and live in
+//! the `vars` and `diagnostic` submodules; the driver here validates, resolves the
+//! words, runs the scan and hands the result to them (bash 5.3.9, measured).
 
 use error_stack::{Report, ResultExt};
 
@@ -40,10 +40,9 @@ pub(crate) fn byte_at(word: &ShortCStr, offset: usize) -> Option<u8> {
     byte.as_bytes().ok()?.first().copied()
 }
 
-/// The scan entry: validate (the house rule for in-process commands), resolve
-/// the words, run the pure scan, commit the counter and the cursor, and set the
-/// end-of-options status. Variable writes and diagnostics are task #591's: this
-/// task's pins assert the committed counters and the status, not stderr.
+/// The scan entry: validate (the house rule for in-process commands), check the
+/// operands, resolve the words, run the pure scan and commit the call (the
+/// counters, `OPTARG`, the name, the statuses, the diagnostics).
 pub(crate) fn run_getopts(
     line: &[u8],
     cmdline: &crate::parse::CommandLine,
@@ -51,7 +50,15 @@ pub(crate) fn run_getopts(
 ) -> Result<bool, Report<CmdError>> {
     super::validation::validate_intercept_no_builtin(line, "getopts", cmdline)?;
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
-    let optstring = cmdline.args.first().ok_or(Report::new(CmdError::Never))?;
+    let (Some(optstring), Some(name)) = (cmdline.args.first(), cmdline.args.get(1)) else {
+        // A missing operand is a fact about the line the user typed, so it is a
+        // **status**, not a `Report`: bash prints its usage line and keeps running
+        // (measured with `let`; a `bail!` here would abort the script), and no scan
+        // runs — nothing is written (plan §3.1).
+        diagnostic::print(&diagnostic::usage());
+        state.set_last_exit(vars::USAGE_STATUS);
+        return Ok(true);
+    };
     let operands = cmdline.args.get(2..).ok_or(Report::new(CmdError::Never))?;
     let words = words::Words::resolve(operands, &state.positional);
     let parsed = optstring::Optstring::parse(optstring);
@@ -65,39 +72,49 @@ pub(crate) fn run_getopts(
             index: words.end_index(),
         },
     };
-    commit(&mut state, &result);
+    commit(&mut state, &result, name, &parsed)?;
     Ok(true)
 }
 
-/// Commit the scan: Found/Presentation write the next position (counter and
-/// cursor), End writes the counter and the end-of-options status; bash 5.3.9
-/// measures status 0 for Found **and** the presentation errors, status 1 only at
-/// the end (task #591 owns the error rules the statuses will follow).
-fn commit(state: &mut ShellState, result: &scan::Scan) {
+/// Commit one call in bash's measured order (plan §3.1): the counters and the
+/// cursor, then `OPTARG`, then the **name** and its status, the diagnostic printed at
+/// its own moment. Each arm is one row of the matrix of plan §2, every value measured
+/// on bash 5.3.9: a found option names its own character and hands `OPTARG` the
+/// argument it took (or unbinds the name); a presentation error is the `diagnostic`
+/// row; the end of options answers `?`, an unbound `OPTARG` and status 1.
+fn commit(
+    state: &mut ShellState,
+    result: &scan::Scan,
+    name: &ShortCStr,
+    parsed: &optstring::Optstring,
+) -> Result<(), Report<CmdError>> {
     match result {
         scan::Scan::Found {
+            ch,
+            arg,
             next_index,
             next_char,
-            ..
-        }
-        | scan::Scan::Presentation {
-            next_index,
-            next_char,
-            ..
         } => {
-            state.optind = *next_index;
+            vars::write_counter(state, *next_index)?;
             state.optchar = *next_char;
-            state.set_last_exit(0);
+            vars::write_optarg(state, arg.clone());
+            vars::report_name(state, name, *ch, vars::REPORT_STATUS)
+        }
+        scan::Scan::Presentation { .. } => {
+            diagnostic::presentation_row(state, name, result, parsed)
         }
         scan::Scan::End { index } => {
-            state.optind = *index;
-            state.set_last_exit(1);
+            vars::write_counter(state, *index)?;
+            vars::write_optarg(state, None);
+            vars::report_name(state, name, vars::QUESTION, vars::FAILURE_STATUS)
         }
     }
 }
 
+mod diagnostic;
 mod optstring;
 mod scan;
+mod vars;
 mod words;
 
 #[cfg(test)]

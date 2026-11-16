@@ -2,9 +2,12 @@
 use super::*;
 use crate::state::ShellState;
 use alloc::collections::VecDeque;
+use alloc::format;
 use alloc::vec;
+use alloc::vec::Vec;
 use sys::ImportedStr;
 use sys::fork_cell::ForkCell;
+use sys::{Origin, Position, ScriptText};
 
 fn make_cmdline() -> crate::parse::CommandLine {
     cmdline_with(&[b"a", b"o"])
@@ -78,8 +81,8 @@ fn only_an_exact_parse_moves_the_counter() {
 /// The scan claims the command (`true`, so `run/parent.rs` never resolves a path
 /// for it) — **this is the pin moved from the #589 stub**: `run_getopts` with no
 /// operands ends the scan with bash's status 1 at OPTIND 1 (`$#`+1 of an empty
-/// list). bash answers `name='?'` there; the variable write is task #591's, so
-/// this test asserts the status and the counters, not stderr.
+/// list), naming `?` and leaving `OPTARG` unbound (bash 5.3.9, re-measured on
+/// task591; the write is task #591's, so the pin covers all of it now).
 #[test]
 fn run_getopts_is_handled_and_the_empty_scan_ends_at_the_seed() {
     let cell = ForkCell::new(ShellState::new());
@@ -95,6 +98,12 @@ fn run_getopts_is_handled_and_the_empty_scan_ends_at_the_seed() {
         "the end-of-options status"
     );
     assert_eq!(state.optind, DEFAULT_OPTIND, "OPTIND stays at $# + 1");
+    drop(state);
+    assert_eq!(
+        called(&cell, &[b"a", b"o"], b"o"),
+        (Some(b"?".to_vec()), None, 1, 0, 1),
+        "the same call, read back through the caller's variables"
+    );
 }
 
 #[test]
@@ -330,4 +339,317 @@ fn the_error_walk_on_one_word_reports_per_character() {
     );
     let (code, index, cursor) = run(&cell, &[b"ab:c", b"o"]);
     assert_eq!((code, index, cursor), (1, 2, 0), "the measured end");
+}
+
+// ---------------------------------------------------------------------------
+// The per-call writes of task #591: `name`, `OPTIND`, `OPTARG`, the statuses and
+// the diagnostics. Every row re-measured on bash 5.3.9 on this machine before
+// being pinned (the plan §2 matrix).
+
+/// `(name, OPTARG, OPTIND, cursor, status)` after one call, read back the way the
+/// caller reads it — the store, `$name` and `$?`. `None` is a variable the call
+/// never wrote, which for `OPTARG` is bash's **unbound** (its `${OPTARG+set}`
+/// answers empty, plan §2), not an empty value.
+fn called(
+    cell: &ForkCell<ShellState>,
+    args: &[&[u8]],
+    name: &[u8],
+) -> (Option<Vec<u8>>, Option<Vec<u8>>, u64, usize, i32) {
+    let cmdline = cmdline_with(args);
+    assert!(
+        run_getopts(b"getopts o", &cmdline, cell).unwrap(),
+        "getopts is claimed (the launch path never sees it)"
+    );
+    let state = cell.borrow().unwrap();
+    let name = s(name);
+    let optarg = ShortCStr::from(c"OPTARG");
+    (
+        state.strings.get(&name).map(store_bytes),
+        state.strings.get(&optarg).map(store_bytes),
+        state.optind,
+        state.optchar,
+        state.last_status.exit_code(),
+    )
+}
+
+fn store_bytes(value: &ImportedStr) -> Vec<u8> {
+    value.value.as_bytes().unwrap().to_vec()
+}
+
+#[test]
+fn a_found_flag_names_its_character_and_leaves_optarg_unbound() {
+    // Measured `set -- -a` on `"ab:c"`: name `a`, OPTIND 2, OPTARG unbound, rc 0.
+    let cell = seeded(&[b"-a"]);
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"a".to_vec()), None, 2, 0, 0)
+    );
+}
+
+#[test]
+fn an_attached_argument_is_the_arguments_row() {
+    // Measured `set -- -bval`: name `b`, OPTARG `val`, OPTIND 2, rc 0.
+    let cell = seeded(&[b"-bval"]);
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"b".to_vec()), Some(b"val".to_vec()), 2, 0, 0)
+    );
+}
+
+#[test]
+fn a_separate_argument_is_the_arguments_row_too() {
+    // Measured `set -- -b val`: name `b`, OPTARG `val`, OPTIND 3 — the word the
+    // argument consumed moved the counter too (plan §2).
+    let cell = seeded(&[b"-b", b"val"]);
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"b".to_vec()), Some(b"val".to_vec()), 3, 0, 0)
+    );
+}
+
+#[test]
+fn a_flag_unties_the_optarg_a_previous_call_set() {
+    // Measured on `":ab:c"` (silent): `set -- -x -a` — call 1 is the unknown-option
+    // row (name `?`, OPTARG the offender `x`, rc 0, nothing printed); call 2 reports
+    // the flag and `OPTARG` goes back to **unbound** (plan §2's fourth row).
+    let cell = seeded(&[b"-x", b"-a"]);
+    assert_eq!(
+        called(&cell, &[b":ab:c", b"o"], b"o"),
+        (Some(b"?".to_vec()), Some(b"x".to_vec()), 2, 0, 0)
+    );
+    assert_eq!(
+        called(&cell, &[b":ab:c", b"o"], b"o"),
+        (Some(b"a".to_vec()), None, 3, 0, 0)
+    );
+}
+
+#[test]
+fn the_end_names_the_question_mark_with_optarg_unbound() {
+    // Measured `set -- foo`: the walk ends on the first non-option word — name `?`,
+    // OPTIND 1, OPTARG unbound, rc 1, nothing printed (plan §2).
+    let cell = seeded(&[b"foo"]);
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"?".to_vec()), None, 1, 0, 1)
+    );
+}
+
+#[test]
+fn the_end_after_a_found_argument_keeps_the_counter_it_committed() {
+    // Measured `set -- -b val x`, calls 1-2-3: `b` with `val` at OPTIND 3 (rc 0),
+    // then the end twice: name `?`, OPTARG unbound, rc 1, OPTIND stays 3.
+    let cell = seeded(&[b"-b", b"val", b"x"]);
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"b".to_vec()), Some(b"val".to_vec()), 3, 0, 0)
+    );
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"?".to_vec()), None, 3, 0, 1)
+    );
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"?".to_vec()), None, 3, 0, 1),
+        "the second end, bash's rc 1 again"
+    );
+}
+
+#[test]
+fn an_unknown_option_names_the_question_mark_and_prints() {
+    // Measured `set -- -x` on `"ab:c"` (verbose): name `?`, OPTARG unbound, OPTIND 2
+    // (the offending word is passed), rc 0 — and the message is the builder's, so
+    // `diagnostic::presentation` answers Some for this row (its bytes are pinned in
+    // `diagnostic/tests.rs`).
+    let cell = seeded(&[b"-x"]);
+    assert_eq!(
+        // The printed bytes are pinned in `diagnostic/tests.rs`; this is the
+        // store half of the row.
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"?".to_vec()), None, 2, 0, 0)
+    );
+}
+
+#[test]
+fn the_silent_mode_answers_optarg_with_the_offender() {
+    // Measured `set -- -x` on `":ab:c"`: name `?`, OPTARG `x`, OPTIND 2, rc 0, and
+    // **no** diagnostic (plan §2, POSIX agrees).
+    let cell = seeded(&[b"-x"]);
+    assert_eq!(
+        called(&cell, &[b":ab:c", b"o"], b"o"),
+        (Some(b"?".to_vec()), Some(b"x".to_vec()), 2, 0, 0)
+    );
+}
+
+#[test]
+fn a_missing_option_argument_is_the_option_character_in_the_verbose_mode() {
+    // Measured `set -- -b` on `"ab:c"`: name `?`, OPTARG unbound, OPTIND 2, rc 0, and
+    // bash **does** print `option requires an argument -- b` here (re-measured on
+    // task591: bash 5.3.9 answers POSIX's text on this row).
+    let cell = seeded(&[b"-b"]);
+    assert_eq!(
+        // The printed bytes are pinned in `diagnostic/tests.rs`; this is the
+        // store half of the row.
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"?".to_vec()), None, 2, 0, 0)
+    );
+}
+
+#[test]
+fn a_missing_option_argument_is_a_colon_in_the_silent_mode() {
+    // Measured `set -- -b` on `":ab:c"`: name `:`, OPTARG `b`, OPTIND 2, rc 0, nothing
+    // printed — the one row whose name is not `?` (plan §2/§4.1).
+    let cell = seeded(&[b"-b"]);
+    assert_eq!(
+        called(&cell, &[b":ab:c", b"o"], b"o"),
+        (Some(b":".to_vec()), Some(b"b".to_vec()), 2, 0, 0)
+    );
+}
+
+#[test]
+fn a_name_that_is_not_an_identifier_fails_only_the_name_write() {
+    // Measured `set -- -bval; getopts "ab:c" 1abc`: the scan runs and **commits** —
+    // OPTIND 2 and OPTARG `val` stand — only the name write fails, with bash's
+    // message and status 1 (plan §2, §3.1).
+    let cell = seeded(&[b"-bval"]);
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"1abc"], b"1abc"),
+        (None, Some(b"val".to_vec()), 2, 0, 1)
+    );
+}
+
+#[test]
+fn an_empty_name_operand_is_the_same_error_on_a_found_option() {
+    // Measured `set -- -a; getopts "ab:c" 1abc` (the first row of the plan §2
+    // processing-error table): the counter commits, nothing is named, rc 1. The
+    // **empty** operand (`getopts "ab:c" ""`) is the same rule with nothing else to
+    // commit: an empty word list, so the end row's OPTIND 1 and rc 1.
+    let cell = seeded(&[b"-a"]);
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"1abc"], b"1abc"),
+        (None, None, 2, 0, 1)
+    );
+    let cell = ForkCell::new(ShellState::new());
+    assert_eq!(
+        called(&cell, &[b"ab:c", b""], b""),
+        (None, None, 1, 0, 1),
+        "the empty operand, nothing else to commit"
+    );
+}
+
+#[test]
+fn an_accepted_name_operand_is_written() {
+    // Measured `getopts "ab:c" v -a`: `v` is an identifier, so the row's character
+    // lands in it (`a`), `OPTARG` stays unbound, OPTIND 2, rc 0 — no message (the
+    // accept half of the identifier rule; `vars/tests.rs` pins the whole matrix).
+    let cell = ForkCell::new(ShellState::new());
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"v", b"-a"], b"v"),
+        (Some(b"a".to_vec()), None, 2, 0, 0)
+    );
+}
+
+#[test]
+fn a_missing_name_operand_answers_the_usage_line_and_keeps_running() {
+    // Measured `getopts "ab:c"`: bash prints the usage line, answers **2**, writes no
+    // variable and runs no scan (OPTIND stays 1) — a status, not a `Report`, so the
+    // script continues (plan §3.1/§4.4).
+    let cell = seeded(&[b"-a"]);
+    cell.borrow_mut().unwrap().set_last_exit(0);
+    assert_eq!(
+        called(&cell, &[b"ab:c"], b"o"),
+        (None, None, 1, 0, 2),
+        "the usage row writes nothing"
+    );
+}
+
+#[test]
+fn a_missing_optstring_operand_answers_the_usage_line_too() {
+    // Measured `getopts`: the same usage line, the same status 2, nothing set.
+    let cell = seeded(&[b"-a"]);
+    cell.borrow_mut().unwrap().set_last_exit(0);
+    let cmdline = cmdline_with(&[]);
+    assert!(run_getopts(b"getopts", &cmdline, &cell).unwrap());
+    let state = cell.borrow().unwrap();
+    assert_eq!(state.last_status.exit_code(), 2, "bash's measured 2");
+    assert_eq!(state.optind, DEFAULT_OPTIND, "no scan ran");
+    assert!(
+        state.strings.get(&ShortCStr::from(c"OPTARG")).is_none(),
+        "nothing written"
+    );
+}
+
+#[test]
+fn the_counter_write_moves_the_visible_row_and_leaves_the_cursor_alone() {
+    // Plan §3.4: the counter's commit writes the counter **and** the store row
+    // bash's `$OPTIND` reads, and must not go through the `set_var` name-sync — a
+    // cluster whose counter has not moved yet (`set -- -abc val`: `a` reports, the
+    // counter stays 1, the cursor moves to 2) proves both halves at once.
+    let cell = seeded(&[b"-abc", b"val"]);
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"a".to_vec()), None, 1, 2, 0),
+        "the row agrees with the field, the cursor moved"
+    );
+    let state = cell.borrow().unwrap();
+    let row = state
+        .strings
+        .get(&ShortCStr::from(c"OPTIND"))
+        .map(store_bytes)
+        .unwrap();
+    assert_eq!(row, b"1", "the visible row of the counter's own value");
+    drop(state);
+    // And the second call, resuming the cluster: `b` takes the attached `c`, the
+    // counter moves to 2, and the row moves with it.
+    assert_eq!(
+        called(&cell, &[b"ab:c", b"o"], b"o"),
+        (Some(b"b".to_vec()), Some(b"c".to_vec()), 2, 0, 0)
+    );
+    let state = cell.borrow().unwrap();
+    let row = state
+        .strings
+        .get(&ShortCStr::from(c"OPTIND"))
+        .map(store_bytes)
+        .unwrap();
+    assert_eq!(row, b"2", "the row followed the counter");
+}
+
+/// The one write-observing pin of plan §6: the driver's "message present → write it"
+/// branch, seen as the **bytes in the file** the call redirects stderr to. The
+/// in-process `$0` of `ShellState::new()` is `fdshell` (the seed `state/ctor.rs`
+/// pins), and the row is the verbose unknown-option message.
+#[test]
+fn the_verbose_diagnostic_reaches_the_redirected_stderr() {
+    let dir = scratch("write");
+    let path = dir.0.join("err");
+    let cell = seeded(&[b"-x"]);
+    let line = format!(r#"getopts "ab:c" o 2>{}"#, path.display());
+    let text = ScriptText::new(s(line.as_bytes()), Position::new(1, 1), Origin::Shell);
+    crate::run::run_one(&text, &cell, false).unwrap();
+    assert_eq!(
+        std::fs::read(path).unwrap(),
+        b"fdshell: illegal option -- x\n"
+    );
+}
+
+/// A pid + counter scratch dir, removed on drop (the `intercept/cd/tests.rs` shape,
+/// so a concurrent suite run cannot collide).
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+fn scratch(tag: &str) -> Scratch {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let c = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "fdshell-getopts-{}-{}-{}",
+        tag,
+        std::process::id(),
+        c
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    Scratch(dir)
 }
