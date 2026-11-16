@@ -4,6 +4,7 @@ use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, ShortCStr};
 
 use crate::error::cmd::CmdError;
+use crate::intercept::getopts::DEFAULT_OPTIND;
 use crate::state::ShellState;
 
 fn s(b: &[u8]) -> ShortCStr {
@@ -90,6 +91,43 @@ fn ifs_restored_after_local_ifs() {
     assert_eq!(state.ifs, s(b":"));
     state.end_frame();
     assert_eq!(state.ifs, caller_ifs);
+}
+
+/// The counter is a **field** like the split set: the entry comes back on its
+/// own, so without `old_optind` the field is what leaks (task #593).
+#[test]
+fn a_local_optind_restores_the_counter() {
+    let mut state = ShellState::new();
+    let caller_counter = state.optind;
+    state.begin_frame();
+    shadow(&mut state, &s(b"OPTIND"));
+    set(&mut state, &s(b"OPTIND"), &s(b"3"));
+    assert_eq!(caller_counter, DEFAULT_OPTIND, "the startup seed");
+    assert_eq!(state.optind, 3, "set_var synced it inside the call");
+    state.end_frame();
+    assert_eq!(
+        state.optind, caller_counter,
+        "the frame writes the field back"
+    );
+    assert_eq!(strings(&state, &s(b"OPTIND")), Some(s(b"1")));
+}
+
+#[test]
+fn first_touch_keeps_the_caller_counter() {
+    let mut state = ShellState::new();
+    set(&mut state, &s(b"OPTIND"), &s(b"pre"));
+    let caller_counter = state.optind;
+    state.begin_frame();
+    shadow(&mut state, &s(b"OPTIND"));
+    set(&mut state, &s(b"OPTIND"), &s(b"3"));
+    shadow(&mut state, &s(b"OPTIND"));
+    set(&mut state, &s(b"OPTIND"), &s(b"4"));
+    state.end_frame();
+    assert_eq!(
+        state.optind, caller_counter,
+        "the first touch recorded the caller's value"
+    );
+    assert_eq!(strings(&state, &s(b"OPTIND")), Some(s(b"pre")));
 }
 
 #[test]
