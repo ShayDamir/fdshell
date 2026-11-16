@@ -226,7 +226,9 @@ wait $!            # reap a nameless job by pid; $? is its exit status
 descriptor runs its arm in a forked child; the arm's exit status decides the
 descriptor's fate — exit `0` keeps it open for the next round, any other
 status closes it. The ready descriptor is bound to `%?`. `after N` arms fire
-when nothing is ready within `N` milliseconds.
+when nothing is ready within `N` milliseconds. A signal that is both `signalfd`ed
+and `trap`ped goes to the fd and not to the trap — see "Signals and traps" under
+"The shell language".
 
 ```shell
 # wait for data on the pipe's read end, or for a background job to finish
@@ -252,7 +254,9 @@ Wrap the block in a loop (`while true; do wait … done`) to re-poll each round.
 Builtins live in the shell process, not on `PATH`: invoke them as
 `builtin openat2 …`. (`shopt -s builtin_first` makes a bare name resolve to
 its builtin before searching `PATH`.) `help` lists every builtin, the shell
-commands and the socket family.
+commands and the socket family. The table below is the fd family only; `trap` is
+one of the shell commands and its manual is "Signals and traps", under "The shell
+language".
 
 `umask`, `unset` and the loop-control words `break`/`continue`/`return` are
 **parse-level shell commands, not builtins**: the `builtin`/`command` prefix does
@@ -1829,6 +1833,83 @@ comment and runs nothing. The rule reaches a here-doc operator on a
 comment-terminated line too: `cat <<Q # c` + `body` + `Q` prints `body`, because
 the comment's newline is where the body starts and the line keeps its own region.
 A `#` inside a word (`echo a#b`) is data.
+
+### Signals and traps
+
+`trap [action [condition …]]` keeps the shell's action table, and four forms are the
+whole grammar: an action with one or more conditions registers it for each condition
+(the action is a command string and the shell runs it itself, so `eval`'s rules apply
+to it); an action, or a bare `-`, with **no** condition is a usage report at status 2;
+`''` as the action is the ignore **disposition**; and no action at all prints the
+table. Conditions are processed one at a time, so a bad one is reported at status 1
+and the conditions before it stay registered; no report aborts the shell.
+
+```shell
+trap 'echo bye' EXIT    # runs at every exit path, at most once per shell
+trap 'echo hit' USR1    # runs at the next command boundary after the signal
+trap '' INT             # the ignore disposition: the signal is consumed
+trap - USR1             # back to the kernel's own action
+trap                    # the list form
+```
+
+`EXIT` and `0` are **one** slot — POSIX's two spellings of the same condition — and its
+action runs before the process ends on every exit path, `exit n`, a natural end, a
+script's EOF, the REPL's EOF, with the status the shell asked for winning. A signal
+action is never run by the handler: the handler records the signal and the action runs
+later, at a command boundary, which is what keeps the handler async-signal-safe (the
+dash/bash pattern). `$?` is saved before an action and restored after it, so an action
+cannot change what the shell sees (POSIX, Austin Group #1602); inside itself it sees the
+status the shell held when it was invoked, and its own commands change that live. Loop
+control and `exit` raised inside an action propagate like anywhere else.
+
+The list form is the inverse of the parser, so `eval "$(trap)"` re-inputs exactly what
+was printed: the `--` marker, the `'\''` quoting and the `SIG`-prefixed name spelling
+all exist for that round trip, the quoting shared with the `alias` printer and the
+signal-name table with the parser. Conditions print in ascending signal number, which
+puts `EXIT` first; POSIX's null action prints as its own line (`trap -- '' SIGINT`) and
+a reset condition prints no line.
+
+`SIGKILL` and `SIGSTOP` are the pair whose results POSIX leaves undefined: bash accepts
+them silently, fdshell rejects them — for both spellings of each — at status 1.
+
+**The entry rule.** POSIX XCU 2.15: in a non-interactive shell, a signal ignored on
+entry cannot be trapped or reset, "although no error need be reported". fdshell refuses
+silently at status 0 — no registration, no `sigaction`, no diagnostic, and the condition
+stays ignored. Its inherited set is **not** empty the way bash's is, because Rust's own
+runtime ignores `SIGPIPE`, so `trap 'x' PIPE` is refused here where bash traps it, and
+the set is a snapshot taken once at startup, since after the first `trap` the process
+disposition is no longer the one the shell started with. bash *lists* the inherited
+ignore and honours a reset on it, so the list line and the reset are measured
+divergences and fdshell's silence at status 0 is what is pinned.
+
+**The `signalfd` overlap.** A signal that is both `signalfd`ed and `trap`ped belongs to
+the fd. `signalfd` blocks its signals in the process mask (`sigprocmask(SIG_BLOCK)`,
+which is how it receives them at all), and a blocked signal is never delivered to an
+installed handler: the fd becomes readable and the trap action cannot run while the
+block holds, whichever of the two was registered first. The table entry survives and is
+still printed — the mask decides delivery, not registration. `EXIT` is not a signal, so
+its trap runs on the exit path even while another signal is blocked.
+
+**What crosses into a subshell.** POSIX XCU 2.11 resets *trapped* signals in a child
+process, and bash follows that for its subshells. fdshell's pure-fork children — a `$(…)`
+capture, a background job, a `wait` arm — keep both the disposition (kernel inheritance)
+and the table (the copy-on-write copy of the shell state), so a trap **does** cross into
+them and the action runs there. An **exec'd** child starts fresh — `exec` resets
+handlers and ignored signals stay ignored — which is where both shells agree.
+
+`ERR` and `DEBUG` are out of scope: ksh extensions, not POSIX conditions, so fdshell
+answers its invalid-condition report at status 1 where bash registers them and runs
+them. `errexit` itself is `set -e`, under "Pipelines and lists" above.
+
+Pinned in `safe/fdshell/tests/trap.rs`: the entry rules
+(`an_entry_ignored_condition_is_refused_and_stays_ignored`,
+`an_entry_ignored_reset_is_refused_and_stays_ignored`,
+`the_inherited_ignore_is_refused_silently`), the `signalfd` overlap
+(`a_blocked_signal_goes_to_the_signalfd_not_the_trap` and its four neighbours), the
+crossing (`a_trap_crosses_into_a_forked_subshell`,
+`a_backgrounded_builtin_runs_the_parents_action`, `an_executed_child_starts_fresh`), and
+the bash-verified matrix that runs registration, delivery, the `$?` rule and the `EXIT`
+path in one script.
 
 ### Aliases
 

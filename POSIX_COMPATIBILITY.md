@@ -794,6 +794,66 @@ invocation name and keeps the operands as `$1..`, so
 `sh -c 'echo $0 $1' a b` prints `sh a`, not `a b`. A script file still sees
 its own path in `$0` as POSIX requires.
 
+## Signals ignored on entry stay ignored
+
+POSIX XCU 2.15 gives a non-interactive shell one entry rule: a signal **ignored on
+entry** cannot be trapped or reset, "although no error need be reported". In bash the
+inherited set is empty and the rule never fires; here it fires, and the silence POSIX
+allows is exactly what the shell does: no registration, no `sigaction`, no diagnostic,
+status 0, and the condition **stays** ignored, so the signal keeps doing what it did on
+entry.
+
+The set is not empty here for a reason that is fdshell's own: Rust's runtime ignores
+`SIGPIPE`, so `trap 'x' PIPE` and `trap - PIPE` are refused in `-c` mode where bash
+traps and resets it. Put another signal into the set the way a real caller would —
+`sh -c 'trap "" INT; exec fdshell -c …'`, so the ignore is inherited through the `exec`
+— and both halves of the rule are measurable, measured against bash 5.3.9 on this host
+2026-11-16: the registration is refused and the signal stays ignored, and so is the
+reset, where bash *lists* the inherited ignore (`trap -- '' SIGINT`) and honours its
+own reset — its `trap - INT; kill -INT $$; echo after` prints nothing and ends 130,
+fdshell's prints `after` and ends 0. The set is a snapshot taken once at startup; a live
+query would refuse conditions bash accepts, because after the first `trap` the process
+disposition is no longer the one the shell started with.
+
+The glibc-reserved numbers are the same family: the name table has no row for 32 or 33,
+the printer falls back to the decimal spelling bash uses, and `trap 'x' 32` is a real
+`sigaction` argument here, so it answers `EINVAL` — bash answers 0 there, fdshell
+reports the syscall and answers 1, the errno kept in the chain.
+
+Pinned in `safe/fdshell/tests/trap.rs`: `the_inherited_ignore_is_refused_silently` (the
+SIGPIPE row), `an_entry_ignored_condition_is_refused_and_stays_ignored`,
+`an_entry_ignored_reset_is_refused_and_stays_ignored`,
+`a_signal_not_ignored_on_entry_is_trapped_as_usual` and
+`the_entry_rule_needs_the_parent_to_ignore_the_signal` — the control, where nothing is
+inherited and every row is an ordinary registration both shells agree on — plus
+`a_signal_glibc_reserves_reports_the_syscall`; the snapshot itself in
+`safe/fdshell/src/state/tests.rs::the_seed_records_the_signals_ignored_on_entry`.
+
+## Traps cross into fdshell's own forked subshells
+
+POSIX XCU 2.11 resets *trapped* signals in a child process, and bash follows that for its
+subshells, so an action the parent registered does not run inside a bash subshell.
+fdshell's pure-fork children — a `$(…)` capture, a background job, a `wait` arm — keep
+both halves: the disposition through the kernel and the table through the copy-on-write
+copy of the shell state. So the action runs there. Measured on this host 2026-11-16, one
+script in both shells (`trap 'echo hit' USR1`, then a
+`$( sh -c 'kill -USR1 $PPID; echo alive' )` capture): bash prints `hit` from itself and
+`captured=[alive]`; fdshell's capture holds both lines — the `hit` was printed by the
+forked child that ran the parent's action — and both then print `after`. The control is
+the same shape with no trap: the forked child dies of `USR1` and the parent carries on at
+rc 0, while bash's whole top shell dies there at 138.
+
+An **exec'd** child is where the two shells agree and where POSIX's rule actually bites:
+`exec` resets handlers, and ignored signals stay ignored, so a backgrounded `sleep`
+killed by `USR1` dies without printing in either shell — a child caught inside the
+fork-to-exec window still has the table, so both shells print a late `hit` now and then
+(measured; the row asserts the shell's own line, not the child's).
+
+Pinned in `safe/fdshell/tests/trap.rs`: `a_trap_crosses_into_a_forked_subshell`,
+`a_backgrounded_builtin_runs_the_parents_action` (the forked builtin's own `read` answers
+`EINTR`, which is what `sa_flags == 0` means), `an_executed_child_starts_fresh`, and the
+`wait` arm that runs the action twice, `the_wait_boundary_runs_the_pending_action`.
+
 ## Strict mode
 
 `shopt -s strict` is an opt-in FDSHELL extension: it bans absolute paths and
