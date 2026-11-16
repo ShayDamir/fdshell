@@ -62,9 +62,12 @@ fn set_lists_variables_in_sorted_order() {
     // (bash 5.3.9 lists only variables and functions, no positionals at all —
     // accepted divergence).
     // IFS's default value is " \t\n", so its line is followed by a blank one.
+    // The other startup seed, `OPTIND=1`, is listed too (task #589).
     assert_eq!(
         out.lines().collect::<Vec<_>>(),
-        ["ALPHA=2", "IFS= \t", "", "MID=9", "ZED=1", "_=MID=9"]
+        [
+            "ALPHA=2", "IFS= \t", "", "MID=9", "OPTIND=1", "ZED=1", "_=MID=9"
+        ]
     );
 }
 
@@ -72,11 +75,11 @@ fn set_lists_variables_in_sorted_order() {
 fn set_lists_ifs_exactly_once() {
     let (out, err, code) = run("set");
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out.lines().collect::<Vec<_>>(), ["IFS= \t", ""]);
+    assert_eq!(out.lines().collect::<Vec<_>>(), ["IFS= \t", "", "OPTIND=1"]);
     // IFS already assigned: still listed exactly once.
     let (out, err, code) = run("IFS=z; set");
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out.lines().collect::<Vec<_>>(), ["IFS=z", "_="]);
+    assert_eq!(out.lines().collect::<Vec<_>>(), ["IFS=z", "OPTIND=1", "_="]);
     // Unbound: listed **zero** times. The startup seed made the general store
     // path the whole listing, so the unbound state lists nothing (task #511) —
     // bash 5.3.9 measures the same (measured 2026-11-12 on this branch:
@@ -84,7 +87,8 @@ fn set_lists_ifs_exactly_once() {
     // row `_=IFS`, the tracker left by the `unset` command).
     let (out, err, code) = run("unset IFS; set");
     assert_eq!(code, 0, "stderr={err:?}");
-    assert_eq!(out, "_=IFS\n", "bash measures the same");
+    // Only the `OPTIND` seed is left to list, then the tracker row `unset` left.
+    assert_eq!(out, "OPTIND=1\n_=IFS\n", "bash measures the same");
     assert!(
         !out.lines().any(|l| l.starts_with("IFS=")),
         "stdout={out:?}"
