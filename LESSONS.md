@@ -11613,10 +11613,29 @@ snapshot taken once at startup (`ShellState::ignored_on_entry`, a `u64` bitmask 
 the first `trap` the process disposition is no longer the one the shell started with, so a
 live query would refuse conditions bash would accept.
 
+The rule has two edges and only one is shared. fdshell refuses **both** forms — the
+registration and the reset — the same silent way at status 0; bash, whose own set is empty
+so the rule never fires for it, *lists* the inherited ignore (`trap -- '' SIGINT`) and
+honours a reset on it: `trap - INT; kill -INT $$; echo after` under a parent that ignored
+`INT` dies of `INT` (its parent sees 130) where fdshell prints `after` at 0
+(bash 5.3.9, this host, 2026-11-16). So the pinned rows are fdshell's silence at 0 and the
+inherited ignore surviving the `kill`; bash's list line is a comment. The control that
+decides the rule is the **parent's** `trap`: the same rows with nothing inherited are
+ordinary registrations both shells agree on line for line. Put the signal into the set the
+way a real caller does — a parent `sh` that sets it and `exec`s the binary, so the
+disposition is inherited through the `exec` — and the suite keeps to `sh`, which it already
+spawns (bash is never spawned by the suite, so bash rows stay comments).
+
 Pins: `safe/fdshell/src/state/tests.rs::the_seed_records_the_signals_ignored_on_entry` (the
 `SIGPIPE` bit set, an ordinary bit clear) with `unsafe/sys/tests/sigpipe.rs` pinning the
 same fact at the `sys` layer, and `safe/fdshell/tests/trap.rs::the_inherited_ignore_is_refused_silently`
-(prints nothing, status 0, and a signal not ignored on entry still traps).
+(prints nothing, status 0, and a signal not ignored on entry still traps),
+`safe/fdshell/tests/trap.rs::an_entry_ignored_condition_is_refused_and_stays_ignored`,
+`safe/fdshell/tests/trap.rs::an_entry_ignored_reset_is_refused_and_stays_ignored`,
+`safe/fdshell/tests/trap.rs::a_signal_not_ignored_on_entry_is_trapped_as_usual` and
+`safe/fdshell/tests/trap.rs::the_entry_rule_needs_the_parent_to_ignore_the_signal` (the
+no-parent control, and the reset row there is a SIGINT death — a killed shell never
+reaches an exit code, so the pin reads the signal).
 
 ## The deferred trap executor is the only runner; handlers flag, tables store (task #585)
 
@@ -11640,8 +11659,26 @@ handled signal interrupts a pidfd `waitid` — `wait_pidfd_rusage` retries it af
 handler flags: flag-and-resume is the pattern, and an interrupted reap must never abort
 the shell.
 
+Two corollaries of the same split, measured against bash 5.3.9 on this host 2026-11-16. A
+signal **blocked** by `signalfd` never reaches the handler at all — `sys::signalfd` blocks
+its signals with `sigprocmask(SIG_BLOCK)`, which is how it receives them — and a blocked
+signal is not delivered to an installed handler, so the fd owns the delivery, no action
+runs while the block holds, and the order of the two registrations changes nothing; the
+table entry survives and still prints, and `EXIT` is not a signal, so its own path runs it
+even while another signal is blocked. Second: a pure-fork child keeps **both** halves the
+executor needs — the disposition (kernel inheritance) and the table (the CoW copy, the same
+route the pending mask already takes) — so the action runs in a `$(…)` capture, a
+background builtin and a `wait` arm alike; POSIX XCU 2.11 resets trapped signals in a child
+process and bash follows it for its subshells, so bash runs nothing there. `exec` is the
+reset: an exec'd child has the default disposition and ignored signals stay ignored, which
+is where both shells agree (a child caught inside the fork-to-exec window still has the
+table, so both shells print a late action now and then — measured, not asserted).
+
 Pins: `safe/fdshell/tests/trap.rs::the_action_sees_the_pre_trap_status_and_restore_is_exact`,
 `safe/fdshell/tests/trap.rs::the_exit_trap_runs_at_most_once_per_shell`,
 `safe/fdshell/tests/trap.rs::the_wait_boundary_runs_the_pending_action`,
 `safe/fdshell/src/trap_exec/tests.rs::the_action_runs_in_the_current_environment`,
-`unsafe/sys/tests/sigaction.rs::waitid_resumes_after_the_handler_interrupted_the_wait`.
+`unsafe/sys/tests/sigaction.rs::waitid_resumes_after_the_handler_interrupted_the_wait`,
+`safe/fdshell/tests/trap.rs::a_blocked_signal_goes_to_the_signalfd_not_the_trap`,
+`safe/fdshell/tests/trap.rs::a_trap_crosses_into_a_forked_subshell` and
+`safe/fdshell/tests/trap.rs::a_backgrounded_builtin_runs_the_parents_action`.
