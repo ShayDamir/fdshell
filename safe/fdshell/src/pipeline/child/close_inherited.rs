@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C pipeline -- -E 'test(/^pipeline::/) | binary(pipeline)'
+
 //! Close the pipeline fds a forked child inherited but does not use.
 //!
 //! Every child inherits the parent's whole fd table: all pipeline pipe

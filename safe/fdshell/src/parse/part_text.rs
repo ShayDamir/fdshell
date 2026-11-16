@@ -52,7 +52,7 @@ fn owned_span(text: &ScriptText, tokens: &[Token]) -> Result<ScriptText, Report<
     let line = text.as_bytes().change_context(ParseError::Never)?;
     let reach = terminator_spans(line)
         .into_iter()
-        .filter(|&(s, _)| s >= start && s < end)
+        .filter(|&(s, _)| (start..end).contains(&s))
         .map(|(_, e)| e)
         .max()
         .unwrap_or(end);

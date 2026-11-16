@@ -66,7 +66,7 @@ pub(super) fn seeded_ignored_on_entry() -> u64 {
     (1..=64).fold(0u64, |mask, sig| {
         let ignored = sys::signal::disposition(sig).unwrap_or(0) == sys::signal::SIG_IGN;
         if ignored {
-            mask | (1u64 << (sig - 1))
+            mask + (1u64 << (sig - 1))
         } else {
             mask
         }

@@ -1244,11 +1244,11 @@ the entry above, extended to the delimiter half. The derivation has a
 mutant-shaped consequence: the two lists are **not** equivalent, because an
 *empty* delimiter line yields a region and **no** span, so
 `tokenize_statement`'s `regions.is_empty() && terminators.is_empty()` mask
-decision must key on the body regions, and the `&&`→`||` mutant is unkillable
-unless the empty-delimiter shape is pinned (`cat <<''` + `'` + the blank line
-prints `'`, bash parity —
+decision must key on the body regions, and the empty-delimiter shape must
+stay pinned (`cat <<''` + `'` + the blank line prints `'`, bash parity —
 `parse/token/tests.rs::the_body_of_an_empty_delimiter_line_is_blank_too`,
-`tests/heredoc.rs::the_body_of_an_empty_delimiter_line_is_data`). (2)
+`tests/heredoc.rs::the_body_of_an_empty_delimiter_line_is_data`; these pins
+fail on the `&&`→`||` mutant, verified on the mutated tree in task #577). (2)
 **Tokenizer**: `tokenize_statement` blanks the structure bytes
 (`is_structural`) of those spans in the copy it tokenizes;
 `brace_expand/protect::terminator_word` stays as it was — the two mechanisms
@@ -1310,15 +1310,17 @@ than by process position or a sleep — transient states (pre-exec, mid-cleanup)
 are not inspectable and must simply be re-polled.
 
 ## A mutant "caught" by a flaky test is a false kill — re-run the gate honestly after fixing the test
-The review gate reported `close_inherited`'s `j == i` skip inversion as
-caught, but the catch was a false kill from the same racy test that produced
-the timeout: a flaky test can "kill" a mutant by timing out. Once the test was
-deterministic, the honest baseline (`cargo mutants` without `--baseline skip`)
-showed it was genuinely missed — and observable: the inversion closes the
-stage's *own* capture socketpair, so `true | builtin memfd %>%m` fails `EBADF`
-where the clean build exits 0. Rule: when a gate reports "N caught, 0 missed"
-on a run that had flaky tests, distrust the miss list; the fix is a
-deterministic test that kills the mutant, not a re-skip of the baseline.
+A flaky test can "kill" a mutant by timing out: when a gate reports
+"N caught, 0 missed" on a run that had flaky tests, distrust the miss list
+and re-derive honestly (apply the mutation, run the suite) after fixing the
+test. The fix for a genuinely missed mutant is a deterministic test that
+kills it, not a re-skip of the baseline. The mechanism that made this task's
+case observable: the `close_inherited` `j == i` skip inversion closes the
+stage's *own* capture socketpair, so `true | builtin memfd %>%m` fails
+`EBADF` where the clean build exits 0. Pins: the deterministic row
+`safe/fdshell/tests/pipeline.rs::builtin_stage_keeps_own_capture_pair`
+asserts both halves — clean rc 0 **and** the capture's success — and fails on
+the inversion (verified on the mutated tree, task #577).
 
 The same failure hits a **whole sweep** in **both** directions when
 `cargo mutants` runs at `-j4` on a shared target dir on a loaded host: mutants
@@ -7833,28 +7835,24 @@ a shorter spelling of it.
 ## A gate start measured from the operator pair has a `-2` twin that is killable at the one-byte glued offset (task #236, re-derived by task #477)
 
 `cond.rs::run_cond_list` names the gate start once (`let after = i + 2;` — the
-byte just past the `&&`/`||` pair the boundary scan stopped on) and hands it
-to `gate_end` and `take_bodies`. The equivalence claim for the `+`→`-` mutant
-(`i - 2`) — the bytes it starts on are the pair's own bytes and the whitespace
-before them, and the gate's two run rules normalize that start to exactly the
-state the `+2` start has on the gated list's first word (`strip_at` classifies
-a `|`/`&` word as a pair head/tail and leaves `Place::Command`, `group_at_run`
-treats a run ending in `&&`/`||` as command position, so the gate ends at the
-same byte and `take_bodies` counts the same `<<` operators) — holds only for
-shapes with a **multi-byte** left operand. This entry's original claim,
-"no input distinguishes the two starts — do not chase with a test", was later
-**disproved**: a **one-byte** left operand glued to the pair puts the operator
-at `i == 1`, where `i - 2` underflows — in the dev profile (what nextest and
-`cargo mutants` build) the shell dies with rc 101 — and
+byte just past the `&&`/`||` pair the boundary scan stopped on) and hands it to
+`gate_end` and `take_bodies`; measuring the start from the pair is the honest
+expression (the pair *is* the boundary). The `+`→`-` twin (`i - 2`) agrees with
+the honest start for every shape with a **multi-byte** left operand — the bytes
+it starts on are the pair's own bytes and the whitespace before them, and the
+gate's run rules normalize that start to exactly the state the `+2` start has
+on the gated list's first word (`strip_at` classifies a `|`/`&` word as a pair
+head/tail and leaves `Place::Command`, `group_at_run` treats a run ending in
+`&&`/`||` as command position, so the gate ends at the same byte and
+`take_bodies` counts the same `<<` operators) — but a **one-byte** left operand
+glued to the pair puts the operator at `i == 1`, where `i - 2` underflows: in
+the dev profile (what nextest and `cargo mutants` build) the shell dies with rc
+101, so the mutant is **killed by its pins**, not an equivalent; in a release
+profile the wrapped index finds no separator and the mutant is equivalent there.
+Pins (both fail on the applied mutant, task #577):
 `tests/glued_pair.rs::one_byte_operand_glued_to_the_pair_keeps_the_gate_behind_the_pair`
-pins exactly that row (full record in the task-#326 entry
-"The cond-list gate window starts behind the pair; its 2-byte back-step is equivalent until it underflows";
-re-derived by hand on task #477: mutation applied, whole `-p fdshell` suite
-run, exactly that row fails). In a release profile the mutant is equivalent
-(the wrapped index finds no separator and the gate ends at the same byte), so
-a release-profile `Missed` line for it is the equivalence, not a gap.
-Measuring the start from the pair remains the honest expression (the pair *is*
-the boundary); the `+`→`*` twin (`2i`, past the gated text) is killed by
+and `safe/fdshell/src/tests/run.rs::the_or_gate_skips_from_behind_the_operator_not_the_left_word`
+(rule 28, measured). The `+`→`*` twin (`2i`, past the gated text) is killed by
 `cond/tests.rs::gate_end_skips_the_gated_and_list_to_its_separator` and
 `tests/run.rs::short_circuit_gate_consumes_the_gated_list_bodies`.
 
@@ -8409,26 +8407,23 @@ Use `>>` on a fixed name and count lines.
 
 ## The cond-list gate window starts behind the pair; its 2-byte back-step is equivalent until it underflows (task #326)
 
-`cargo mutants` missed `cond.rs:62:31` (`let after = i + 2` → `i - 2`) in the
-short-circuit gate path. Analysis: `gate_end` scans for the first depth-0
-`;`/`\n` from `after`, and the 2 bytes the mutant adds to the window's front
-are the pair's own bytes plus the whitespace before it — a statement's text
-has no top-level `;` or newline there (the segment split consumed them), and
-the pair bytes score nothing (`|` is no keyword, opens no group), so for every
-shape with a **multi-byte** left operand the scan returns the same gate end
-and takes the same bodies: unkillable. It is killable at exactly one offset: a
-**one-byte** left operand glued to the pair (`:||echo b`) puts the operator at
-`i == 1`, where `i - 2` underflows — in the dev profile (what nextest and
-`cargo mutants` build) the shell dies with rc 101 where bash and fdshell print
-nothing at rc 0; in release the wrapped index finds no separator and the gate
-ends at the same byte, so the mutant is equivalent there. Pinned by
+The cond-list gate window starts behind the pair: `gate_end` scans for the
+first depth-0 `;`/`\n` from `after`, and for every shape with a **multi-byte**
+left operand the 2 bytes a `+`→`-` back-step adds to the window's front are
+the pair's own bytes plus the whitespace before them — a statement's text has
+no top-level `;` or newline there (the segment split consumed them) and the
+pair bytes score nothing (`|` is no keyword, opens no group) — so the scan
+returns the same gate end and takes the same bodies: equivalent at that
+offset. It is killable at exactly one offset: a **one-byte** left operand
+glued to the pair (`:||echo b`) puts the operator at `i == 1`, where `i - 2`
+underflows — in the dev profile (what nextest and `cargo mutants` build) the
+shell dies with rc 101 where bash and fdshell print nothing at rc 0; in
+release the wrapped index finds no separator and the mutant is equivalent
+there. Pinned by
 `tests/glued_pair.rs::one_byte_operand_glued_to_the_pair_keeps_the_gate_behind_the_pair`
-(`:||echo b`, `:||echo b; echo after`, the `&&` twin and the spaced twins, all
- measured against bash 5.3.9): the row pins the shape, the dev profile does
-the
- killing. Record it here so a future run reads the `Missed` line for this
-mutant
- in a release-profile run as the equivalence, not as a gap.
+(`:||echo b`, `:||echo b; echo after`, the `&&` twin and the spaced twins,
+all measured against bash 5.3.9): the row pins the shape, the dev profile
+does the killing — the pin fails on the applied mutant (task #577).
 
 ## A clamp the tail guard already enforces is a provably equivalent mutant: delete it, and pin a cursor rule with the rows that need it (task #326, round 3)
 
@@ -11543,26 +11538,22 @@ records the rejection.
 ## A boundary comparison with an unproducible equality class is accepted-equivalent at that boundary
 
 When a comparison earns its keep (both neighbours of `<` are pinned and
-behave differently), but its **equality input cannot be produced**, the
-mutant that stretches it (`<'→`<=`, and the `>`/`>=` mirror) is an accepted
-equivalent: the census that shows no input reaches `s == end` **is** the
-proof; do not invent a test for an input that cannot exist. Mechanism on
-`parse/part_text.rs::owned_span`: the producer `scan::heredoc/regions.rs
-::terminator_spans` emits only **sized** spans (its own `stop > start`
-filter), so `s == end` would need the slice's last token to end ON the
-newline byte that opens the terminator line — and the tokenizer never
-delivers a token ending on a bare newline (words flush before it, trimmed
-separators drop out, blanked body words emit no tokens). Equality therefore
-forces a zero-width span, and zero-width shapes (`(len, len)` end-of-file
-regions) pass both predicates identically. Unlike
+behave differently), but its **equality input cannot be produced** (the
+producer's own filter admits only sized results and the byte-level shape
+shows the equality input can never arrive), the mutant that stretches it
+(`<'→`<=`, and the `>`/`>=` mirror) is an accepted equivalent: the census
+that shows no input reaches equality **is** the proof; do not invent a test
+for an input that cannot exist. When the membership can be written through a
+method with no operator at the boundary (CATCHING_MUTANTS rules 22/24),
+simplify the source and retire the record instead; this entry governs the
+comparisons that must stay. Unlike
 "Redundant boundary ±1 produces equivalent mutants", the comparison here is
-**not** redundant — keep the source, record the proof.
+**not** redundant — keep the comparison, record the proof.
 
 Pins: the append-side equality neighbour
 `parse/part_text/tests.rs::a_region_starting_exactly_at_the_slice_end_still_appends`
-(zero-width region, `s == end`, the newline stays), the `<`-side neighbours
-by the existing append/extension pins of the same file, and the allowlist
-record for `parse/part_text.rs:55:43`.
+(zero-width region, the equality neighbour, the newline stays) and the
+`<`-side neighbours by the existing append/extension pins of the same file.
 
 ## A real signal handler relies on glibc's `sigaction` to fill the restorer (task #582)
 

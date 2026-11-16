@@ -262,8 +262,6 @@ keeps the reusable proof. A "registry" below means that allowlist.
     it: apply the mutant as source, run the suite, and name the producer rule;
     keep the comparison (it carries the rule — this is not rule 6's dead arm) and
     pin the equality input that *does* exist (a zero-width pass-through) at its
-    consumer. Measured on `parse/part_text.rs`'s `owned_span` filter, `<'→`<=`
-    (task #563): sized spans, no token ends on a bare newline, and the append-side
-    equality neighbour
-    `parse/part_text/tests.rs::a_region_starting_exactly_at_the_slice_end_still_appends`
-    keeps the newline.
+    consumer. This recipe governs the records whose boundary cannot be rewritten
+    with no operator at it; where rule 24's shape (an exact range, a method, a
+    predicate) fits, simplify the source and retire the record with it.

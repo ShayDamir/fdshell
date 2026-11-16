@@ -229,16 +229,24 @@ fn builtin_middle_stage_pipeline_completes() {
 /// capture socketpair: `close_inherited` closes every *sibling* pair but skips
 /// the stage's own (the `j == i` guard). Flipping that guard closes the stage's
 /// own socket, so the capture `try_clone` hits a closed fd and the pipeline
-/// fails with EBADF.
+/// fails with EBADF. The row asserts both halves of the clean build's answer —
+/// exit status 0 **and** the capture's success (the parent's `%m` is the memfd
+/// the stage reported, `statx`-visible as an empty regular file).
 #[test]
 fn builtin_stage_keeps_own_capture_pair() {
     let dir = Scratch::new();
-    let out = run(&dir, "true | builtin memfd %>%m");
+    let out = run(&dir, "true | builtin memfd %>%m; builtin statx %m");
     assert_eq!(
         out.status.code(),
         Some(0),
         "stderr={:?}",
         str::from_utf8(&out.stderr)
+    );
+    assert_eq!(str::from_utf8(&out.stderr).unwrap(), "");
+    let stdout = str::from_utf8(&out.stdout).unwrap().to_string();
+    assert!(
+        stdout.contains("kind=file size=0"),
+        "the memfd must reach the parent through the stage's own pair: {stdout}"
     );
 }
 
