@@ -58,7 +58,7 @@ fn second_reap_of_the_same_child_reports_echild() {
                 "first reap must succeed"
             );
             let err = match pidfd.wait_pidfd() {
-                Ok(status) => panic!("the second reap of a reaped child must fail"),
+                Ok(_status) => panic!("the second reap of a reaped child must fail"),
                 Err(err) => err,
             };
             assert_eq!(

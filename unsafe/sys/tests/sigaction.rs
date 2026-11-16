@@ -202,6 +202,8 @@ fn waitid_resumes_after_the_handler_interrupted_the_wait() -> Result<(), Syscall
                 // SAFETY: both are valid `timespec`es; `nanosleep` reads one and
                 // writes the other.
                 unsafe { libc::nanosleep(&request, &mut remainder) };
+                // SAFETY: `getppid` is a plain libc query; the result is this
+                // process's parent, a valid pid to signal.
                 let _ = sys::signal::kill(sys::Pid::from_raw(unsafe { libc::getppid() }), SIGUSR1);
                 sys::exit(0);
             }
