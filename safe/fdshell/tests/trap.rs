@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::str;
 
 use sys::Pid;
-use sys::signalfd::{SIGTERM, SIGUSR1};
+use sys::signalfd::{SIGINT, SIGTERM, SIGUSR1};
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
@@ -708,4 +708,467 @@ fn a_signal_during_the_blocking_poll_reports_its_own_chain() {
     assert!(stderr.contains("poll failed"), "stderr={stderr:?}");
     assert!(stderr.contains("errno 4"), "the EINTR chain: {stderr:?}");
     assert_eq!(output.status.code(), Some(1), "stderr={stderr:?}");
+}
+
+// ---- the entry rules (task #586) -------------------------------------------
+
+/// Run `script` in a shell whose **parent** `sh` runs `parent` and then `exec`s
+/// the binary, so the shell starts with that disposition already set — the only
+/// way to put a signal into the entry-ignored set besides `SIGPIPE`, which Rust's
+/// runtime ignores for its own reasons (LESSONS "fdshell's inherited-ignored set
+/// is not empty, so POSIX's entry rule is observable here (task #584)").
+/// `parent = "true"` is the control: nothing is inherited. Every bash row quoted
+/// below was measured with `bash` in the parent's place on this host, 2026-11-16
+/// (the suite does not spawn bash, so bash rows stay comments).
+fn run_under(parent: &str, script: &str) -> (String, String, i32) {
+    let cmd = format!("{parent}; exec \"$0\" -c \"$1\"");
+    let output = Command::new("sh")
+        .args(["-c", &cmd, BIN, script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// Run `script` and report the **signal** that ended the shell — a shell killed by
+/// a default-dispositioned signal never reaches an exit code, so `run()` cannot
+/// see it (stdout is what the kill did not take with it).
+fn run_to_signal(script: &str) -> (String, Option<i32>, String) {
+    let output = Command::new(BIN)
+        .args(["-c", script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        output.status.signal(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+    )
+}
+
+/// POSIX XCU 2.15: a signal ignored on entry to a non-interactive shell cannot be
+/// trapped, "although no error need be reported" — fdshell prints nothing, answers
+/// 0, and the signal **stays** ignored, so the `kill` does not kill. bash reaches
+/// the same status and the same survival, and additionally *lists* the inherited
+/// ignore (`trap -- '' SIGINT` before `after`), because in bash that set is empty
+/// and the rule never fires; here it fires because of Rust's `SIGPIPE` and, in this
+/// row, because the parent put `INT` in it (`the_inherited_ignore_is_refused_silently`
+/// is the SIGPIPE row of the same rule).
+#[test]
+fn an_entry_ignored_condition_is_refused_and_stays_ignored() {
+    let (out, err, code) = run_under(
+        r#"trap "" INT"#,
+        "trap 'echo hit' INT; trap; kill -INT $$; echo after",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "after\n",
+        "no list line: the condition was refused (bash prints `trap -- '' SIGINT` here)"
+    );
+    assert_eq!(err, "", "no error need be reported");
+}
+
+/// The reset form is refused the same way, so the ignore survives and the shell is
+/// never killed: `trap -` on an entry-ignored condition is a silent no-op at status
+/// 0. bash honours its own reset — measured silence at rc 130 (its parent's number
+/// for a SIGINT death), the divergence POSIX_COMPATIBILITY documents.
+#[test]
+fn an_entry_ignored_reset_is_refused_and_stays_ignored() {
+    let (out, err, code) = run_under(r#"trap "" INT"#, "trap - INT; kill -INT $$; echo after");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "after\n",
+        "bash prints nothing at all: it died of the signal"
+    );
+    assert_eq!(err, "");
+}
+
+/// A signal **not** in the inherited set is trapped normally, so the entry rule
+/// refuses one condition and does not shut off the builtin: the registration prints
+/// and the action runs. bash prints one line more, the inherited ignore of its own.
+#[test]
+fn a_signal_not_ignored_on_entry_is_trapped_as_usual() {
+    let (out, err, code) = run_under(
+        r#"trap "" INT"#,
+        "trap 'echo hit' USR1; trap; kill -USR1 $$; echo after",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "trap -- 'echo hit' SIGUSR1\nhit\nafter\n",
+        "bash prepends `trap -- '' SIGINT` (stderr={err:?})"
+    );
+}
+
+/// The rule is about the **inherited** set only: with nothing inherited, all three
+/// shapes are ordinary registrations and every row is byte-identical to bash's
+/// measured answer — the list line and the action for the registration, the default
+/// action (a SIGINT death, bash's parent sees 130) for the reset.
+#[test]
+fn the_entry_rule_needs_the_parent_to_ignore_the_signal() {
+    let (out, err, code) = run_under(
+        "true",
+        "trap 'echo hit' INT; trap; kill -INT $$; echo after",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "trap -- 'echo hit' SIGINT\nhit\nafter\n");
+
+    let (out, signal, err) = run_to_signal("trap - INT; kill -INT $$; echo after");
+    assert_eq!(signal, Some(SIGINT), "the default action is back: {out:?}");
+    assert_eq!(out, "", "bash prints nothing here either");
+    assert_eq!(err, "");
+
+    let (out, err, code) = run_under(
+        "true",
+        "trap 'echo hit' USR1; trap; kill -USR1 $$; echo after",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "trap -- 'echo hit' SIGUSR1\nhit\nafter\n");
+}
+
+// ---- the signalfd overlap (task #586) --------------------------------------
+
+/// The decision, stated in README "Signals and traps": a signal that is both
+/// `signalfd`ed and `trap`ped belongs to the **fd**. `sys::signalfd::signalfd`
+/// blocks its signals with `sigprocmask(SIG_BLOCK)`, and a blocked signal is never
+/// delivered to an installed handler, so the trap action cannot run while the fd is
+/// readable. Registration order is irrelevant — the block decides. bash has no
+/// `signalfd`, so this is fdshell's own contract, and both orders are pinned.
+#[test]
+fn a_blocked_signal_goes_to_the_signalfd_not_the_trap() {
+    let (out, err, code) = run(
+        "signalfd %s USR1; trap 'echo trap-hit' USR1; kill -USR1 $$; \
+         wait readable %s) echo arm-fired;; after 300) echo timeout;; done; echo tail",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "arm-fired\ntail\n", "the fd owns the signal");
+    assert_eq!(err, "");
+
+    // The same shape with no `signalfd`: nothing blocks USR1, so the handler flags
+    // it and the action runs at the next boundary — and the `wait` has no fd
+    // variable to resolve, which is its own report (status 1).
+    let (out, err, code) = run("trap 'echo trap-hit' USR1; kill -USR1 $$; \
+         wait readable %s) echo arm-fired;; after 300) echo timeout;; done; echo tail");
+    assert_eq!(
+        code, 1,
+        "the `wait` names the fd it cannot resolve: {err:?}"
+    );
+    assert_eq!(out, "trap-hit\n", "unblocked, the action runs");
+    assert!(err.contains("s is not set"), "stderr={err:?}");
+}
+
+#[test]
+fn registering_the_trap_first_changes_nothing_for_a_blocked_signal() {
+    let (out, err, code) = run(
+        "trap 'echo trap-hit' USR1; signalfd %s USR1; kill -USR1 $$; \
+         wait readable %s) echo arm-fired;; after 300) echo timeout;; done; echo tail",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "arm-fired\ntail\n", "the block decides, not the order");
+    assert_eq!(err, "");
+}
+
+/// No arm reads the fd, so the signal stays pending in it and the action never
+/// runs — the shell simply carries on at status 0. The control row is the same
+/// script without the `signalfd`.
+#[test]
+fn a_blocked_signal_runs_no_action_when_no_arm_reads_it() {
+    let (out, err, code) = run("trap 'echo hit' USR1; signalfd %s USR1; kill -USR1 $$; echo after");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "after\n",
+        "the action never runs while the signal is blocked"
+    );
+    assert_eq!(err, "");
+
+    let (out, err, code) = run("trap 'echo hit' USR1; kill -USR1 $$; echo after");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hit\nafter\n", "the control: unblocked, it runs");
+}
+
+/// The table keeps its entry even when the fd owns the delivery, so the list form
+/// still prints it (and re-inputs it) — registration and delivery are separate
+/// mechanisms, and only the delivery is decided by the mask.
+#[test]
+fn a_blocked_signal_keeps_its_table_entry() {
+    let (out, err, code) = run("trap 'echo x' USR1; signalfd %s USR1; trap; echo tail");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "trap -- 'echo x' SIGUSR1\ntail\n");
+    assert_eq!(err, "");
+}
+
+/// `EXIT` is not a signal, so blocking `USR1` cannot hold the `EXIT` trap: the
+/// action runs on the exit path (the same slot `zero_and_exit_are_the_same_slot_at_the_exit_path`
+/// and `exit_runs_the_exit_trap_with_the_requested_status` pin).
+#[test]
+fn the_exit_trap_runs_even_while_a_signal_is_blocked() {
+    let (out, err, code) = run("signalfd %s USR1; trap 'echo bye' EXIT; kill -USR1 $$; echo after");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "after\nbye\n");
+    assert_eq!(err, "");
+}
+
+// ---- what crosses into a forked subshell (task #586) -----------------------
+
+/// Spawn `script` with stdin a **pipe held open** for the whole run, so a
+/// backgrounded `read` blocks instead of seeing an immediate EOF (the `deliver`
+/// pattern's live-stdin half; here the script delivers the signal itself).
+fn run_with_live_stdin(script: &str) -> (String, String, i32) {
+    let mut child = Command::new(BIN)
+        .args(["-c", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdin = child.stdin.take().unwrap();
+    let output = child.wait_with_output().unwrap();
+    drop(stdin);
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// Spawn `script` and report the pid the harness sees, so a row can tell the top
+/// shell's own pid from a forked child's (`run()` cannot: `.output()` never learns
+/// the pid).
+fn run_for_pid(script: &str) -> (u32, String, String, i32) {
+    let child = Command::new(BIN)
+        .args(["-c", script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let output = child.wait_with_output().unwrap();
+    (
+        pid,
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// POSIX (XCU 2.11) resets *trapped* signals in a child process and bash follows
+/// that for its subshells; fdshell's pure-fork children keep both the disposition
+/// (kernel inheritance) and the table (the `ShellState` copy-on-write copy), so a
+/// trap **does** cross into a forked subshell and the action runs there —
+/// `the_wait_boundary_runs_the_pending_action` already pins the same crossing
+/// through a `wait` arm. Here the grandchild's `kill -USR1 $PPID` lands on
+/// fdshell's forked child, which prints `hit` into the same capture pipe as its own
+/// `alive`; the top shell only assembles the capture. bash measures `hit` from
+/// itself, `captured=[alive]` (its subshell has no trap), `after`. The control —
+/// no trap — is the pure-fork child dying of `USR1` while the parent carries on at
+/// rc 0; bash's top shell dies there, rc 138.
+#[test]
+fn a_trap_crosses_into_a_forked_subshell() {
+    let (pid, out, err, code) = run_for_pid(
+        "trap 'echo hit' USR1; X=$( sh -c 'kill -USR1 $PPID; echo alive' ); \
+         echo \"top=$$ captured=[$X]\"; echo after",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(out.contains("alive"), "the grandchild's own line: {out:?}");
+    assert!(
+        out.contains("hit"),
+        "the forked child ran the parent's action: {out:?}"
+    );
+    assert!(
+        out.starts_with(&format!("top={pid} captured=[")),
+        "the capture is printed by the top shell the harness spawned: {out:?}"
+    );
+
+    let (pid, out, err, code) = run_for_pid(
+        "X=$( sh -c 'kill -USR1 $PPID; echo alive' ); \
+         echo \"top=$$ captured=[$X]\"; echo after",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out,
+        format!("top={pid} captured=[alive]\nafter\n"),
+        "no trap: the child died and printed nothing (bash's top shell dies here)"
+    );
+    assert_eq!(err, "");
+}
+
+/// A backgrounded **builtin** is a pure fork too, so the child runs the parent's
+/// action; its `read` answers `EINTR` (no `SA_RESTART` — LESSONS "A real signal
+/// handler relies on glibc's `sigaction` to fill the restorer (task #582)") and the
+/// child reports that on stderr before the parent reaps it. bash's child is already
+/// gone at the `kill` (`kill: No such process`, then `after`) — its subshell reset
+/// the trap and the signal killed the child. The `&` keeps a line to itself because
+/// a `&` behind a `;` on one line is a parse error here (bash backgrounds the job).
+#[test]
+fn a_backgrounded_builtin_runs_the_parents_action() {
+    let (out, err, code) = run_with_live_stdin(
+        "trap 'echo hit' USR1\nread x &\npid=$!\nkill -USR1 $pid\nwait $pid\necho after",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(
+        out.contains("hit"),
+        "the forked child ran the parent's action: {out:?}"
+    );
+    assert!(out.contains("after"), "the parent reaped it: {out:?}");
+    assert!(
+        err.contains("errno 4"),
+        "the child's `read` was interrupted: {err:?}"
+    );
+
+    let (out, err, code) =
+        run_with_live_stdin("read x &\npid=$!\nkill -USR1 $pid\nwait $pid\necho after");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "after\n", "no trap: the child died of USR1 silently");
+    assert_eq!(err, "");
+}
+
+/// `exec` resets handlers (and ignored signals stay ignored), so an **exec'd**
+/// child has `USR1`'s default action and dies without printing — both shells agree,
+/// which is why this row documents rather than pins: only the shell's own `after`
+/// at rc 0 is asserted. A child caught inside the fork-to-exec window still holds
+/// the table and would print `hit` (measured once in eight runs, in both shells),
+/// and the foreground `sleep` exists to put the `exec` before the `kill`, not to
+/// decide an outcome.
+#[test]
+fn an_executed_child_starts_fresh() {
+    let (out, err, code) =
+        run("trap 'echo hit' USR1\nsleep 2 &\npid=$!\nsleep 0.3\nkill -USR1 $pid\necho after");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(
+        out.contains("after"),
+        "the parent prints the only deterministic line: {out:?}"
+    );
+    assert_eq!(err, "");
+}
+
+// ---- the bash-verified matrix (task #586) ----------------------------------
+
+/// The whole feature, end to end, every row measured against bash 5.3.9 first. The
+/// single-mechanism rows stay where they are (`the_list_form_re_inputs`,
+/// `status_restore_after_a_signal_trap`, `the_exit_trap_runs_at_most_once_per_shell`,
+/// `the_ignore_form_survives_the_signal`,
+/// `a_reset_gives_the_signal_its_default_action_back`,
+/// `the_reserved_pair_is_rejected_here_not_ignored`,
+/// `zero_and_exit_are_the_same_slot_at_the_exit_path`,
+/// `a_signal_glibc_reserves_reports_the_syscall`); what is added here is the
+/// cross-check that runs registration, delivery, the `$?` rule and the `EXIT` path
+/// in one script, the `$(trap)`-to-a-variable-`eval` spelling, the `INT`
+/// ignore/reset rows, and the `ERR` row.
+
+/// Registration, a real `EXIT` path, and the requested status winning (bash: `work`,
+/// `bye`, rc 3 — byte for byte the same).
+#[test]
+fn the_matrix_exit_trap_runs_before_exit_status() {
+    let (out, err, code) = run("trap 'echo bye' EXIT; echo work; exit 3");
+    assert_eq!(code, 3, "stderr={err:?}");
+    assert_eq!(out, "work\nbye\n", "stderr={err:?}");
+}
+
+/// `trap ''` is the ignore disposition and `trap -` hands the signal back to the
+/// kernel, and the two rows cross-check each other on `INT`: the ignored signal is
+/// consumed and the shell survives at 0 (bash identical), while the reset one kills
+/// — nothing is printed because the kill takes the pending `echo` with it, and
+/// bash's parent sees 130 for the same death.
+#[test]
+fn the_matrix_ignore_and_reset_with_sigint() {
+    let (out, err, code) = run("trap '' INT; kill -INT $$; echo survived");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "survived\n", "bash answers the same");
+    assert_eq!(err, "");
+
+    let (out, signal, err) = run_to_signal("trap - INT; kill -INT $$; echo survived");
+    assert_eq!(
+        signal,
+        Some(SIGINT),
+        "killed by the signal it gave back: {out:?}"
+    );
+    assert_eq!(out, "");
+    assert_eq!(err, "");
+}
+
+/// The list form's re-input contract through a **variable** (`save=$(trap)` then
+/// `eval "$save"`), the shape POSIX promises; the reset in the middle is what makes
+/// the re-input the thing that restores the action, so the action runs only because
+/// the printed line parsed back. bash prints `hit`, `after`, rc 0.
+#[test]
+fn the_matrix_list_form_round_trips_through_a_variable() {
+    let (out, err, code) = run(
+        "trap 'echo hit' USR1; save=$(trap); trap - USR1; eval \"$save\"; \
+         kill -USR1 $$; echo after",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hit\nafter\n", "bash answers the same");
+    assert_eq!(err, "");
+}
+
+/// An invalid condition is reported at status 1 and must not abort the shell — the
+/// status is parity with bash, the wording is each shell's own (bash:
+/// `trap: BADSIG: invalid signal specification`). `the_reserved_pair_is_rejected_here_not_ignored`
+/// and `a_signal_glibc_reserves_reports_the_syscall` are the neighbouring decisions.
+#[test]
+fn the_matrix_bad_condition_reports_at_1_and_keeps_the_shell_alive() {
+    let (out, err, code) = run("trap 'echo x' BADSIG; echo rc=$?; echo alive");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(err.contains("BADSIG"), "stderr={err:?}");
+    assert!(
+        err.contains("invalid signal specification"),
+        "stderr={err:?}"
+    );
+    assert_eq!(out, "rc=1\nalive\n");
+}
+
+/// The `$?` rule across the whole path: the action **sees** the status the shell
+/// held when it was invoked (`kill`'s 0), changes it live inside itself (`false` →
+/// 1), and the shell sees its own value again afterwards — every line byte-identical
+/// to bash.
+#[test]
+fn the_matrix_status_restore_after_a_signal_trap_end_to_end() {
+    let (out, err, code) = run(
+        "trap 'echo in-trap-rc=$?; false; echo action-rc=$?' USR1; kill -USR1 $$; \
+         echo rc-after=$?; echo tail",
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "in-trap-rc=0\naction-rc=1\nrc-after=0\ntail\n",
+        "bash answers the same, line for line (stderr={err:?})"
+    );
+}
+
+/// One script, four mechanisms: register an action, deliver the signal, keep the
+/// shell's status as it was, and run the `EXIT` trap at the exit with the requested
+/// status 7 — bash's answer is byte for byte this.
+#[test]
+fn the_matrix_one_script_registration_delivery_status_exit_trap() {
+    let (out, err, code) = run(
+        "trap 'echo bye' EXIT; trap 'echo hit' USR1; kill -USR1 $$; \
+         echo status-after-trap=$?; exit 7",
+    );
+    assert_eq!(code, 7, "stderr={err:?}");
+    assert_eq!(out, "hit\nstatus-after-trap=0\nbye\n", "stderr={err:?}");
+}
+
+/// `ERR` is a ksh extension, not POSIX (`DEBUG` too), so fdshell refuses both as an
+/// invalid condition — reported at status 1, the shell alive at 0 — where bash
+/// registers `trap -- 'echo x' ERR` and runs it. `errexit` itself is task #118's.
+#[test]
+fn the_err_trap_is_out_of_scope_ksh_not_posix() {
+    let (out, err, code) = run("trap 'x' ERR; echo rc=$?; echo alive");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(err.contains("ERR"), "stderr={err:?}");
+    assert!(
+        err.contains("invalid signal specification"),
+        "stderr={err:?}"
+    );
+    assert_eq!(
+        out, "rc=1\nalive\n",
+        "bash registers it and answers rc=0 for the trap"
+    );
 }
