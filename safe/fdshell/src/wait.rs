@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C wait -C --test -C trap -- -E 'test(/^wait::/) | binary(wait) | binary(trap)'
+
 mod arm;
 pub(crate) mod round;
 
@@ -54,9 +56,13 @@ fn run_round(
             last = dispatch(arm, None, &none, false, cell).change_context(CmdError::Wait)?;
         }
     }
+    // Boundary after the round's polls and arm dispatches; the plan places it
+    // before `set_last_exit`, and the round now returns what a running action
+    // raises (a `break` inside an action reaches the block's own loop level).
+    let control = crate::trap_exec::run_pending(cell)?;
     let mut s = cell.borrow_mut().change_context(CmdError::Never)?;
     s.set_last_exit(last);
-    Ok(None)
+    Ok(control)
 }
 
 /// Poll the round's descriptors once and record each descriptor's `revents`.

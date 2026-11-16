@@ -279,3 +279,22 @@ fn script_file_with_a_nul_byte_names_the_nul_and_not_an_impossible_state() {
         "a user-reachable input must not be reported as an internal state, stderr={stderr}"
     );
 }
+
+/// The `-c` positional construction keeps the documented full-argv `Origin`
+/// index (task #585): in `sh -c cmd foo` the command string is `argv[2]` and
+/// `foo` — the first positional — is `argv[3]`, the phrase `explain` prints.
+/// Dropping the `+ 1` (or flipping the operator) prints a different slot.
+#[test]
+fn c_mode_positional_traces_the_full_argv_index() {
+    let output = Command::new(BIN)
+        .args(["-c", "explain 1", "foo"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(
+        str::from_utf8(&output.stdout).unwrap(),
+        "$1=\"foo\" (from argv[3])\n"
+    );
+    assert!(output.status.success());
+}

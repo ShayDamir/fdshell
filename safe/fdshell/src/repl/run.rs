@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C repl -C --test -C trap -- -E 'binary(repl) | binary(trap)'
+
 //! The interactive read-complete-execute loop: prompt, continuation buffering
 //! and dispatch, one logical input at a time.
 
@@ -25,6 +27,12 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
     let mut input = LineReader::new();
     loop {
         let Some(text) = read_input(cell, &mut input)? else {
+            // End of input ends the shell: the EXIT trap runs first, at most
+            // once per shell, and its report is written here (the `Ok(())`
+            // contract, the plan's decision for task #585).
+            if let Err(report) = crate::trap_exec::run_exit_trap(cell) {
+                let _ = writeln!(crate::io::Stderr, "{report:?}");
+            }
             return Ok(());
         };
         if let Err(err) = handle(&text, cell) {

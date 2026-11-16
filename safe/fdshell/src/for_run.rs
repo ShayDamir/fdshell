@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C loops -C --test -C trap -- -E 'test(/^for_run::/) | binary(loops) | binary(trap)'
+
 pub(crate) mod arith;
 mod array_word;
 mod word;
@@ -51,7 +53,11 @@ fn run_for_body(
         .change_context(CmdError::Resolve)?
     };
     for word in &words {
-        if let Some(control) = word::run_for_word(forblock, word, cell)? {
+        let control = word::run_for_word(forblock, word, cell)?;
+        // End-of-iteration boundary: pending traps run here, and one raised
+        // inside an action wins over the body's own (the plan's merge rule).
+        let control = crate::trap_exec::run_pending(cell)?.or(control);
+        if let Some(control) = control {
             match at_level(control) {
                 AtLevel::Stop => break,
                 // The for list's next iteration is the next word.

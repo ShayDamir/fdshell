@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C trap -- -E 'binary(trap)'
+
 use error_stack::{Report, ResultExt, ensure};
 
 use crate::error::cmd::CmdError;
@@ -21,5 +23,9 @@ pub(crate) fn run_exit(
         }
     };
     ensure!((0..=255).contains(&code), CmdError::ExitArgInvalid);
+    // The EXIT trap runs at most once per shell before the process ends
+    // (bash measured), so an `exit` raised from inside a trap action exits
+    // with its status without re-entering the trap.
+    crate::trap_exec::run_exit_trap(cell)?;
     sys::exit(code);
 }

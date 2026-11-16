@@ -1,3 +1,5 @@
+// mutants: -C --test -C kill -C --test -C pidfd_send_signal -C --test -C sigaction -- -E 'binary(kill) | binary(pidfd_send_signal) | binary(sigaction)'
+
 use crate::getrusage::CpuTimes;
 use crate::siginfo::{SigInfo, WaitStatus};
 use crate::{LocalFd, SyscallError, cvt};
@@ -16,19 +18,31 @@ impl LocalFd {
         // SAFETY: `libc::rusage` is all-integer; zeroed is valid.
         let mut raw: libc::rusage = unsafe { core::mem::zeroed() };
 
-        // SAFETY: SYS_waitid (247) is valid on x86_64 Linux. `self` is a valid
-        // pidfd. info and raw are writable memory of the right size for the
-        // kernel.
-        cvt(unsafe {
-            libc::syscall(
-                libc::SYS_waitid,
-                libc::P_PIDFD as i64,
-                self.as_raw() as i64,
-                &raw mut info,
-                libc::WEXITED as i64,
-                &raw mut raw,
-            ) as isize
-        })?;
+        // An interrupted retry: the record handler runs with `sa_flags == 0`
+        // (task #582's choice — no `SA_RESTART`), so a handled signal makes the
+        // `waitid` answer `EINTR` **after** the handler has flagged it, and the
+        // shell's flag-and-keep-walking pattern needs the wait to resume: the
+        // pidfd still holds the child (measured, task #585 — a `kill -USR1 $$`
+        // command used to abort the shell through this errno).
+        loop {
+            // SAFETY: SYS_waitid (247) is valid on x86_64 Linux. `self` is a valid
+            // pidfd. info and raw are writable memory of the right size for the
+            // kernel.
+            match cvt(unsafe {
+                libc::syscall(
+                    libc::SYS_waitid,
+                    libc::P_PIDFD as i64,
+                    self.as_raw() as i64,
+                    &raw mut info,
+                    libc::WEXITED as i64,
+                    &raw mut raw,
+                ) as isize
+            }) {
+                Ok(_) => break,
+                Err(SyscallError::Other { errno, .. }) if errno == libc::EINTR => continue,
+                Err(e) => return Err(e),
+            }
+        }
 
         let status = match info.si_code {
             libc::CLD_EXITED => WaitStatus::Exited(info.si_status),

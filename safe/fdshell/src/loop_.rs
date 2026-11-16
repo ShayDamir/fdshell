@@ -52,6 +52,9 @@ fn run_loop_body(
         let control = errexit::gated(cell, || {
             crate::repl::run_cond_list(&block.condition, &cond_bodies, cell, bg)
         })?;
+        // Boundary after the condition (outside the errexit gate — an action is
+        // not part of the test); one raised inside an action wins (plan's rule).
+        let control = crate::trap_exec::run_pending(cell)?.or(control);
         if let Some(control) = control {
             match at_level(control) {
                 AtLevel::Stop => break,
@@ -70,9 +73,12 @@ fn run_loop_body(
             break;
         }
         ran_body = true;
-        if let Some(control) = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
+        let control = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
             crate::repl::run_script(&block.body, cell)
-        })? {
+        })?;
+        // Boundary after the body, same merge rule as the condition's.
+        let control = crate::trap_exec::run_pending(cell)?.or(control);
+        if let Some(control) = control {
             match at_level(control) {
                 AtLevel::Stop => break,
                 AtLevel::Next => continue,

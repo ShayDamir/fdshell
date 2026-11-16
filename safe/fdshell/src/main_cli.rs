@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C cli_args -C --test -C trap -- -E 'binary(cli_args) | binary(trap)'
+
 use crate::{AppError, ShellState, exec_cmd};
 use alloc::collections::VecDeque;
 use core::fmt::Write;
@@ -6,6 +8,19 @@ use sys::Origin;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Position, ScriptText, Trace};
+
+/// The natural-exit path: the EXIT trap runs (at most once per shell) before
+/// the process ends; its report is consumed with a write because this
+/// function's error type is `AppError` (the plan's decision, task #585).
+fn exit_with_trap(code: i32, state: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
+    if let Err(report) = crate::trap_exec::run_exit_trap(state) {
+        let _ = writeln!(crate::io::Stderr, "{report:?}");
+    }
+    if code != 0 {
+        sys::exit(code);
+    }
+    Ok(())
+}
 
 pub fn run_cmd_mode(
     all_args: &[ShortCStr],
@@ -32,12 +47,7 @@ pub fn run_cmd_mode(
     }
     let text = ScriptText::new(cmd.clone(), Position::new(1, 1), Origin::CliArgument(2));
     match exec_cmd(&text, state) {
-        Ok(code) => {
-            if code != 0 {
-                sys::exit(code);
-            }
-            Ok(())
-        }
+        Ok(code) => exit_with_trap(code, state),
         Err(info) => {
             let _ = writeln!(crate::io::Stderr, "{info:?}");
             sys::exit(1);
@@ -56,12 +66,7 @@ pub fn execute_script(
         origin,
     );
     match exec_cmd(&text, state) {
-        Ok(code) => {
-            if code != 0 {
-                sys::exit(code);
-            }
-            Ok(())
-        }
+        Ok(code) => exit_with_trap(code, state),
         Err(info) => {
             let _ = writeln!(crate::io::Stderr, "{info:?}");
             sys::exit(1);

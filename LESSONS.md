@@ -11617,3 +11617,31 @@ Pins: `safe/fdshell/src/state/tests.rs::the_seed_records_the_signals_ignored_on_
 `SIGPIPE` bit set, an ordinary bit clear) with `unsafe/sys/tests/sigpipe.rs` pinning the
 same fact at the `sys` layer, and `safe/fdshell/tests/trap.rs::the_inherited_ignore_is_refused_silently`
 (prints nothing, status 0, and a signal not ignored on entry still traps).
+
+## The deferred trap executor is the only runner; handlers flag, tables store (task #585)
+
+The trap chain splits three ways: the `sys` handler flags (the pending-mask static —
+see LESSONS: "A real signal handler relies on glibc's `sigaction` to fill the restorer
+(task #582)"), the `ShellState` table stores (task #583), the builtin registers (task
+#584) — and `safe/fdshell/src/trap_exec.rs` *runs*, dash's `trap.c::dotrap` / bash's
+`trap.c::run_pending_traps` shape. Only it may call the runner for a pending trap: the
+handler must stay async-signal-safe (one atomic), so running happens at command
+boundaries after the handler has returned. `$?` is saved before an action and restored
+after — the action must not be able to change what the shell sees (POSIX, Austin Group
+#1602) — and restoring the *code* is exact for every consumer (`$?` renders
+`exit_code()`, and nothing matches `last_status` on its variant). The EXIT trap is a
+one-shot: an `exit` inside an action must exit with that status without re-entering the
+trap (bash 5.3.9, measured), and the guard is a `static` `AtomicBool` because
+dispositions and the pending mask are already process-global. One consequence of the
+wait block's forked arms (task #362): an arm child forked after a flag fired inherits
+the pending mask through CoW and runs the action at its own boundary too, so that pin
+asserts the double run as measured. And because `sa_flags == 0` (no `SA_RESTART`), a
+handled signal interrupts a pidfd `waitid` — `wait_pidfd_rusage` retries it after the
+handler flags: flag-and-resume is the pattern, and an interrupted reap must never abort
+the shell.
+
+Pins: `safe/fdshell/tests/trap.rs::the_action_sees_the_pre_trap_status_and_restore_is_exact`,
+`safe/fdshell/tests/trap.rs::the_exit_trap_runs_at_most_once_per_shell`,
+`safe/fdshell/tests/trap.rs::the_wait_boundary_runs_the_pending_action`,
+`safe/fdshell/src/trap_exec/tests.rs::the_action_runs_in_the_current_environment`,
+`unsafe/sys/tests/sigaction.rs::waitid_resumes_after_the_handler_interrupted_the_wait`.

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C case -C --test -C trap -- -E 'test(/^case_exec::/) | binary(case) | binary(trap)'
+
 use crate::glob::match_component;
 use crate::loop_control::LoopControl;
 use crate::parse::case_clause::CaseClause;
@@ -61,6 +63,8 @@ fn run_case_body(
         let control = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
             crate::repl::run_script(&clause.body, cell)
         })?;
+        // Boundary after the clause body; the action's control wins (plan's rule).
+        let control = crate::trap_exec::run_pending(cell)?.or(control);
         if control.is_some() {
             // `case` is a transparent level (LESSONS "A cond-list run returns loop
             // control"): a `break`/`continue`/`exit` raised in any body of the

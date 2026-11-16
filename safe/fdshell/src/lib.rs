@@ -64,6 +64,7 @@ mod state;
 mod substitute;
 mod task;
 mod time_exec;
+mod trap_exec;
 mod verbose;
 mod wait;
 mod warn;

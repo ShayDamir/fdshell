@@ -96,8 +96,10 @@ fn one_action_prints_one_line_per_condition() {
 
     let (out, err, code) = run("trap 'echo y' EXIT; trap 'echo x' USR1; trap");
     assert_eq!(code, 0, "stderr={err:?}");
+    // bash 5.3.9 (measured): the two list lines, then the natural end runs the
+    // EXIT action (task #585's executor).
     assert_eq!(
-        out, "trap -- 'echo y' EXIT\ntrap -- 'echo x' SIGUSR1\n",
+        out, "trap -- 'echo y' EXIT\ntrap -- 'echo x' SIGUSR1\ny\n",
         "EXIT comes first (stderr={err:?})"
     );
 }
@@ -331,4 +333,379 @@ fn registering_exit_leaves_the_process_disposition_alone() {
         Some(SIGUSR1),
         "`EXIT` is not a signal: SIGUSR1 keeps its default action"
     );
+}
+
+// ---- the deferred executor (task #585) -------------------------------------
+
+/// Write `content` to a pid-uniqued script file and run it (the file mode,
+/// task #291's entry), reporting stdout, stderr and the exit code.
+fn run_script_file(tag: &str, content: &str) -> (String, String, i32) {
+    let path = std::env::temp_dir().join(format!("fdshell-trap-{tag}-{}.sh", std::process::id()));
+    std::fs::write(&path, content).unwrap();
+    let output = Command::new(BIN)
+        .arg(path.to_str().unwrap())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    std::fs::remove_file(&path).ok();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// Spawn the REPL (no `-c`), pipe `input` to stdin, close it, and capture
+/// stdout/stderr/exit code (the shape of `tests/repl.rs::run_repl`).
+fn run_repl(input: &str) -> (String, String, i32) {
+    let mut child = Command::new(BIN)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    drop(child.stdin.take().unwrap());
+    let output = child.wait_with_output().unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// Spawn the REPL under a pty (`script -qec <bin>`, so `isatty(0)` is true),
+/// write `input`, close the pty's stdin (that does deliver a pty EOF), settle,
+/// and report stdout plus whether the shell was still alive (the shape of
+/// `tests/repl.rs::run_tty` — sleep, `try_wait`, `kill` a live child, drain;
+/// the pty echoes the input, so assertions `contains`, never exact equality).
+fn run_tty(input: &str) -> (String, bool) {
+    let mut child = Command::new("script")
+        .args(["-qec", BIN, "/dev/null"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    drop(child.stdin.take().unwrap());
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let alive = child.try_wait().unwrap().is_none();
+    if alive {
+        let _ = child.kill();
+    }
+    let output = child.wait_with_output().unwrap();
+    (str::from_utf8(&output.stdout).unwrap().to_string(), alive)
+}
+
+/// The `deliver` shape extended to report what the shell printed (the plan's
+/// pin 20: the signal lands while `read` blocks, the handler flags it, and the
+/// boundary that follows the finished `read` runs the action — then the poke
+/// lets the script finish, so the assertion is the printed action and status
+/// 0 (bash runs the trap at the same boundary; its `read` returns 128+sig
+/// instead of finishing — the shapes' statuses differ, the order is the same).
+#[test]
+fn a_signal_during_a_blocking_read_runs_the_action() {
+    let mut child = Command::new(BIN)
+        .args([
+            "-c",
+            "trap 'echo a' USR1; builtin echo ready; read x; builtin echo [{$x}]",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let ready = lines.next().unwrap().unwrap();
+    assert_eq!(
+        ready, "ready",
+        "the registration must print its marker first"
+    );
+    sys::signal::kill(Pid::from_raw(child.id() as i32), SIGUSR1).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    child.stdin.as_mut().unwrap().write_all(b"ping\n").unwrap();
+    drop(child.stdin.take().unwrap());
+    // The rest of stdout belongs to the reader that already took `ready`
+    // (`wait_with_output` drains an empty pipe and loses buffered bytes). The
+    // signal interrupts the blocked `read` (the handler runs first —
+    // `sa_flags` is 0), and the boundary after the finished `read` runs the
+    // action: `a`, then the script's own `[ping]` line (bash runs the trap at
+    // the same point; its `read` answers 130 instead of finishing — the
+    // statuses differ, the order is the same).
+    let rest: Vec<String> = lines.collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(
+        rest,
+        ["a", "[{ping}]"],
+        "the action runs at the boundary after the read"
+    );
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(0), "the script finishes");
+}
+
+// ---- the exit paths ----------------------------------------------------------------
+
+/// The `exit` builtin runs the EXIT trap before the process ends, and the
+/// requested status wins (bash 5.3.9, measured: `bye`, rc 3).
+#[test]
+fn exit_runs_the_exit_trap_with_the_requested_status() {
+    let (out, err, code) = run("trap 'echo bye' EXIT; exit 3");
+    assert_eq!(code, 3, "stderr={err:?}");
+    assert_eq!(out, "bye\n", "stderr={err:?}");
+}
+
+/// The `-c` mode's natural end (status 0) runs the trap (measured: `hi`,
+/// `bye`, rc 0).
+#[test]
+fn a_natural_end_at_zero_runs_the_exit_trap() {
+    let (out, err, code) = run("trap 'echo bye' EXIT; echo hi");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hi\nbye\n", "stderr={err:?}");
+}
+
+/// A non-zero last status is what the shell exits with, trap printed first
+/// (measured: `bye`, rc 1).
+#[test]
+fn a_natural_end_at_a_nonzero_status_keeps_it() {
+    let (out, err, code) = run("trap 'echo bye' EXIT; false");
+    assert_eq!(code, 1, "stderr={err:?}");
+    assert_eq!(out, "bye\n", "stderr={err:?}");
+}
+
+/// A script file's EOF is an exit path (measured: `bye`, rc 0).
+#[test]
+fn script_eof_runs_the_exit_trap() {
+    let (out, err, code) = run_script_file("eof", "trap 'echo bye' EXIT\n");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "bye\n", "stderr={err:?}");
+}
+
+/// The REPL's piped-EOF exit path runs the trap (measured against
+/// `bash --noediting`: `bye`, rc 0; the prompts echo on stdout, hence
+/// `contains`).
+#[test]
+fn repl_eof_on_a_pipe_runs_the_exit_trap() {
+    let (out, err, code) = run_repl("trap 'echo bye' EXIT\n");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(out.contains("bye\n"), "stdout={out:?} stderr={err:?}");
+}
+
+/// The interactive exit path, gated on `ignoreeof` (on for a tty, so the row
+/// turns it off first — that is the whole point). The LESSONS tty shape:
+/// `script -qec`, `contains` assertions only (the pty echoes the input).
+#[test]
+fn repl_eof_on_a_tty_runs_the_exit_trap() {
+    let (out, alive) = run_tty("set +o ignoreeof\ntrap 'echo bye' EXIT\n");
+    assert!(!alive, "the shell exits by itself after the trap: {out:?}");
+    assert!(
+        out.contains("bye"),
+        "the trap runs at the EOF exit: {out:?}"
+    );
+}
+
+// ---- the boundary and the `$?` rule --------------------------------------------------
+
+/// The task's pin shape (measured, bash 5.3.9): the action runs at the
+/// boundary after the `kill` command, and the shell's `$?` afterwards predates
+/// the action — the `[ "$?" = 1 ]` test sees `false`'s status, so status 0
+/// proves the restore.
+#[test]
+fn status_restore_after_a_signal_trap() {
+    let (out, err, code) = run(r#"trap 'echo hit' USR1; kill -USR1 $$; false; [ "$?" = 1 ]"#);
+    assert_eq!(code, 0, "stdout={out:?} stderr={err:?}");
+    assert!(out.contains("hit"), "the action ran: {out:?}");
+}
+
+/// Inside the action, `$?` is the status the shell held when the action was
+/// invoked (the status `kill` left: 0 — measured); the action's own commands
+/// change it live (`false` → 1 inside); and the shell sees its pre-action
+/// value again after the action (measured, bash 5.3.9, line for line).
+#[test]
+fn the_action_sees_the_pre_trap_status_and_restore_is_exact() {
+    let (out, err, code) = run(
+        r#"trap 'echo in-trap-rc=$?; false; echo post-rc=$?' USR1; kill -USR1 $$; echo rc-after-trap=$?; echo tail"#,
+    );
+    assert_eq!(code, 0, "stdout={out:?} stderr={err:?}");
+    assert_eq!(
+        out, "in-trap-rc=0\npost-rc=1\nrc-after-trap=0\ntail\n",
+        "stderr={err:?}"
+    );
+}
+
+/// The action runs through the in-process runner, so an assignment inside it
+/// lands in the shell's own store (measured: `X=set`).
+#[test]
+fn the_action_runs_in_the_current_environment() {
+    let (out, err, code) = run(r#"trap 'X=set' USR1; kill -USR1 $$; echo X=$X"#);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "X=set\n", "stderr={err:?}");
+}
+
+/// An `exit` inside a running trap action exits with that status, the EXIT
+/// trap running for the process's end (measured: `hit`, `bye`, rc 2).
+#[test]
+fn exit_inside_a_trap_action_exits_with_its_status() {
+    let (out, err, code) =
+        run("trap 'echo bye' EXIT; trap 'echo hit; exit 2' USR1; kill -USR1 $$; echo not-reached");
+    assert_eq!(code, 2, "stdout={out:?} stderr={err:?}");
+    assert_eq!(out, "hit\nbye\n", "stderr={err:?}");
+}
+
+/// The EXIT trap runs at most once per shell: an `exit` inside the action
+/// ends the shell without re-entering the trap, and that status wins
+/// (measured: `bye` once, rc 5).
+#[test]
+fn the_exit_trap_runs_at_most_once_per_shell() {
+    let (out, err, code) = run("trap 'echo bye; exit 5' EXIT; exit 3");
+    assert_eq!(code, 5, "stderr={err:?}");
+    assert_eq!(out, "bye\n", "one line only: {out:?} stderr={err:?}");
+}
+
+/// An empty action is the ignore disposition: it consumes its signal and runs
+/// nothing (the pin against the executor running `Ignore` entries).
+#[test]
+fn the_ignore_form_needs_no_execution() {
+    let (out, err, code) = run("trap '' USR1; kill -USR1 $$; echo after");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "after\n", "the disposition did the work: {out:?}");
+}
+
+/// `0` and `EXIT` are the same slot (task #583/#584's key `0`), so registering
+/// the numeric spelling reaches the same executor path (measured: `bye`, rc 3).
+#[test]
+fn zero_and_exit_are_the_same_slot_at_the_exit_path() {
+    let (out, err, code) = run("trap 'echo bye' 0; exit 3");
+    assert_eq!(code, 3, "stderr={err:?}");
+    assert_eq!(out, "bye\n", "stderr={err:?}");
+}
+
+/// A bad action is reported and the shell carries on. bash reports it at
+/// registration (`trap: line 1: syntax error …`, then `after`, rc 0); fdshell
+/// stores the bytes verbatim (task #584's decision), so the report surfaces at
+/// execution instead — same continuation, same status.
+#[test]
+fn a_bad_action_is_reported_and_the_shell_carries_on() {
+    let (out, err, code) = run("trap 'echo hit &&' USR1; kill -USR1 $$; echo after");
+    assert_eq!(code, 0, "stdout={out:?} stderr={err:?}");
+    assert_eq!(out, "after\n");
+    assert!(err.contains("parse error"), "stderr={err:?}");
+    assert!(err.contains("expected command after"), "stderr={err:?}");
+}
+
+/// Loop control raised inside an action propagates through the boundary like
+/// any other control the runner returns (measured: `loop-1`, `hit`,
+/// `after-loop` — the `break` stops the loop).
+#[test]
+fn loop_control_raised_inside_an_action_propagates() {
+    let (out, err, code) = run(
+        r#"trap 'echo hit; break' USR1; for i in 1 2 3; do echo loop-$i; kill -USR1 $$; done; echo after-loop"#,
+    );
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "loop-1\nhit\nafter-loop\n", "stderr={err:?}");
+}
+
+// ---- the block-executor boundaries -------------------------------------------------
+
+/// The plain `run.rs` boundary: a signal flagged by the command before it is
+/// the next check.
+#[test]
+fn the_run_boundary_is_the_first_check() {
+    let (out, err, code) = run("trap 'echo hit' USR1; kill -USR1 $$");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hit\n", "stderr={err:?}");
+}
+
+/// The `for_run` boundary: the signal is flagged inside the body (the
+/// boundary inside the body's statement runs first — §4 — and the loop's own
+/// merge line is next in line), so the action prints before the loop's tail.
+#[test]
+fn the_for_run_boundary_runs_the_pending_action() {
+    let (out, err, code) =
+        run("trap 'echo hit' USR1; for i in one; do kill -USR1 $$; done; echo tail");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hit\ntail\n", "stderr={err:?}");
+}
+
+/// The `case_exec` boundary, same shape through a clause body.
+#[test]
+fn the_case_exec_boundary_runs_the_pending_action() {
+    let (out, err, code) =
+        run("trap 'echo hit' USR1; case a in a) kill -USR1 $$;; esac; echo tail");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "hit\ntail\n", "stderr={err:?}");
+}
+
+/// The `wait` boundary: the flag is set during the assignment's substitution
+/// (the handler runs when the shell's `waitid` is interrupted — the resume
+/// path, §5's syscall-wake rule — and the assignment has no boundary of its
+/// own), the poll times out into its `after` arm, and the round's boundary
+/// line runs the action. The action prints **twice**: the arm child inherits
+/// the flagged pending mask through its fork (the mask was set before the
+/// dispatch) and runs the action at its own boundary, and the parent's round
+/// line runs it from the parent's copy (the plan's pins 16/17 substitute
+/// shapes measured unstable across this mechanism; the direct-kill rows above
+/// are the deterministic boundary pins).
+#[test]
+fn the_wait_boundary_runs_the_pending_action() {
+    let (out, err, code) = run(
+        "trap 'echo hit' USR1; signalfd %v PIPE; X=$(kill -USR1 $$; echo); \
+         wait readable %v) echo armed;; after 50) echo ready;; done; echo tail",
+    );
+    assert_eq!(code, 0, "stdout={out:?} stderr={err:?}");
+    assert_eq!(out, "ready\nhit\nhit\ntail\n", "stderr={err:?}");
+}
+
+/// A signal arriving during a **blocking** poll is `wait`'s own report, not a
+/// trap (plan §5.7: the poll's reporting stays as it is — `sa_flags == 0`
+/// means the `poll` answers `EINTR` after the handler flags). bash runs the
+/// trap first and reports `128+sig` (measured 138); fdshell flags the bit,
+/// reports its own `poll failed` chain, exits 1, and nothing runs — the gap
+/// predates task #585 and is not silently fixed here.
+#[test]
+fn a_signal_during_the_blocking_poll_reports_its_own_chain() {
+    let mut child = Command::new(BIN)
+        .args([
+            "-c",
+            "trap 'echo hit' USR1; signalfd %s PIPE; builtin echo ready; \
+             wait readable %s) echo fired;; done",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let ready = lines.next().unwrap().unwrap();
+    assert_eq!(
+        ready, "ready",
+        "the registration must print its marker first"
+    );
+    // Settle first: the signal must land while the shell is blocked in the
+    // `poll` (the kernel delivers pending signals at syscall exits — a signal
+    // that arrives during userspace time flags the executor's static but never
+    // interrupts the `poll`, and the block then waits forever).
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    sys::signal::kill(Pid::from_raw(child.id() as i32), SIGUSR1).unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stdout = str::from_utf8(&output.stdout).unwrap().to_string();
+    let stderr = str::from_utf8(&output.stderr).unwrap().to_string();
+    assert!(
+        !stdout.contains("hit"),
+        "the trap does not run first: {stdout:?}"
+    );
+    assert!(!stdout.contains("fired"), "no arm ran: {stdout:?}");
+    assert!(stderr.contains("poll failed"), "stderr={stderr:?}");
+    assert!(stderr.contains("errno 4"), "the EINTR chain: {stderr:?}");
+    assert_eq!(output.status.code(), Some(1), "stderr={stderr:?}");
 }

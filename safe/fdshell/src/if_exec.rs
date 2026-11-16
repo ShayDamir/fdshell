@@ -47,6 +47,8 @@ fn run_if_body(
             ifblock.cond_background,
         )
     })?;
+    // Boundary after the condition (outside the errexit gate); plan's merge rule.
+    let control = crate::trap_exec::run_pending(cell)?.or(control);
     if let Some(control) = control {
         // An `if` is not a loop level (README "Loop control"), so the signal is
         // the caller's: propagate it whole, consuming nothing.
@@ -66,6 +68,7 @@ fn run_if_body(
         let control = errexit::gated(cell, || {
             crate::repl::run_cond_list(&arm.cond, &arm_bodies, cell, arm.cond_background)
         })?;
+        let control = crate::trap_exec::run_pending(cell)?.or(control);
         if let Some(control) = control {
             return Ok(Some(control));
         }

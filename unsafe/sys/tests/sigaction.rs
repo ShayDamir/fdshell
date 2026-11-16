@@ -3,7 +3,7 @@
 use sys::SyscallError;
 use sys::errno;
 use sys::fork_cell::ForkCell;
-use sys::fork_pidfd::fork_pidfd_cell;
+use sys::fork_pidfd::{self, fork_pidfd_cell};
 use sys::pipe::pipe2;
 use sys::siginfo::WaitStatus;
 use sys::signal::{Action, SIG_DFL, SIG_IGN, disposition, set_action, take_pending};
@@ -168,4 +168,52 @@ fn invalid_signal_errors_via_cvt() {
         Err(err) => err,
     };
     assert_eq!(err.errno(), libc::EINVAL, "got {err}");
+}
+
+/// The `EINTR` retry of `wait_pidfd_rusage` (task #585): a recorded signal
+/// interrupts the `waitid` (the handler runs with `sa_flags == 0`, no
+/// `SA_RESTART`) and the wait must resume and still reap.
+///
+/// The shape is one grandchild deeper than the other rows so the ordering is
+/// forced: the grandchild wakes this row's child over a pipe (built before the
+/// forks, like the harness's own), sleeps 20 ms past the child's entry into
+/// `waitid`, signals it, and exits. The child's wait then answers `EINTR` —
+/// or the signal lands just before the `waitid`, either schedule is fine —
+/// re-enters, and reaps the grandchild's `Exited(0)` with the pending mask
+/// holding exactly the delivered signal's bit. The sleep windows are 20 ms
+/// wide at least.
+#[test]
+fn waitid_resumes_after_the_handler_interrupted_the_wait() -> Result<(), SyscallError> {
+    let (rd, wr) = pipe2(0)?;
+    assert_eq!(
+        child_reports(|| {
+            set_action(SIGUSR1, Action::Record).unwrap();
+            let (gpid, gpidfd) = fork_pidfd::fork_pidfd().unwrap();
+            if gpid.as_raw() == 0 {
+                let _ = wr.write_all(&[7u8]);
+                let request = libc::timespec {
+                    tv_sec: 0,
+                    tv_nsec: 20_000_000,
+                };
+                let mut remainder = libc::timespec {
+                    tv_sec: 0,
+                    tv_nsec: 0,
+                };
+                // SAFETY: both are valid `timespec`es; `nanosleep` reads one and
+                // writes the other.
+                unsafe { libc::nanosleep(&request, &mut remainder) };
+                let _ = sys::signal::kill(sys::Pid::from_raw(unsafe { libc::getppid() }), SIGUSR1);
+                sys::exit(0);
+            }
+            let mut b = [0u8; 1];
+            rd.read(&mut b).unwrap();
+            let status = gpidfd.unwrap().wait_pidfd().unwrap();
+            let mask = take_pending().unwrap();
+            usize::from(matches!(status, WaitStatus::Exited(0)) && mask == bit(SIGUSR1) as u64)
+        })?,
+        1,
+        "the waitid must resume after the handler's EINTR and still reap \
+         Exited(0) with exactly the delivered bit pending"
+    );
+    Ok(())
 }
