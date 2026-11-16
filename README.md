@@ -1890,7 +1890,7 @@ block holds, whichever of the two was registered first. The table entry survives
 still printed — the mask decides delivery, not registration. `EXIT` is not a signal, so
 its trap runs on the exit path even while another signal is blocked.
 
-**What crosses into a subshell.** POSIX XCU 2.11 resets *trapped* signals in a child
+**What crosses into a subshell.** POSIX XCU 2.12 resets *trapped* signals in a child
 process, and bash follows that for its subshells. fdshell's pure-fork children — a `$(…)`
 capture, a background job, a `wait` arm — keep both the disposition (kernel inheritance)
 and the table (the copy-on-write copy of the shell state), so a trap **does** cross into
@@ -1906,10 +1906,9 @@ Pinned in `safe/fdshell/tests/trap.rs`: the entry rules
 `an_entry_ignored_reset_is_refused_and_stays_ignored`,
 `the_inherited_ignore_is_refused_silently`), the `signalfd` overlap
 (`a_blocked_signal_goes_to_the_signalfd_not_the_trap` and its four neighbours), the
-crossing (`a_trap_crosses_into_a_forked_subshell`,
-`a_backgrounded_builtin_runs_the_parents_action`, `an_executed_child_starts_fresh`), and
-the bash-verified matrix that runs registration, delivery, the `$?` rule and the `EXIT`
-path in one script.
+crossing (`a_trap_crosses_into_a_forked_subshell` and
+`a_backgrounded_builtin_runs_the_parents_action`), and the bash-verified matrix that
+runs registration, delivery, the `$?` rule and the `EXIT` path in one script.
 
 ### Aliases
 

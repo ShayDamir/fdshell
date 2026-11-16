@@ -237,7 +237,8 @@ fn the_reserved_pair_is_rejected_here_not_ignored() {
 /// The one signal the name table cannot spell is a real `sigaction` argument on
 /// this machine and answers `EINVAL` (glibc keeps 32 for itself). bash answers 0
 /// there; fdshell reports the syscall and answers non-zero — the divergence
-/// task #586 documents.
+/// POSIX_COMPATIBILITY documents under "Signals ignored on entry stay
+/// ignored".
 #[test]
 fn a_signal_glibc_reserves_reports_the_syscall() {
     let (out, err, code) = run("trap 'x' 32; echo rc=$?; echo continued");
@@ -959,7 +960,7 @@ fn run_for_pid(script: &str) -> (u32, String, String, i32) {
     )
 }
 
-/// POSIX (XCU 2.11) resets *trapped* signals in a child process and bash follows
+/// POSIX (XCU 2.12) resets *trapped* signals in a child process and bash follows
 /// that for its subshells; fdshell's pure-fork children keep both the disposition
 /// (kernel inheritance) and the table (the `ShellState` copy-on-write copy), so a
 /// trap **does** cross into a forked subshell and the action runs there —
@@ -1003,9 +1004,10 @@ fn a_trap_crosses_into_a_forked_subshell() {
 /// A backgrounded **builtin** is a pure fork too, so the child runs the parent's
 /// action; its `read` answers `EINTR` (no `SA_RESTART` — LESSONS "A real signal
 /// handler relies on glibc's `sigaction` to fill the restorer (task #582)") and the
-/// child reports that on stderr before the parent reaps it. bash's child is already
-/// gone at the `kill` (`kill: No such process`, then `after`) — its subshell reset
-/// the trap and the signal killed the child. The `&` keeps a line to itself because
+/// child reports that on stderr before the parent reaps it. bash runs no action
+/// there — its subshell reset the trap and the signal killed the child — and
+/// prints only `after`, empty stderr, rc 0 (measured 2026-11-16, with stdin held
+/// open and at EOF). The `&` keeps a line to itself because
 /// a `&` behind a `;` on one line is a parse error here (bash backgrounds the job).
 #[test]
 fn a_backgrounded_builtin_runs_the_parents_action() {
@@ -1027,25 +1029,6 @@ fn a_backgrounded_builtin_runs_the_parents_action() {
         run_with_live_stdin("read x &\npid=$!\nkill -USR1 $pid\nwait $pid\necho after");
     assert_eq!(code, 0, "stderr={err:?}");
     assert_eq!(out, "after\n", "no trap: the child died of USR1 silently");
-    assert_eq!(err, "");
-}
-
-/// `exec` resets handlers (and ignored signals stay ignored), so an **exec'd**
-/// child has `USR1`'s default action and dies without printing — both shells agree,
-/// which is why this row documents rather than pins: only the shell's own `after`
-/// at rc 0 is asserted. A child caught inside the fork-to-exec window still holds
-/// the table and would print `hit` (measured once in eight runs, in both shells),
-/// and the foreground `sleep` exists to put the `exec` before the `kill`, not to
-/// decide an outcome.
-#[test]
-fn an_executed_child_starts_fresh() {
-    let (out, err, code) =
-        run("trap 'echo hit' USR1\nsleep 2 &\npid=$!\nsleep 0.3\nkill -USR1 $pid\necho after");
-    assert_eq!(code, 0, "stderr={err:?}");
-    assert!(
-        out.contains("after"),
-        "the parent prints the only deterministic line: {out:?}"
-    );
     assert_eq!(err, "");
 }
 

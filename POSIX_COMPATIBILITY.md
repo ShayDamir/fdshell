@@ -831,7 +831,7 @@ inherited and every row is an ordinary registration both shells agree on — plu
 
 ## Traps cross into fdshell's own forked subshells
 
-POSIX XCU 2.11 resets *trapped* signals in a child process, and bash follows that for its
+POSIX XCU 2.12 resets *trapped* signals in a child process, and bash follows that for its
 subshells, so an action the parent registered does not run inside a bash subshell.
 fdshell's pure-fork children — a `$(…)` capture, a background job, a `wait` arm — keep
 both halves: the disposition through the kernel and the table through the copy-on-write
@@ -843,16 +843,17 @@ forked child that ran the parent's action — and both then print `after`. The c
 the same shape with no trap: the forked child dies of `USR1` and the parent carries on at
 rc 0, while bash's whole top shell dies there at 138.
 
-An **exec'd** child is where the two shells agree and where POSIX's rule actually bites:
-`exec` resets handlers, and ignored signals stay ignored, so a backgrounded `sleep`
-killed by `USR1` dies without printing in either shell — a child caught inside the
-fork-to-exec window still has the table, so both shells print a late `hit` now and then
-(measured; the row asserts the shell's own line, not the child's).
+An **exec'd** image is where POSIX's reset actually bites, and there the two shells
+part ways: `exec` resets handlers, and ignored signals stay ignored, so a backgrounded
+`sleep` killed by `USR1` dies without acting in bash (measured 2026-11-16, eight runs:
+`child rc=138`, no action). fdshell never reaches that reset on this shape — its `$!`
+names the forked subshell, the same pure-fork child as above, so it runs the parent's
+action every time (eight runs: `hit`, then `child rc=0`).
 
 Pinned in `safe/fdshell/tests/trap.rs`: `a_trap_crosses_into_a_forked_subshell`,
 `a_backgrounded_builtin_runs_the_parents_action` (the forked builtin's own `read` answers
-`EINTR`, which is what `sa_flags == 0` means), `an_executed_child_starts_fresh`, and the
-`wait` arm that runs the action twice, `the_wait_boundary_runs_the_pending_action`.
+`EINTR`, which is what `sa_flags == 0` means), and the `wait` arm that runs the action
+twice, `the_wait_boundary_runs_the_pending_action`.
 
 ## Strict mode
 

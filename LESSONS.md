@@ -11668,11 +11668,12 @@ table entry survives and still prints, and `EXIT` is not a signal, so its own pa
 even while another signal is blocked. Second: a pure-fork child keeps **both** halves the
 executor needs — the disposition (kernel inheritance) and the table (the CoW copy, the same
 route the pending mask already takes) — so the action runs in a `$(…)` capture, a
-background builtin and a `wait` arm alike; POSIX XCU 2.11 resets trapped signals in a child
+background builtin and a `wait` arm alike; POSIX XCU 2.12 resets trapped signals in a child
 process and bash follows it for its subshells, so bash runs nothing there. `exec` is the
-reset: an exec'd child has the default disposition and ignored signals stay ignored, which
-is where both shells agree (a child caught inside the fork-to-exec window still has the
-table, so both shells print a late action now and then — measured, not asserted).
+reset for exec'd images, and only bash reaches that reset from a background job: its exec'd
+`sleep` killed by `USR1` dies without acting (eight runs, `child rc=138`, 2026-11-16),
+while fdshell's `$!` names its forked subshell — disposition and table intact — and acts
+every time (eight runs).
 
 Pins: `safe/fdshell/tests/trap.rs::the_action_sees_the_pre_trap_status_and_restore_is_exact`,
 `safe/fdshell/tests/trap.rs::the_exit_trap_runs_at_most_once_per_shell`,
