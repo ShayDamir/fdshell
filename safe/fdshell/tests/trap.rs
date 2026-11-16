@@ -1051,17 +1051,17 @@ fn an_executed_child_starts_fresh() {
 
 // ---- the bash-verified matrix (task #586) ----------------------------------
 
-/// The whole feature, end to end, every row measured against bash 5.3.9 first. The
-/// single-mechanism rows stay where they are (`the_list_form_re_inputs`,
-/// `status_restore_after_a_signal_trap`, `the_exit_trap_runs_at_most_once_per_shell`,
-/// `the_ignore_form_survives_the_signal`,
-/// `a_reset_gives_the_signal_its_default_action_back`,
-/// `the_reserved_pair_is_rejected_here_not_ignored`,
-/// `zero_and_exit_are_the_same_slot_at_the_exit_path`,
-/// `a_signal_glibc_reserves_reports_the_syscall`); what is added here is the
-/// cross-check that runs registration, delivery, the `$?` rule and the `EXIT` path
-/// in one script, the `$(trap)`-to-a-variable-`eval` spelling, the `INT`
-/// ignore/reset rows, and the `ERR` row.
+// The whole feature, end to end, every row measured against bash 5.3.9 first. The
+// single-mechanism rows stay where they are (`the_list_form_re_inputs`,
+// `status_restore_after_a_signal_trap`, `the_exit_trap_runs_at_most_once_per_shell`,
+// `the_ignore_form_survives_the_signal`,
+// `a_reset_gives_the_signal_its_default_action_back`,
+// `the_reserved_pair_is_rejected_here_not_ignored`,
+// `zero_and_exit_are_the_same_slot_at_the_exit_path`,
+// `a_signal_glibc_reserves_reports_the_syscall`); what is added here is the
+// cross-check that runs registration, delivery, the `$?` rule and the `EXIT` path
+// in one script, the `$(trap)`-to-a-variable-`eval` spelling, the `INT`
+// ignore/reset rows, and the `ERR` row.
 
 /// Registration, a real `EXIT` path, and the requested status winning (bash: `work`,
 /// `bye`, rc 3 — byte for byte the same).
