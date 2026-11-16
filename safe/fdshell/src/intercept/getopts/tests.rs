@@ -46,6 +46,9 @@ fn only_an_exact_parse_moves_the_counter() {
 #[test]
 fn run_getopts_is_handled_and_reports_success() {
     let cell = ForkCell::new(ShellState::new());
+    // Seed a nonzero status so the assertion below is not tautological (the
+    // `colon` tests' shape): the handler must reset a failed status to 0.
+    cell.borrow_mut().unwrap().set_last_exit(1);
     let cmdline = make_cmdline();
     assert!(run_getopts(b"getopts a o", &cmdline, &cell).unwrap());
     let state = cell.borrow().unwrap();
