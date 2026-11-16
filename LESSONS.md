@@ -3817,6 +3817,21 @@ and both are pinned.) The declare form (`local NAME`, no `=`) must leave
 `export E=env; f(){ local E; env | grep ^E=; }` still shows `E=env`. Restore
 the recorded `IFS` last, after the entry loop.
 
+**Extension (task #593):** the rule is about **every mirror field**, not just
+IFS — any field a setter syncs from a store name must be carried by both
+save/restore structures under the same first-touch discipline. The `OPTIND`
+counter (`state.optind`, synced by `set_var`/`unset_var`) is the second such
+field: `end_frame`'s per-name `restore()` helper writes the stores directly and
+never goes through `set_var`, and `EnvSave::restore`'s entry loop only syncs the
+field through the setter when an entry existed — the unbound-name branch removes
+the entry **without** the setter, and bash reaches exactly that branch after
+`unset OPTIND`. Record `old_optind` on the same first touch and write it back
+after the entry loop. Pins: `state/frames/tests.rs`
+(`a_local_optind_restores_the_counter`, `first_touch_keeps_the_caller_counter`),
+`run_env/tests.rs` (`apply_syncs_optind_and_restore_reverts_it`,
+`restore_reverts_the_counter_when_the_name_was_unbound`,
+`drop_new_exports_keeps_the_optind_entry_and_the_counter`).
+
 ## `local`'s name comes from the raw word; its value from `substitute_arg` with the assignment mask
 The name is the raw word up to the first `=` (never substituted, so
 `local '$x'=1` shadows the literal name `$x`), and the value goes through
