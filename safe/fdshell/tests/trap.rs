@@ -27,11 +27,11 @@ fn run(script: &str) -> (String, String, i32) {
 /// Run `setup` in a spawned shell, wait for its `ready` line (so the registration
 /// has happened), deliver `sig`, then poke stdin and collect the exit status.
 ///
-/// What is observable **without** the deferred executor (task #585 does not run a
-/// stored action yet) is survival: a shell that survives a signal whose default
-/// action is terminate had the disposition installed, and one that dies of it did
-/// not. Each row lives in its own process, so no test reads the dispositions of the
-/// test process itself (LESSONS, task #582).
+/// What is observable through the exit status alone is survival: a shell that
+/// survives a signal whose default action is terminate had the disposition
+/// installed, and one that dies of it did not. Each row lives in its own process,
+/// so no test reads the dispositions of the test process itself (LESSONS, task
+/// #582).
 fn deliver(setup: &str, sig: i32) -> std::process::ExitStatus {
     let script = format!("{setup}; builtin echo ready; read x; builtin echo [{{x}}]");
     let mut child = Command::new(BIN)
@@ -50,9 +50,11 @@ fn deliver(setup: &str, sig: i32) -> std::process::ExitStatus {
 
     sys::signal::kill(Pid::from_raw(child.id() as i32), sig).unwrap();
 
-    // Poke stdin: an ignored signal leaves a blocked `read` blocked, so this is how
-    // the shell gets to finish; a recorded one has already interrupted it (`sa_flags`
-    // is 0 — no `SA_RESTART`), and a reset one never got here.
+    // Poke stdin: it is how the shell gets to finish in every case that reaches
+    // here. An ignored signal leaves a blocked `read` blocked; a recorded one
+    // interrupts it (`sa_flags` is 0 — no `SA_RESTART`) and the site resumes, so
+    // the poked line is what ends that read too (task #581). A reset one never
+    // got here.
     let mut stdin = child.stdin.take().unwrap();
     stdin.write_all(b"ping\n").ok();
     stdin.flush().ok();
@@ -287,7 +289,8 @@ fn the_inherited_ignore_is_refused_silently() {
 
 /// `Action::Record`: the shell survives SIGUSR1, whose default action terminates —
 /// so the handler is installed (the body itself runs in task #585; a handled signal
-/// interrupts a blocking `read`, which is what the shell reports here).
+/// interrupts the blocking `read` and the read resumes, so the poked line is what
+/// ends it and the shell reaches its normal exit).
 #[test]
 fn a_registered_action_survives_the_signal() {
     let status = deliver("trap 'echo a' USR1", SIGUSR1);
@@ -411,11 +414,12 @@ fn run_tty(input: &str) -> (String, bool) {
 }
 
 /// The `deliver` shape extended to report what the shell printed (the plan's
-/// pin 20: the signal lands while `read` blocks, the handler flags it, and the
-/// boundary that follows the finished `read` runs the action — then the poke
-/// lets the script finish, so the assertion is the printed action and status
-/// 0 (bash runs the trap at the same boundary; its `read` returns 128+sig
-/// instead of finishing — the shapes' statuses differ, the order is the same).
+/// pin 20: the signal lands while `read` blocks, the handler flags it, the read
+/// answers `EINTR` and this site resumes (task #581), so the poked line is the
+/// line `read x` takes, and the boundary that follows the finished `read` runs
+/// the action — so the assertion is the printed action and status 0 (bash runs
+/// the trap at the same boundary; its `read` returns 128+sig instead of
+/// finishing — the shapes' statuses differ, the order is the same).
 #[test]
 fn a_signal_during_a_blocking_read_runs_the_action() {
     let mut child = Command::new(BIN)
@@ -440,11 +444,12 @@ fn a_signal_during_a_blocking_read_runs_the_action() {
     drop(child.stdin.take().unwrap());
     // The rest of stdout belongs to the reader that already took `ready`
     // (`wait_with_output` drains an empty pipe and loses buffered bytes). The
-    // signal interrupts the blocked `read` (the handler runs first —
-    // `sa_flags` is 0), and the boundary after the finished `read` runs the
-    // action: `a`, then the script's own `[ping]` line (bash runs the trap at
-    // the same point; its `read` answers 130 instead of finishing — the
-    // statuses differ, the order is the same).
+    // signal interrupts the blocked `read` (the handler flags it — `sa_flags`
+    // is 0), this site resumes (task #581) and the poked line is what it takes,
+    // so the boundary after the finished `read` runs the action: `a`, then the
+    // script's own `[ping]` line (bash runs the trap at the same point; its
+    // `read` answers 130 instead of finishing — the statuses differ, the order
+    // is the same).
     let rest: Vec<String> = lines.collect::<Result<Vec<_>, _>>().unwrap();
     assert_eq!(
         rest,
