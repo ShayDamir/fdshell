@@ -1,3 +1,10 @@
+// mutants: -C --lib -C --test -C parse -- -E 'binary(parse)'
+
+// Rejected as methods for this round: `split`, `next_val`, `parse_mode`,
+// `parse_dirfd` (and the family's `resolve.rs`/`strict.rs` twins) parse `&CStr`
+// — core's type, so an `impl CStr` here is E0116 — and the grammar is per-builtin
+// argparse, not a string primitive.
+
 use core::ffi::CStr;
 use error_stack::{Report, ResultExt};
 use sys::ImportedFd;

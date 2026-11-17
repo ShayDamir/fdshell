@@ -1,3 +1,10 @@
+// mutants: -C --lib -C --test -C arrays -- -E 'test(/^parse::/) | binary(arrays)'
+
+// Rejected as a method: `split_index_ref` and its twin `split_element_ref` are
+// the array-reference grammar, kept beside the spellings it parses; it already
+// answers through ShortCStr's own API (no STYLE §6.4 trigger), and two doc
+// pointers bind to this path.
+
 use sys::ShortCStr;
 
 /// Split `name[idx]` into `(name, idx)` when the tail is exactly `[digits]`.

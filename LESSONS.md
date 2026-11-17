@@ -10928,32 +10928,37 @@ fdshell's own readings and name the divergence.
 
 ## A predicate whose only data is the domain type's state is a method; the orphan rule marks the border
 
-`parse/word_quoted.rs` owned the span test `end - start > t.len()` and was
-called with it from ten files; every argument but the span belonged to
-`ShortCStr`, so STYLE §6.4 says the operation is the type's, and it now lives
-on `ShortCStr::is_shorter_than_span` in `unsafe/sys/src/shortcstr/len.rs`. The
-parse module keeps what it owns: the reading of the span as
-"quotes or escapes", and the gates that combine the test with a `Token`. The
-mirror case was already inside the type's own module family —
-`extend_from_slice_fallback(this, bytes)` named its first argument `this`, so
-it became a method beside the `push` family it serves.
+`parse/word_quoted.rs` owned the span test `end - start > t.len()`; ten files
+called it, and every argument but the span was `ShortCStr`'s, so STYLE §6.4
+moved it to `ShortCStr::is_shorter_than_span`
+(`unsafe/sys/src/shortcstr/len.rs`). The same move took the `as_bytes()` byte
+helpers `get_byte`/`first_byte` (`access.rs`), replacing two local copies used
+from four files each; the documented `BadState` answer is `None`. The parse
+module keeps the span reading as "quotes or escapes" and the gates combining
+the test with a `Token`. Mirror case:
+`extend_from_slice_fallback(this, bytes)`, first argument named `this`, became
+a method beside the `push` family it serves.
 
 Same mechanism on the read side: seven `child/` builtins each carried a
-byte-identical `resolve(var: &ShortCStr, state: &ShellState)` whose whole body
-was a lookup in `ShellState`'s own `fds` table, so the getter became
+byte-identical `resolve(var: &ShortCStr, state: &ShellState)` whose body was a
+lookup in `ShellState`'s own `fds` table, so the getter became
 `ShellState::fd_var(&self, name) -> Option<&FdVar>` in `state/fds.rs` — the
-read half of `set_fd_var`, kept in the module family that owns `FdVar`. The
-error mapping stays with the caller (STYLE §4): each site maps `None` itself.
+read half of `set_fd_var`, kept in the `FdVar`-owning family. The error mapping
+stays with the caller (STYLE §4): each site maps `None` itself. Operators
+follow the state too: `ShellState::option_on(bit)` answers for the `options`
+field thirteen files copy-pasted as `options & FLAG != 0`, and `strict()`
+delegates.
 
-What cannot cross stays free, and each family's reason is in its own module
-doc — four answers, because that is what the code does.
+What cannot cross stays free; each family's reason is in its own module doc —
+four answers, because that is what the code does.
 **What reads only the domain type's own fields goes onto the type:**
 `parse/token_word.rs` carries the seven methods `span_word`, `is_semi`,
 `is_list_terminator`, `separator_data`, `is_operator`, `glued`,
 `take_open_paren`.
-**What reads the raw script text `line` — through `quoted_word`, `pipe_token_span` or the byte scanners — stays free:**
-the `parse/word_quoted.rs` family (`keyword_word`, `gated_word`,
-`operator_word`, `is_the_word`) and its neighbours `parse/block_tail/word.rs`,
+**What reads the raw script text `line` — through `quoted_word`,
+`pipe_token_span` or the byte scanners — stays free:** the
+`parse/word_quoted.rs` family (`keyword_word`, `gated_word`, `operator_word`,
+`is_the_word`) and its neighbours `parse/block_tail/word.rs`,
 `parse/semi/preceded.rs::semi_byte` and `parse/function_block.rs::is_definer`.
 **What the orphan rule blocks stays free for that reason alone:** the
 `&ScriptText` family `parse/cond_bodies.rs` and the `&ShortCStr`/`&[MaskBit]`
@@ -10962,26 +10967,40 @@ take a parse-layer type; and the four `last_status_code` copies over
 `ForkCell<ShellState>` (`child/intercepted.rs`, `child/user_function.rs`,
 `pipeline/child/block.rs`, `run/async_job.rs`) — the `impl` belongs to sys,
 which cannot name `ShellState`, and the copies share only one field read.
-**What answers about another module's own data** (a
-`Term`, a `CommandLine`, the operator parse's offset)
-**or serves exactly one caller** stays free for that reason:
-`parse/semi/preceded.rs`, `parse/block_tail.rs`,
+**What answers about another module's own data** (a `Term`, a `CommandLine`,
+the operator parse's offset) **or serves exactly one caller** stays free for
+that reason: `parse/semi/preceded.rs`, `parse/block_tail.rs`,
 `parse/command/collect_tail.rs`, `child/printf/spec_helper.rs`, and the
 two-copy families whose each copy has a single caller, `swap_positional`
 (`function_call.rs`, `intercept/source.rs`) and `write_trace`
 (`child/explain.rs`, `child/fdexplain.rs`).
-**And a method that returns another owner's type or calls that owner's private helper keeps its `impl Token` block in that owner's module**
-— `parse/redirect/path_word.rs`, `parse/redirect/attached.rs`,
+**And a method that returns another owner's type or calls that owner's private
+helper keeps its `impl Token` block in that owner's module** —
+`parse/redirect/path_word.rs`, `parse/redirect/attached.rs`,
 `parse/array_literal/words.rs` — the shape `ShortCStr` already uses inside its
 own family.
 
 Pins: `tests/shortcstr.rs::span_longer_than_the_string`. The sys crate's own
-test binary is the only scope the gate gives a sys file, so the rows have to
+test binary is the only scope the gate gives a sys file, so the rows live
+there, one per mutation of `end - start > self.len()`: equal span and text, a
+longer span, a non-zero `start` so `-` → `+` changes the answer, and a quotient
+short enough that `-` → `/` changes it too; plus the byte-accessor rows —
+`get_byte` in-range and past-the-end, `first_byte` non-empty and empty, and
+`BadState` answering `None` for both. Getter pins: two rows in
+`state/fds/tests.rs`, one per answer — a name nothing holds answers `None`, a
+`set_fd_var`-ed name answers `Some` with its fd; `option_on` pins: two rows in
+`state/options/tests.rs`, one per answer — flag set alone `true`, flag off with
+another bit set `false`.
+
 live there, one per mutation of `end - start > self.len()`: equal span and
 text, a longer span, a non-zero `start` so `-` → `+` changes the answer, and a
-quotient short enough that `-` → `/` changes it too. Getter pins: two rows in
+quotient short enough that `-` → `/` changes it too; plus the byte-accessor
+rows — `get_byte` in-range and past-the-end, `first_byte` non-empty and empty,
+and `BadState` answering `None` for both. Getter pins: two rows in
 `state/fds/tests.rs`, one per answer — a name nothing holds answers `None`,
-and a `set_fd_var`-ed name answers `Some` with the descriptor it was given.
+and a `set_fd_var`-ed name answers `Some` with the descriptor it was given;
+`option_on` pins: two rows in `state/options/tests.rs`, the flag set alone
+answering `true` and the flag off with another bit set answering `false`.
 
 ## A probe only counts if the mutation landed and the filter is the map's filter
 

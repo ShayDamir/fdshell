@@ -1,3 +1,10 @@
+// mutants: -C --lib -C --test -C ls -C --test -C readlink -C --test -C statx -C --test -C verity -- -E 'test(/^child::flags::/) | binary(ls) | binary(readlink) | binary(statx) | binary(verity)'
+
+//! Rejected as a method: `split_eq`'s receiver is sys's `ShortCStr`, so an
+//! `impl ShortCStr` here is E0116; the byte-slice return is what the argparse
+//! needs, and the string op it reuses (`ShortCStr::split_once_byte`) already
+//! lives on the type.
+
 //! Shared flag-value parsing for the forked builtins. `--dir %d` is the
 //! common one: its value is an fd-variable reference and must be read from
 //! `args` (originals), where `%d` has not yet been substituted to the fd
