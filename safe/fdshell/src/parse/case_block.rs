@@ -8,7 +8,7 @@ use super::Token;
 use super::case_clause;
 use super::semi::{semi_byte, trim_semi, try_join_masked};
 use super::word_quoted::{keyword_word, slot_rejects};
-use crate::error::parse::ParseError;
+use crate::error::parse::{CaseError, ParseError};
 use crate::mask::MaskBit;
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
@@ -50,7 +50,7 @@ pub(crate) fn tokens_to_case(
                 .get(i)
                 .is_some_and(|tok| keyword_word(tok, line, b"in"))
         })
-        .ok_or(ParseError::CaseMissingIn)?;
+        .ok_or(ParseError::Case(CaseError::MissingIn))?;
 
     // A clause-position heredoc's bodies sit in the block text after the
     // closing `esac`: the tokens after it are body data, not block structure
@@ -73,8 +73,15 @@ pub(crate) fn tokens_to_case(
     // word) at rc 2, fdshell at its own rc 1 (task #415). The test is on the
     // **trimmed** slice (LESSONS: "An empty block arm body is a parser rule"); a
     // quoted empty pair or a quoted `";"` is a **token**, so those words stay.
-    let word_tokens = trim_semi(closed.get(1..in_idx).ok_or(ParseError::CaseMissingIn)?);
-    ensure!(!word_tokens.is_empty(), ParseError::CaseEmptyWord);
+    let word_tokens = trim_semi(
+        closed
+            .get(1..in_idx)
+            .ok_or(ParseError::Case(CaseError::MissingIn))?,
+    );
+    ensure!(
+        !word_tokens.is_empty(),
+        ParseError::Case(CaseError::EmptyWord)
+    );
 
     // POSIX 2.9.4.3 spells `case WORD in` and POSIX 2.9.1 puts control operators
     // at this position, so bash 5.3.9 rejects a word-opening `(` and a bare `)`
@@ -89,7 +96,7 @@ pub(crate) fn tokens_to_case(
         .iter()
         .any(|tok| slot_rejects(tok, line, &owns_semi))
     {
-        bail!(ParseError::CaseWordOperator);
+        bail!(ParseError::Case(CaseError::WordOperator));
     }
 
     let (word, word_mask, word_span) = try_join_masked(word_tokens);
@@ -109,7 +116,7 @@ pub(crate) fn tokens_to_case(
         let slot_from = in_idx.saturating_add(1);
         let slot = closed.get(slot_from..esac_idx).unwrap_or(&[]);
         if slot.iter().any(|tok| semi_byte(tok, line)) {
-            bail!(ParseError::CaseEmptyClauseList);
+            bail!(ParseError::Case(CaseError::EmptyClauseList));
         }
     }
 

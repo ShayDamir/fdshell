@@ -5,3 +5,17 @@
 
 # Tasks #534, #551, #540 and #577 resolved the records their commits name: each
 # site is now killed by a named test or gone from `--list`; git keeps the proofs.
+
+[[allow]]
+file = "safe/fdshell/src/error/parse/position.rs"
+line = 69
+column = 57
+mutant = "replace + with * in report_stray_closer"
+reason = "Task #576, measured on the full suite with the mutant applied as source: every stray-closer row the scan recognizes passes a word whose run is quote-free (keyword_len stops at a break byte), so the quote gate's backward walk answers false at the word's own end and at any misaligned window alike (`None => false`); `pos * skip` shifts the window off the word and the verdict is unchanged. The killable family of this site dies in `error/parse/position/tests.rs`; only the `*` mutants are equivalent. Re-derive after any change to this line."
+
+[[allow]]
+file = "safe/fdshell/src/error/parse/position.rs"
+line = 69
+column = 64
+mutant = "replace + with * in report_stray_closer"
+reason = "Task #576, same site and same proof as the 69:57 entry (measured on the full suite with the mutant applied as source): `skip * word.len()` moves the quote gate's window off the quote-free keyword run, and the gate answers the same `false` there as at the word's own end. The `+`→`-` mutant at this coordinate is killed by the pins in `error/parse/position/tests.rs` (it underflows on the zero-skip rows). Re-derive after any change to this line."

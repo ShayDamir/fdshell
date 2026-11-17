@@ -1,5 +1,10 @@
 //! The `ParseError` enum; the facade (`error/parse.rs`) re-exports it and
-//! implements `Error`.
+//! implements `Error`. The `case` and `wait` families live in their own enums
+//! beside this file and are forwarded by the `Case`/`Wait` variants, so every
+//! message stays byte-identical.
+
+pub(crate) mod case;
+pub(crate) mod wait;
 
 /// [ParseError] Parser errors
 // Debug needed for impl Error (trait bound), not for display.
@@ -11,24 +16,8 @@ pub(crate) enum ParseError {
     UnexpectedEof,
     /// invalid character
     InvalidChar { ch: u8 },
-    /// case: missing 'in'
-    CaseMissingIn,
-    /// case: empty pattern
-    CaseEmptyPattern,
-    /// case: missing 'esac'
-    CaseMissingEsac,
-    /// case: missing ')'
-    CaseMissingCloseParen,
-    /// case: missing ';;' between clauses
-    CaseMissingSemiSemi,
-    /// case: empty word
-    CaseEmptyWord,
-    /// case: ';' before an empty clause list
-    CaseEmptyClauseList,
-    /// case: '(' and ')' are control operators here (quote them)
-    CaseWordOperator,
-    /// case arm: unexpected ')' — a command list cannot take a paren
-    CaseArmUnexpectedCloseParen,
+    #[displaydoc("{0}")]
+    Case(case::CaseError),
     /// stray ';;' — it only separates 'case' clauses
     UnexpectedSemiSemi,
     /// array assignment is missing its closing ')'
@@ -148,24 +137,8 @@ pub(crate) enum ParseError {
     CaptureEmptyVar,
     /// malformed `wait` block
     MalformedWaitBlock,
-    /// `wait`: empty block (no arms)
-    WaitEmptyBlock,
-    /// `wait`: empty arm pattern
-    WaitEmptyPattern,
-    /// `wait`: missing ')' after arm pattern
-    WaitMissingCloseParen,
-    /// `wait`: unknown arm pattern keyword
-    WaitUnknownPattern,
-    /// `wait`: `readable`/`writable`/`finished` need an fd reference
-    WaitMissingFd,
-    /// `wait`: fd reference must start with '%'
-    WaitFdRefPercent,
-    /// `wait`: `after` needs a millisecond deadline
-    WaitMissingTimeout,
-    /// `wait`: `after` deadline must be a non-negative integer
-    WaitInvalidTimeout,
-    /// `wait`: unexpected token in arm pattern
-    WaitUnexpectedToken,
+    #[displaydoc("{0}")]
+    Wait(wait::WaitError),
     /// here-doc/here-string: '{prefix}' is not a valid descriptor number (a decimal fd
     /// number in `0 ..= 2147483647`, as in `N>file`)
     InvalidRedirFdWord { prefix: sys::ShortCStr },

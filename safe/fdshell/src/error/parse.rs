@@ -12,5 +12,7 @@ pub(crate) use position::{
     report_unexpected_eof,
 };
 pub(crate) use types::ParseError;
+pub(crate) use types::case::CaseError;
+pub(crate) use types::wait::WaitError;
 
 impl core::error::Error for ParseError {}

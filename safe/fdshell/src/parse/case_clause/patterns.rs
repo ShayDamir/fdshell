@@ -4,7 +4,7 @@
 //! and including the `)` that ends it (POSIX 2.9.4.3's `( pattern-list )`).
 
 use super::pattern;
-use crate::error::parse::ParseError;
+use crate::error::parse::{CaseError, ParseError};
 use crate::parse::Token;
 use crate::parse::pipe_token_span;
 use crate::parse::semi::trim_semi;
@@ -20,7 +20,7 @@ use error_stack::{Report, bail, ensure};
 /// the kind of one glued pair. The empty word is quoted word data
 /// (task #336's gate). What the ONE predicate is left with is `&`, `&&` and `||`:
 /// an operator word in a pattern slot, which bash rejects (task #495) — and the
-/// pattern it leaves is empty, so [`ParseError::CaseEmptyPattern`] answers.
+/// pattern it leaves is empty, so [`CaseError::EmptyPattern`] answers.
 fn owns(w: &[u8]) -> bool {
     matches!(w, b"" | b";" | b"(" | b")" | b"|")
 }
@@ -78,7 +78,7 @@ pub(super) fn collect_patterns(
         }
         if pipe_token_span(line, *start, *end) {
             if current_pattern.is_empty() {
-                bail!(ParseError::CaseEmptyPattern);
+                bail!(ParseError::Case(CaseError::EmptyPattern));
             }
             patterns.push(pattern::join(trim_semi(&current_pattern)));
             current_pattern.clear();
@@ -88,15 +88,15 @@ pub(super) fn collect_patterns(
             // pattern text (task #495): bash's pattern list is words only and its
             // parser fails at the operator word — here the `&` of `case x in & )`.
             if operator_word(tok, line, &owns).is_some() {
-                bail!(ParseError::CaseEmptyPattern);
+                bail!(ParseError::Case(CaseError::EmptyPattern));
             }
             current_pattern.push(tok.clone());
             *pos += 1;
         }
     }
-    ensure!(closed_paren, ParseError::CaseMissingCloseParen);
+    ensure!(closed_paren, ParseError::Case(CaseError::MissingCloseParen));
     if current_pattern.is_empty() && patterns.is_empty() {
-        bail!(ParseError::CaseEmptyPattern);
+        bail!(ParseError::Case(CaseError::EmptyPattern));
     }
     if !current_pattern.is_empty() {
         patterns.push(pattern::join(trim_semi(&current_pattern)));

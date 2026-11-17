@@ -1,7 +1,9 @@
+// mutants: -C --lib -- -E 'test(/^parse::/) | test(/^error::/)'
+
 //! Position info carried on a `Report<ParseError>` (the `report_*` ctors and
 //! the `ParsePosition` attachment of `error/parse.rs`).
 
-use super::ParseError;
+use super::{CaseError, ParseError};
 use crate::keywords::{Closer, Keyword, keyword_kind, keyword_len, time_prefix_len};
 use alloc::vec::Vec;
 use builtins::error::Suggestion;
@@ -19,7 +21,7 @@ pub(crate) fn report_unbalanced_quote(line: &[u8], pos: usize) -> Report<ParseEr
 /// Create a `Report<ParseError>` for a `)` token at `pos` that a `case` arm's
 /// command list cannot take (task #419 — the position ride from the arm walk).
 pub(crate) fn report_case_arm_close_paren(line: &[u8], pos: usize) -> Report<ParseError> {
-    Report::new(ParseError::CaseArmUnexpectedCloseParen).attach_opaque(ParsePosition {
+    Report::new(ParseError::Case(CaseError::ArmUnexpectedCloseParen)).attach_opaque(ParsePosition {
         pos,
         input: Some(line.to_vec()),
     })
@@ -89,3 +91,6 @@ pub(crate) fn report_stray_closer(line: &[u8], pos: usize) -> Report<ParseError>
             input: Some(line.to_vec()),
         })
 }
+
+#[cfg(test)]
+mod tests;

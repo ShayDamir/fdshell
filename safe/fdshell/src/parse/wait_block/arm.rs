@@ -4,7 +4,7 @@
 
 use super::WaitArm;
 use super::pattern;
-use crate::error::parse::ParseError;
+use crate::error::parse::{ParseError, WaitError};
 use crate::parse::Token;
 use crate::parse::case_clause::extract;
 use crate::parse::semi::trim_semi;
@@ -41,7 +41,7 @@ pub(super) fn next_arm(
         .get(pos..done_idx)
         .and_then(|s| s.iter().position(|tok| tok.span_word(b")")))
         .map(|i| pos + i)
-        .ok_or(ParseError::WaitMissingCloseParen)?;
+        .ok_or(ParseError::Wait(WaitError::MissingCloseParen))?;
     let (pattern, captures) = pattern::parse_pattern(
         trim_semi(tokens.get(pos..pat_end).unwrap_or(&[])),
         text.start,

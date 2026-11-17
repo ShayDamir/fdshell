@@ -156,6 +156,24 @@ fn a_quoted_separator_is_pattern_text_in_the_arm_walk() {
     );
 }
 
+/// The array-wildcard row of [`super::fdref::parse_fdref`] (`%name[]`) is the
+/// only one whose `rest.len() - 2` bound the other tests never walked — with a
+/// non-empty base it yields the array reference and the arm parses, while the
+/// `+` and `/` mutants of that operator answer the missing-fd error (task #576).
+#[test]
+fn an_array_wildcard_reference_walks_the_arm() {
+    let (tokens, text, done_idx) = scan(b"wait\nreadable %var[]) echo hit;\ndone");
+    let (arm, _) = arm::next_arm(&tokens, &text, 1, done_idx).unwrap().unwrap();
+    assert!(
+        matches!(
+            arm.pattern,
+            WaitPattern::Readable(FdRef::Array(ref base)) if base.eq_bytes(b"var")
+        ),
+        "{:?}",
+        arm.pattern
+    );
+}
+
 /// Each arm of the gate's guard decides once on its own (rule 8): crossed-only,
 /// keyword-only, and neither rows, plus the `;`-skip loop running over a real
 /// `;` token (a `wait` on its own line) — the rows above never feed the loop one.

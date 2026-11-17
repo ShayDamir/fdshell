@@ -3,7 +3,7 @@
 use super::Token;
 use super::stray;
 use super::terminator;
-use crate::error::parse::{ParseError, report_case_arm_close_paren};
+use crate::error::parse::{CaseError, ParseError, report_case_arm_close_paren};
 use crate::keywords::Closer;
 use crate::parse::part_text::part_text;
 use crate::parse::semi::{List, amp_semi, trim_body, walk_until};
@@ -68,7 +68,9 @@ pub(crate) fn body(
         line,
         stray::arith_seed(tokens, body_start),
     ) {
-        Some((stray::Stray::ClausePattern, _)) => bail!(ParseError::CaseMissingSemiSemi),
+        Some((stray::Stray::ClausePattern, _)) => {
+            bail!(ParseError::Case(CaseError::MissingSemiSemi))
+        }
         Some((stray::Stray::CloseParen, pos)) => {
             return Err(report_case_arm_close_paren(line, pos));
         }

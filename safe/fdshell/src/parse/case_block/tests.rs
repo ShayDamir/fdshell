@@ -181,7 +181,9 @@ fn in_word_is_a_keyword_only_when_unquoted() {
             Err(report)
                 if matches!(
                     report.current_context(),
-                    crate::error::parse::ParseError::CaseMissingIn
+                    crate::error::parse::ParseError::Case(
+                        crate::error::parse::CaseError::MissingIn
+                    )
                 )
         )
     };

@@ -3,7 +3,7 @@
 use super::fdref::parse_fdref;
 use super::{FdRef, WaitPattern};
 use crate::capture::Capture;
-use crate::error::parse::ParseError;
+use crate::error::parse::{ParseError, WaitError};
 use crate::parse::Token;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail, ensure};
@@ -15,14 +15,14 @@ pub(super) fn parse_pattern(
 ) -> Result<(WaitPattern, Vec<Capture>), Report<ParseError>> {
     let (kw, rest) = match tokens.first() {
         Some(Token { word: kw, .. }) => (kw, rest_from(tokens, 1)?),
-        None => bail!(ParseError::WaitEmptyPattern),
+        None => bail!(ParseError::Wait(WaitError::EmptyPattern)),
     };
     if let Some(make) = wait_kind(kw) {
         arm(make, rest, start)
     } else if kw.eq_bytes(b"after") {
         after(rest)
     } else {
-        bail!(ParseError::WaitUnknownPattern)
+        bail!(ParseError::Wait(WaitError::UnknownPattern))
     }
 }
 
@@ -49,7 +49,7 @@ fn arm(
 ) -> Result<(WaitPattern, Vec<Capture>), Report<ParseError>> {
     let (fd_tok, caps) = match rest.first() {
         Some(Token { word: fd, .. }) => (fd, rest_from(rest, 1)?),
-        None => bail!(ParseError::WaitMissingFd),
+        None => bail!(ParseError::Wait(WaitError::MissingFd)),
     };
     let ref_ = parse_fdref(fd_tok)?;
     let captures = parse_captures(caps, start)?;
@@ -60,11 +60,14 @@ fn after(rest: &[Token]) -> Result<(WaitPattern, Vec<Capture>), Report<ParseErro
     let ms_tok = rest
         .first()
         .map(|t| &t.word)
-        .ok_or(ParseError::WaitMissingTimeout)?;
+        .ok_or(ParseError::Wait(WaitError::MissingTimeout))?;
     let ms = ms_tok
         .parse::<usize>()
-        .change_context(ParseError::WaitInvalidTimeout)?;
-    ensure!(rest.len() <= 1, ParseError::WaitUnexpectedToken);
+        .change_context(ParseError::Wait(WaitError::InvalidTimeout))?;
+    ensure!(
+        rest.len() <= 1,
+        ParseError::Wait(WaitError::UnexpectedToken)
+    );
     Ok((WaitPattern::After(ms), Vec::new()))
 }
 
@@ -76,7 +79,7 @@ fn parse_captures(
     for Token { word: t, .. } in toks {
         match crate::parse::capture::parse_capture(t, start)? {
             Some(c) => out.push(c),
-            None => bail!(ParseError::WaitUnexpectedToken),
+            None => bail!(ParseError::Wait(WaitError::UnexpectedToken)),
         }
     }
     Ok(out)

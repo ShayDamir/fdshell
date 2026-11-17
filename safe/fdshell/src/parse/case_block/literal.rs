@@ -6,7 +6,7 @@
 //! one that answers `tokens_to_case` and the one that answers `literal_indices`.
 
 use super::Token;
-use crate::error::parse::ParseError;
+use crate::error::parse::{CaseError, ParseError};
 use crate::keywords::Closer;
 use crate::parse::block_tail;
 use crate::parse::semi::{List, list_closing_keyword_index};
@@ -105,13 +105,15 @@ pub(crate) fn up_to_esac<'a>(
     line: &[u8],
 ) -> Result<&'a [Token], Report<ParseError>> {
     let rest = match list_closing_keyword_index(tokens, line, Closer::Esac, List::Case) {
-        Some(idx) => tokens.get(..=idx).ok_or(ParseError::CaseMissingEsac)?,
+        Some(idx) => tokens
+            .get(..=idx)
+            .ok_or(ParseError::Case(CaseError::MissingEsac))?,
         None => tokens,
     };
     ensure!(
         rest.last()
             .is_some_and(|tok| block_tail::is_closer(tok, b"esac")),
-        ParseError::CaseMissingEsac
+        ParseError::Case(CaseError::MissingEsac)
     );
     Ok(rest)
 }

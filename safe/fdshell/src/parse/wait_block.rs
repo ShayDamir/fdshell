@@ -12,7 +12,7 @@ pub(crate) use gate::is_block;
 
 use super::Token;
 use crate::capture::Capture;
-use crate::error::parse::ParseError;
+use crate::error::parse::{ParseError, WaitError};
 use crate::redirect::RedirectDef;
 use alloc::vec::Vec;
 use error_stack::{Report, ensure};
@@ -78,6 +78,6 @@ pub(crate) fn tokens_to_wait(
         arms.push(arm);
         pos = next;
     }
-    ensure!(!arms.is_empty(), ParseError::WaitEmptyBlock);
+    ensure!(!arms.is_empty(), ParseError::Wait(WaitError::EmptyBlock));
     Ok(WaitBlock { arms, redirects })
 }
