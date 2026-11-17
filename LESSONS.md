@@ -469,7 +469,7 @@ written
   `unwrap_or(bytes.len())` → `unwrap_or(0)` — the old
 "whole suite green under it" proof is stale.
   Applying it on the current tree fails 20 rows (reproduced twice), killed by
-the task #321 pins:
+the task #321 pinned:
   `substitute/tests.rs::quoted_tilde_prefix_stays_literal` plus the
 `env_assign`/`loops`/`quotes`
   e2e rows. The source stays as written; the mutant is killable.
@@ -2192,7 +2192,7 @@ measured values, because its rule reads the operator that opens a
 `done`) stays 0, because a body that never runs never reports.
 
 ## A single-quoted literal is stored in the double-quote escape form
-Task #141 gives the tokenizer a single-quote state, but the quote **mask**
+Task #141 gave the tokenizer a single-quote state, but the quote **mask**
 stays `Vec<bool>` — it is read by ~15 consumers (word splitting, globbing,
 param-op patterns, clobber/redirect detection, `word_quoted`, `args_quoted`,
 for-list words), and a per-byte quote *kind* would touch every one of them.
@@ -3102,7 +3102,7 @@ still share the key `a*` — see the section
 "A parent-side intercept's words are a substitution surface"). Surfaces
 deliberately NOT folded: the arith lexers (`$((1\+2))` stays a syntax error,
 as in bash) and a backtick command-substitution body (its bytes are command
-text, never a word surface — task #216 expands the body through the argument
+text, never a word surface — task #216 expanded the body through the argument
 pipeline, yet the body reaches the child verbatim) — fold only the surfaces
 that consume word text, and never before a check that keys on the raw bytes.
 The for-list is not a fold surface (task #131): it delegates its words to
@@ -3121,7 +3121,7 @@ by `alias_name_keeps_the_escape_pair` and
 `keyword_recognition_runs_on_the_raw_token`.
 
 ## Word 0 is a substitution surface: expand it once, in the parent, and gate on raw text
-Task #268 makes the command-name position expand like an argument:
+Task #268 made the command-name position expand like an argument:
 `$(echo echo) hi` runs `echo hi`, and the same for backticks, `$(( … ))`,
 `$name`, `%fd`/`%CWD` and a leading `~`. The design rules, each one a trap:
 
@@ -3379,7 +3379,7 @@ the checkout's directory — otherwise the suite's result depends on the
 repository's file names.
 
 ## An intercept's operand is a substitution surface, and the raw word decides the fdshell-only forms (task #284)
-Task #284 makes `cd`'s operand expand: `cd $V`, `cd "$@"`, `cd ~`,
+Task #284 made `cd`'s operand expand: `cd $V`, `cd "$@"`, `cd ~`,
 `cd "$(echo sub)"`, `cd $((1+1))` and `cd s*` move the base to the directory
 the **expansion** names, where master opened the literal text of every one of
 them. The surface is `intercept/cd.rs::run_cd` →
@@ -3669,8 +3669,8 @@ at the quoted space and counted the inner `<<b` as a **second** operator — the
 rule written at the byte level is only valid for both quote kinds.
 
 Standing rule, measured today against bash 5.3.9 (this entry shipped it as an
-open residual, owned by the now-superseded task #266): the delimiter word
-**may contain** a `<<`, and the heredoc
+open residual; the superseded task #266 owned it, and task #446 owns it
+today): the delimiter word **may contain** a `<<`, and the heredoc
 **terminator line is not command bytes** — the pre-parse passes blank the
 terminator line's structure bytes, so its own `<<` is heredoc data (the
 per-line body allocation stays aligned with the token count:
@@ -3720,7 +3720,7 @@ warning, so only the word text (and the warning count it produces) stays with
 pins are `scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word` and
 `parse/heredoc/tests.rs::escaped_delimiter_words_fold_the_same_at_both_levels`.
 
-**The join's owner, decided on #489's measurements (the arm lands in #555)**:
+**The join's owner, decided on #489's measurements (the arm landed in #555)**:
 it belongs to the folding machine the delimiter word already shares —
 `bytes/fold/raw.rs::fold_impl`'s escape-pair arm — not to a pre-region-scan
 text pass and not to `parse/heredoc/strip.rs`. The arm landed as planned
@@ -4398,7 +4398,7 @@ see the same byte the same way, or the two `<<` counts drift silently.
 absorbed `|`), `echo a>|<<EOF` 1 byte-level vs 0 token-level, and a real
 script breaks observably: `cat "a>"| <<EOF` then the body then `EOF` reports
 `missing terminating delimiter` on the divergent tree, where master and bash
-read the body (rc 1 / rc 0). Task **#364** retires the error half of that
+read the body (rc 1 / rc 0). Task **#364** retired the error half of that
 counterfactual: the parse layer now accepts the end-of-file shape and warns,
 so a byte/token count drift of this kind would show as a warning, not a
 failure.
@@ -4438,7 +4438,7 @@ redirection, so the body is consumed) /
 `quoted_operator_word_does_not_shift_the_next_heredoc_body`. The *run-start*
 half of the `cat >| <<EOF` / `>| <<EOF` divergence (the byte scan required a
 preceding command word, so a `>|`-leading run counted 0 against the token
-layer's 1) is closed by task #185 and pinned by
+layer's 1) was closed by task #185 and pinned by
 `parse/heredoc/tests.rs::operator_count_leading_operator_forms_agree` and
 `scan/heredoc/ops/tests.rs::redirect_operator_leading_run_counts_the_operator`
 — see the entry
@@ -5086,7 +5086,7 @@ Whether a nested region's quote bytes belong in the word text is a
   content verbatim and `param_op::colon::apply` pushes it verbatim, so kept
   quotes would print literally. `"${u:-"z w"}"` must expand to `z w` (bash
   parity); kept quotes give `z w` with literal `"` around it.
-* backtick — dropped, for the same reason: task #216 expands the body through
+* backtick — dropped, for the same reason: task #216 expanded the body through
   the same `cmd_subst` path as `$( … )`, so the body text is handed to the
   child verbatim (the drop is the accepted divergence: `echo "`printf "q r"`"`
   prints `q`, bash `q r`).
@@ -5507,8 +5507,8 @@ body answer arrives one word later through `after`'s still-ungated `)` row —
 the `then` behind `a)`) — all of them pinned by
 `tests/heredoc.rs::a_word_ending_in_close_paren_in_an_if_clause_splits_the_region_again`;
 and the comment-terminated delimiter row `if :; then cat <<Q # c` /
-`cat <<Q # c` (task **#364** brings it to bash's side: both shells run at rc 0
-with the end-of-file warning; the pins are the parity rows of
+`cat <<Q # c` (task **#364** brought it to bash's side: both shells run at rc
+0 with the end-of-file warning; the pins are the parity rows of
 `tests/heredoc.rs::a_comment_terminated_line_starved_rows_reach_parity_and_deferred_rows_keep_their_owners`).
 
 ## A cond-list heredoc arm's `b == b'\n'` guard: a missing mid-run pin, then a dead-code equivalence, then a kill
@@ -7969,8 +7969,8 @@ digit run, gated by `word_start`) is the byte scan's gate, and
 `span[line[..at]] == [digits] <<`, never `<`) is the token layer's, so
 `is_operator`, `delimiter_token_indices` and `operator_at` all read the span
 and not the token text. The failure mode this avoids is the count mismatch
-that tasks #261/#274 record: the token text of `cat 3"<<"T`, `cat "3"<<T` and
-`cat \3<<T` is exactly `3<<T`/`3<<T`/`3<<T`, so a token-text rule counts 1
+that tasks #261/#274 recorded: the token text of `cat 3"<<"T`, `cat "3"<<T`
+and `cat \3<<T` is exactly `3<<T`/`3<<T`/`3<<T`, so a token-text rule counts 1
 where the byte scan counts 0, and the region allocation shifts. Pinned:
 `operator_count_io_number_forms_agree` (byte == token on 26 lines) and
 `io_number_prefixed_operators_carry_their_fd`.
@@ -9241,8 +9241,8 @@ change from silently swallowing them.
 
 **Check order is a message contract.** The group's order is closer search →
 empty-body → terminator rule, and the def follows it, so `f() { }` reports
-`function definition body is empty` today and keeps that message when **#424**
-inserts `ensure_before_closer` after it. A rule inserted between the closer
+`function definition body is empty` today and kept that message when **#424**
+inserted `ensure_before_closer` after it. A rule inserted between the closer
 search and the empty check flips pins the moment its neighbour lands.
 
 **Grep for the script shape, not the message, when looking for pins of the old behaviour.**
@@ -9829,7 +9829,7 @@ has three call sites and gets ONE predicate,
 `parse/bg_redirect.rs` (the `&>`/`&>>` source decision,
 `path_offset == op_end`), and `parse/redirect_op.rs` (the `>>` reject, where
 the operand's first byte is index `1` of `after_mask`, i.e. `after_op[1]`). A
-byte-identical private duplicate at any site is the drift #323 names (LESSONS:
+byte-identical private duplicate at any site is the drift #323 named (LESSONS:
 "A bare redirect operator token takes the next token as its operand") and an
 equivalent-mutant source. The mask index `at` **is** `path_offset`, the same
 offset `path_word::suffix` slices the word, its mask and its spans with
