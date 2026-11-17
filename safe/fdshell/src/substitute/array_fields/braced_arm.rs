@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C positional -- -E 'test(/^substitute::/) | binary(positional)'
+
 //! The embedded arm of the shell string array reads, called from
 //! `substitute/brace.rs`: the twin of `dollar/at_star.rs`.
 
@@ -11,7 +13,6 @@ use crate::substitute::origin::Origin;
 
 use super::{Shape, element_value, join, list, shape};
 use crate::substitute::borrow_state;
-use crate::substitute::positional::first_ifs_byte;
 
 /// `[*]` — and `[@]` whose trigger byte is unquoted — join the elements with the
 /// first `IFS` byte into one span the caller splits; a quoted `[@]` pushes them
@@ -34,7 +35,7 @@ pub(crate) fn braced(
         Shape::All { name, star } => {
             let elements = list(name, &state);
             if *star || !quoted {
-                out.push(&join(&elements, first_ifs_byte(&state.ifs)?)?);
+                out.push(&join(&elements, state.ifs.first_byte())?);
             } else {
                 adjacent(&elements, out, origin);
             }

@@ -13,8 +13,6 @@ use alloc::vec::Vec;
 
 use sys::ShortCStr;
 
-use super::byte_at;
-
 /// A parsed optstring: the silent flag and the option-character table. The flag
 /// has no consumer before task #591 (naming and diagnostics land there); it is
 /// pinned at the unit level in this task.
@@ -32,9 +30,9 @@ impl Optstring {
         };
         let mut options = Vec::new();
         let mut i = 0;
-        while let Some(ch) = byte_at(&rest, i) {
+        while let Some(ch) = rest.get_byte(i) {
             if is_option_char(ch) {
-                options.push((ch, byte_at(&rest, i + 1) == Some(b':')));
+                options.push((ch, rest.get_byte(i + 1) == Some(b':')));
             }
             i += 1;
         }

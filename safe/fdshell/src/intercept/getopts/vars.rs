@@ -78,14 +78,14 @@ pub(crate) fn report_name(
 /// `-x`, `n=1`, and the empty operand. The rule sits with the write, not with the usage
 /// check, because a rejected name stops only the write.
 pub(crate) fn is_valid_name(name: &ShortCStr) -> bool {
-    let Some(first) = super::byte_at(name, 0) else {
+    let Some(first) = name.get_byte(0) else {
         return false;
     };
     if !matches!(first, b'a'..=b'z' | b'A'..=b'Z' | b'_') {
         return false;
     }
     let mut offset = 1;
-    while let Some(byte) = super::byte_at(name, offset) {
+    while let Some(byte) = name.get_byte(offset) {
         if !matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') {
             return false;
         }

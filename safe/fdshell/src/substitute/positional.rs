@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C positional -- -E 'test(/^substitute::/) | binary(positional)'
+
 use alloc::vec;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -42,7 +44,7 @@ pub(super) fn expand_positional_word(
 ) -> Result<Vec<(ShortCStr, Vec<MaskBit>)>, Report<ResolveError>> {
     let state = borrow_state(cell)?;
     if fq && is_star {
-        let sep = first_ifs_byte(&state.ifs)?;
+        let sep = state.ifs.first_byte();
         let word = join(&state.positional, sep)?;
         let mask = vec![MaskBit::Quoted; word.len()];
         return Ok(vec![(word, mask)]);
@@ -67,13 +69,8 @@ pub(super) fn positional_join<'a>(
     positional: impl IntoIterator<Item = &'a ImportedStr>,
     ifs: &ShortCStr,
 ) -> Result<ShortCStr, Report<ResolveError>> {
-    let sep = first_ifs_byte(ifs)?.unwrap_or(b' ');
+    let sep = ifs.first_byte().unwrap_or(b' ');
     join(positional, Some(sep))
-}
-
-pub(super) fn first_ifs_byte(ifs: &ShortCStr) -> Result<Option<u8>, Report<ResolveError>> {
-    let bytes = ifs.as_bytes().change_context(ResolveError::RefNotFound)?;
-    Ok(bytes.first().copied())
 }
 
 pub(super) fn join<'a>(

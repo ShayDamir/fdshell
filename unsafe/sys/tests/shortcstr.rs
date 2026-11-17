@@ -1858,3 +1858,29 @@ fn float_negative_zero() {
     assert_eq!(p.value, 0.0);
     assert!(p.value.is_sign_negative());
 }
+
+// --- byte accessors (get_byte / first_byte) ---
+
+#[test]
+fn get_byte_answers_within_and_past_the_end() {
+    let s = ShortCStr::from(c"xy");
+    assert_eq!(s.get_byte(1), Some(b'y'));
+    assert_eq!(s.get_byte(2), None);
+}
+
+#[test]
+fn first_byte_answers_non_empty_and_empty() {
+    assert_eq!(ShortCStr::from(c"hi").first_byte(), Some(b'h'));
+    assert_eq!(ShortCStr::new().first_byte(), None);
+}
+
+#[test]
+fn byte_accessors_answer_none_on_bad_state() {
+    let s = ShortCStr::Arc {
+        arc: Arc::new(b"hi".to_vec()),
+        offset: 0,
+        length: 100,
+    };
+    assert_eq!(s.get_byte(0), None);
+    assert_eq!(s.first_byte(), None);
+}

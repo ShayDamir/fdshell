@@ -41,7 +41,7 @@ use crate::substitute::Join;
 use crate::substitute::borrow_state;
 use crate::substitute::mask::Counting;
 use crate::substitute::origin::Origin;
-use crate::substitute::positional::{first_ifs_byte, join};
+use crate::substitute::positional::join;
 mod modes;
 
 pub(super) fn expand(
@@ -59,7 +59,7 @@ pub(super) fn expand(
         // space-joins, `$*` joins on the first `IFS` byte (both measured).
         Join::Assign => {
             let sep = if is_star {
-                first_ifs_byte(&state.ifs)?
+                state.ifs.first_byte()
             } else {
                 Some(b' ')
             };
@@ -107,9 +107,9 @@ pub(crate) fn pattern_arm(
     origin: &mut Origin,
 ) -> Result<(), Report<ResolveError>> {
     if is_star {
-        return joined(&state.positional, first_ifs_byte(&state.ifs)?, out, origin);
+        return joined(&state.positional, state.ifs.first_byte(), out, origin);
     }
-    if quoted && first_ifs_byte(&state.ifs)?.is_some() {
+    if quoted && state.ifs.first_byte().is_some() {
         adjacent(&state.positional, out, origin);
         return Ok(());
     }

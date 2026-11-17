@@ -33,13 +33,6 @@ pub(crate) fn counter(value: &ShortCStr, current: u64) -> u64 {
     }
 }
 
-/// The byte of `word` at `offset`, `None` past its end — the per-byte helper the
-/// getopts modules share (no new `unsafe/sys` API, task #590 §5).
-pub(crate) fn byte_at(word: &ShortCStr, offset: usize) -> Option<u8> {
-    let byte = word.get(offset..offset + 1)?;
-    byte.as_bytes().ok()?.first().copied()
-}
-
 /// The scan entry: validate (the house rule for in-process commands), check the
 /// operands, resolve the words, run the pure scan and commit the call (the
 /// counters, `OPTARG`, the name, the statuses, the diagnostics).

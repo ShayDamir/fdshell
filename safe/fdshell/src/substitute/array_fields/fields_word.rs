@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C positional -- -E 'test(/^substitute::/) | binary(positional)'
+
 //! The whole-word arm of the shell string array reads: the fast path of
 //! `substitute/fields.rs`, the twin of `positional::expand_positional_word`.
 
@@ -16,7 +18,6 @@ use super::Shape;
 use super::{join, list, shape};
 use crate::substitute::borrow_state;
 use crate::substitute::origin::Origin;
-use crate::substitute::positional::first_ifs_byte;
 use crate::substitute::split::split_word;
 
 /// The whole-word shape of the fast path in `substitute/fields.rs`: a word that
@@ -55,7 +56,7 @@ pub(crate) fn fields(
     let state = borrow_state(cell)?;
     let elements = list(name, &state);
     if fq && is_star {
-        let word = join(&elements, first_ifs_byte(&state.ifs)?)?;
+        let word = join(&elements, state.ifs.first_byte())?;
         return Ok(vec![(word.clone(), vec![MaskBit::Quoted; word.len()])]);
     }
     let mut out = Vec::new();

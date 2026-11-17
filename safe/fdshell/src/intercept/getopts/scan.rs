@@ -8,7 +8,6 @@
 
 use sys::ShortCStr;
 
-use super::byte_at;
 use super::optstring::Optstring;
 
 /// What one scan step found. `Presentation` carries everything task #591 needs
@@ -63,7 +62,7 @@ pub(crate) fn scan(
             return Scan::End { index: index + 1 };
         }
     }
-    let Some(ch) = byte_at(word, offset) else {
+    let Some(ch) = word.get_byte(offset) else {
         // The word at this index changed under a mid-cluster cursor; the scan
         // has no character here to report, so the list ends on it.
         return Scan::End { index };
