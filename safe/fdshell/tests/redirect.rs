@@ -1139,6 +1139,35 @@ fn exec_and_group_scopes_apply_in_written_order() {
     );
 }
 
+#[test]
+fn dup_chain_after_a_write_redirect_shares_the_file_description() {
+    // `f > f 2>&1 3>&1`: both dups copy the fd 1 **as of their turn**, so fd 2
+    // and fd 3 share the def's open file description and its offset, and the
+    // three writes land in execution order (measured 2026-11-17, bash 5.3.9
+    // and fdshell in agreement: the file is `one\ntwo\nthree\n`, the terminal
+    // sees only `cat`, rc 0). `3>&1` is deterministic without
+    // `run_fd3_closed` here because fd 3 is created by the command's own def.
+    // The unit twin is
+    // `redirect/resolve/tests.rs::dup_chain_shares_one_def_s_description_through_both_clones`.
+    let (path, _spath) = temp_path("dup_chain");
+    let _ = std::fs::remove_file(&path);
+    let (out, err, code) = run(&format!(
+        "f(){{ echo one; echo two >&2; echo three >&3; }}; f > {path} 2>&1 3>&1; cat {path}"
+    ));
+    let body = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(
+        out, "one\ntwo\nthree\n",
+        "only `cat` wrote to the terminal, stdout={out:?}"
+    );
+    assert!(err.is_empty(), "stderr={err:?}");
+    assert_eq!(
+        body, "one\ntwo\nthree\n",
+        "one description: the writes follow each other"
+    );
+}
+
 // --- the `/dev/fd/N` magic path (task #337) ---------------------------------
 //
 // bash opens a `/dev/fd/<n>` (`/proc/self/fd/<n>`) target with the operator's

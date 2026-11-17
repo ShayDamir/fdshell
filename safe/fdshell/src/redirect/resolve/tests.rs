@@ -629,6 +629,50 @@ fn dup_shares_the_last_def_s_description_when_two_defs_target_one_fd() {
     );
 }
 
+/// The chain, at resolve granularity: **two** dups from one fd
+/// (`cmd > f 2>&1 3>&1`) both resolve through the path def's own entry, so fd
+/// 2 and fd 3 are separate clones of that one open file description — three
+/// distinct descriptors, one offset, and the writes land in write order (the
+/// `combined_path_def_resolves_to_a_pair_from_one_open` idiom, extended to the
+/// chain). Every clone sits at or above `min_fd` = max target + 1 = 4, so the
+/// re-home rule holds through the whole chain. A dup resolved against the
+/// **process** fd 1 sends its write to the test harness's stdout and the file
+/// loses that line. The integration twin is
+/// `tests/redirect.rs::dup_chain_after_a_write_redirect_shares_the_file_description`.
+#[test]
+fn dup_chain_shares_one_def_s_description_through_both_clones() {
+    let c = cell();
+    let (path, _scratch) = temp_path("dup_chain");
+    let src = vec![opened_target(&path)];
+    let redirects = vec![
+        RedirectDef::write_path(1, cstr(&path)),
+        RedirectDef::dup(2, 1),
+        RedirectDef::dup(3, 1),
+    ];
+    let resolved = resolve_redirects(&redirects, &src, &[], &c).unwrap();
+    assert_eq!(resolved.len(), 3, "three defs, three entries, no pair");
+    let (fd1, fd2, fd3) = (
+        dup_of(resolved.first().unwrap()).try_clone().unwrap(),
+        dup_of(resolved.get(1).unwrap()).try_clone().unwrap(),
+        dup_of(resolved.get(2).unwrap()).try_clone().unwrap(),
+    );
+    assert!(
+        fd1.as_raw() >= 4 && fd2.as_raw() >= 4 && fd3.as_raw() >= 4,
+        "every clone sits above every target of the command"
+    );
+    assert_ne!(fd2.as_raw(), fd3.as_raw(), "two separate clones");
+    fd1.write_all(b"one\n").unwrap();
+    fd2.write_all(b"two\n").unwrap();
+    fd3.write_all(b"three\n").unwrap();
+    drop((fd1, fd2, fd3));
+    drop(resolved);
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        body, "one\ntwo\nthree\n",
+        "one description: the writes follow each other"
+    );
+}
+
 /// `echo x 1>&- 2>&1`: the `Close` entry for fd 1 means the fd will be gone
 /// when the `Dup` is exported, so the def fails as a dup of an unopen fd —
 /// bash's `1: Bad file descriptor`, rc 1. The frame is the one the `>&N` arm
