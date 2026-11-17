@@ -7,23 +7,23 @@
 #[derive(displaydoc::Display, Debug)]
 pub(crate) enum WaitError {
     /// `wait`: empty block (no arms)
-    WaitEmptyBlock,
+    EmptyBlock,
     /// `wait`: empty arm pattern
-    WaitEmptyPattern,
+    EmptyPattern,
     /// `wait`: missing ')' after arm pattern
-    WaitMissingCloseParen,
+    MissingCloseParen,
     /// `wait`: unknown arm pattern keyword
-    WaitUnknownPattern,
+    UnknownPattern,
     /// `wait`: `readable`/`writable`/`finished` need an fd reference
-    WaitMissingFd,
+    MissingFd,
     /// `wait`: fd reference must start with '%'
-    WaitFdRefPercent,
+    FdRefPercent,
     /// `wait`: `after` needs a millisecond deadline
-    WaitMissingTimeout,
+    MissingTimeout,
     /// `wait`: `after` deadline must be a non-negative integer
-    WaitInvalidTimeout,
+    InvalidTimeout,
     /// `wait`: unexpected token in arm pattern
-    WaitUnexpectedToken,
+    UnexpectedToken,
 }
 
 impl core::error::Error for WaitError {}

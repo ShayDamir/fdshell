@@ -8,23 +8,23 @@
 #[derive(displaydoc::Display, Debug)]
 pub(crate) enum CaseError {
     /// case: missing 'in'
-    CaseMissingIn,
+    MissingIn,
     /// case: empty pattern
-    CaseEmptyPattern,
+    EmptyPattern,
     /// case: missing 'esac'
-    CaseMissingEsac,
+    MissingEsac,
     /// case: missing ')'
-    CaseMissingCloseParen,
+    MissingCloseParen,
     /// case: missing ';;' between clauses
-    CaseMissingSemiSemi,
+    MissingSemiSemi,
     /// case: empty word
-    CaseEmptyWord,
+    EmptyWord,
     /// case: ';' before an empty clause list
-    CaseEmptyClauseList,
+    EmptyClauseList,
     /// case: '(' and ')' are control operators here (quote them)
-    CaseWordOperator,
+    WordOperator,
     /// case arm: unexpected ')' — a command list cannot take a paren
-    CaseArmUnexpectedCloseParen,
+    ArmUnexpectedCloseParen,
 }
 
 impl core::error::Error for CaseError {}

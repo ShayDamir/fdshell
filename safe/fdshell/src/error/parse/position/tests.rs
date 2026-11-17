@@ -6,6 +6,8 @@
 
 use super::*;
 use crate::debug::install_debug_hooks;
+use alloc::format;
+use alloc::string::String;
 
 /// One pin: the helper's own `{:?}` with the debug hooks installed (the shape
 /// `debug/tests.rs` pins the same way; the source-location line moves with the
@@ -55,7 +57,7 @@ fn the_stray_esac_suggestion_names_the_case_block() {
           ├╴at safe/fdshell/src/error/parse/position.rs:87:5\n\
           ├╴Suggestion: a stray 'esac' needs an open `case` block: open one, or drop the word\n\
           ├╴esac\n\
-          ╰╴^~~^"
+          ╰╴^"
     );
 }
 
