@@ -454,13 +454,16 @@ i.e. a quote *after* the
   slash), the short-mask padding `unwrap_or(false)` → `unwrap_or(true)` (kills
 bare `~`), and `any` →
   `all` (kills `~"/*"`, whose `~` bit is `false`).
-- **Resolved by task #569 (the accepted rows are measured now, not argued):** the
-  quoted-character **inside a `~user` prefix** (`~ro"ot"/x`) is pinned at helper
+- **Resolved by task #569 (the accepted rows are measured now, not argued):**
+the
+  quoted-character **inside a `~user` prefix** (`~ro"ot"/x`) is pinned at
+helper
   level by the unit rows in `substitute/tilde/tests.rs` — each row feeds the
   guard the text the program rejects and asserts the guard's own answer
   (rule 19), so `== → !=` on the slash, the disjunction's `|| → &&` and
   `<= → >` fail on it; the file gained the mutants map naming those rows plus
-  the `env_assign`/`loops`/`quotes` e2e rows. The backslash branch is gone from
+  the `env_assign`/`loops`/`quotes` e2e rows. The backslash branch is gone
+from
   `prefix_quoted` ("deliberately not consulted"), so the `\X` half of the old
   claim has no site. Read `~"a"/x`, `~a"b"/x` and `~\/x` as documentation pins
   of the agreement, not as kill pins.
@@ -974,13 +977,14 @@ covered the *quoted* half of the disjunction, and the hoisted gate now refuses
 a quoted pattern byte before any arm runs — measured by hand, `109:36` and
 `109:47` `||`→`&&`, `109:21` `!=`→`==`, and both `delete match arm` rows fail
 the existing dot/dotglob rows. The `[`-arm is pinned on **both** answers now
-(task #569): `glob/match/tests.rs::the_bracket_arm_answers_only_for_a_closed_class`
-asserts the closed class blocks the dot name and the **unclosed** leading `[`
-answers `false`, leaving the matcher to read the literal byte — the shape the
-old `with true` acceptance called unkillable at program level (no name can
-match a literal `[` as a leading dot, so no program-level test tells the
-builds apart; the helper-level rows measure the arm's answer instead, rules
-2/9). `glob/match/tests.rs::dot_rule_blocks_leading_bracket_class` kills
+(task #569):
+`glob/match/tests.rs::the_bracket_arm_answers_only_for_a_closed_class` asserts
+the closed class blocks the dot name and the **unclosed** leading `[` answers
+`false`, leaving the matcher to read the literal byte — the shape the old
+`with true` acceptance called unkillable at program level (no name can match a
+literal `[` as a leading dot, so no program-level test tells the builds apart;
+the helper-level rows measure the arm's answer instead, rules 2/9).
+`glob/match/tests.rs::dot_rule_blocks_leading_bracket_class` kills
 `with false`. Rule: when a guard's disjunct decides a byte class the matcher
 can never match on the name, only the *blocking* direction is observable at
 program level; pin that answer at the helper and stop chasing it at the
@@ -992,15 +996,14 @@ A heredoc body (`cmd <<EOF … EOF`) can contain any bytes, including `;`, `&&`,
 `|`, `#`, quotes, `<<`, and keyword-shaped lines (`fi`, `done`, `}`, `;;`).
 Every layer that scans multi-line bytes must jump from the heredoc command
 line past its last delimiter line, or the body corrupts statement splitting
-(`segment.rs`), cond-list splitting (`cond/boundary.rs::next_boundary`), block keyword
-depth (`comment.rs::scan_block`), and brace depth
+(`segment.rs`), cond-list splitting (`cond/boundary.rs::next_boundary`), block
+keyword depth (`comment.rs::scan_block`), and brace depth
 (`brace/block.rs::scan_brace_block`) — four call sites, all fed by the one
 shared helper `scan::heredoc::skip`/`skip_region`. A body's bytes never fold
-into the
-caller's quote/substitution state — a body legitimately carries unbalanced
-`'`, `"`, backticks and `$( … )`. The same helper feeds the tokenizer:
-`token::tokenize_statement` blanks the `body_regions` spans in a copy before
-tokenizing, so an *unbalanced* quote in the body cannot raise
+into the caller's quote/substitution state — a body legitimately carries
+unbalanced `'`, `"`, backticks and `$( … )`. The same helper feeds the
+tokenizer: `token::tokenize_statement` blanks the `body_regions` spans in a
+copy before tokenizing, so an *unbalanced* quote in the body cannot raise
 `UnbalancedQuote` (the body tokens are discarded anyway — `finish_command`
 breaks at the first `;` token, pipeline stages trim at `;` — but the tokenizer
 must not *fail* on them).
@@ -1904,24 +1907,25 @@ definer twin `f()` + `# c {` + `{ echo a; }` + `f` as `a`. Pinned at
 `brace/tests.rs::a_comment_row_hides_a_brace_written_in_its_text`,
 `parse/for_block/tests.rs::a_comment_row_in_the_gap_is_bash_parity` and
 `safe/fdshell/tests/loops.rs::c_style_for_every_spelling_of_a_gap_comment_matches_bash`.
-**The cond path is closed** (task **#560**, bash parity): the run gate gained the
-cond arm — the run's tail after its last `&&` / `||` is the head, the same
+**The cond path is closed** (task **#560**, bash parity): the run gate gained
+the cond arm — the run's tail after its last `&&` / `||` is the head, the same
 run-tail rule `segment/group/prefix.rs` has read from the brace side since
-**#394**, now read at the run's end — with the opener standing behind the whole
-run and the `;` slot still **before** the comment rows (the load-bearing order
-above). The cond parse needs **no** comment arm of its own after all: the token
-list the tail walk (`parse/for_block/arith/tail.rs`) receives for a cond part
-carries **no** token for a comment row — the tokenizer's drop serves the cond
-path exactly as it serves the statement path, probe-verified on the full suite —
-so `parse/semi/gap.rs`'s header ("Comment rows need no arm in either direction")
-stays true for the walks it owns and nothing is to be re-added there. The family
-is pinned at bash's measured values in
+**#394**, now read at the run's end — with the opener standing behind the
+whole run and the `;` slot still **before** the comment rows (the load-bearing
+order above). The cond parse needs **no** comment arm of its own after all:
+the token list the tail walk (`parse/for_block/arith/tail.rs`) receives for a
+cond part carries **no** token for a comment row — the tokenizer's drop serves
+the cond path exactly as it serves the statement path, probe-verified on the
+full suite — so `parse/semi/gap.rs`'s header
+("Comment rows need no arm in either direction") stays true for the walks it
+owns and nothing is to be re-added there. The family is pinned at bash's
+measured values in
 `safe/fdshell/tests/loops.rs::c_style_for_a_gap_comment_in_a_cond_list_is_bash_parity`;
-the no-comment row keeps the proof that this is the cond path (it diverged before
-the comment arm existed), and the two rows that keep diverging — the loop behind
-a pipe (the group layer's inherited error) and the `true ||` row (fdshell runs
-the body where bash skips the operator's right side) — are pinned there at
-fdshell's measured value naming bash's.
+the no-comment row keeps the proof that this is the cond path (it diverged
+before the comment arm existed), and the two rows that keep diverging — the
+loop behind a pipe (the group layer's inherited error) and the `true ||` row
+(fdshell runs the body where bash skips the operator's right side) — are
+pinned there at fdshell's measured value naming bash's.
 
 Filed, measured, do not re-open blind: **#395** the spaced step `i ++` is
 **parity** on both spellings (`i ++`/`++ i`, `i --`/`-- i`), pinned by
@@ -2507,8 +2511,9 @@ an unbalanced `'` reported `unmatched quote` (rc 1, bash prints the body) —
 the **body-line** half of #266's opacity class, flipped to bash parity by #311
 and re-pinned as
 `tests/heredoc.rs::single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_is_verbatim`;
-the **terminator-line** half is closed at bash parity too (task **#266**: `cat <<'a <<b'` + body + `a <<b` and `cat <<a\"b` +
-body + `a"b` each print the body, rc 0 = bash), pinned by
+the **terminator-line** half is closed at bash parity too (task **#266**:
+`cat <<'a <<b'` + body + `a <<b` and `cat <<a\"b` + body + `a"b` each print
+the body, rc 0 = bash), pinned by
 `tests/heredoc.rs::a_terminator_line_with_a_chevron_is_data` and
 `tests/heredoc.rs::a_terminator_line_with_an_unbalanced_quote_is_data`; the
 mechanism and the whole pin family are the entry LESSONS:
@@ -2770,9 +2775,9 @@ not "fix" the integration tests toward 127 to match the `-c` quirk.
 A token whose suffix from the first `>`/`<` byte is exactly `>`, `>>`, `<`,
 `<>` (an optional all-digit fd prefix precedes it) consumes the **next** token
 as its path operand (`parse/redirect/bare.rs`), mirroring the bare `<<`
-delimiter (`parse/heredoc/operator_at.rs::operator_at`, `extra = 1`) and the bare
-`<<<` (`parse/here_string.rs`). Test bare-ness on the operator *suffix*: `>>`
-and `<>` have a one-byte (`>`) `after_op`, which the attached path's
+delimiter (`parse/heredoc/operator_at.rs::operator_at`, `extra = 1`) and the
+bare `<<<` (`parse/here_string.rs`). Test bare-ness on the operator *suffix*:
+`>>` and `<>` have a one-byte (`>`) `after_op`, which the attached path's
 `redirect_op` rejects as `InvalidRedirect` — that is why `cmd >> file` was a
 parse error while `cmd >file` worked, and the attached path's emptiness branch
 is dead logic once the bare branch exists (deleted — a mutant source). A
@@ -2998,28 +3003,35 @@ caller. A status out-parameter that only one of two parallel paths sets is a
 latent divergence — give the shared state a single `end()` that both paths
 populate.
 
-Task #581 shared that body (`safe/fdshell/src/fd_read.rs`: read a chunk, hand it to the
-sink, stop on EOF or on the sink's decision) and found the same drift one level up: what
-differs per site is the **answer to a failed syscall**, and four of the five sites had
-never been asked. The handler is installed without `SA_RESTART` (task #582) so a caught
-signal answers `EINTR` (task #585), and each site must state its own policy — the shared
-loop takes it as a parameter (resume / finish with what it has / report) and keeps no
-error type of its own. The table, first three rows measured against bash 5.3.9 on this
-machine, 3/3 each (the last three are the pre-existing reports, pinned by their
-own unit tests for their own errno):
+Task #581 shared that body (`safe/fdshell/src/fd_read.rs`: read a chunk, hand
+it to the sink, stop on EOF or on the sink's decision) and found the same
+drift one level up: what differs per site is the
+**answer to a failed syscall**, and four of the five sites had never been
+asked. The handler is installed without `SA_RESTART` (task #582) so a caught
+signal answers `EINTR` (task #585), and each site must state its own policy —
+the shared loop takes it as a parameter (resume / finish with what it has /
+report) and keeps no error type of its own. The table, first three rows
+measured against bash 5.3.9 on this machine, 3/3 each (the last three are the
+pre-existing reports, pinned by their own unit tests for their own errno):
 
-| site | a caught signal | pinned by |
-| --- | --- | --- |
-| the `$( … )` capture read | resume, keeping the bytes already read (`X=[end]`) — the bug that started this (task #587) | `a_signal_during_the_capture_read_keeps_the_bytes` |
-| the `read` builtin loop | resume; the line poked after the action is what `read x` takes | `a_signal_during_a_blocking_read_restarts_it` |
-| the `read -t` poll | resume with the time that is left, so the deadline still decides; its status stays each shell's own rule (fdshell 1, bash 128+SIGALRM) | `a_signal_during_the_read_poll_restarts_it` |
-| `source`'s file read | report and stop | `run_source_directory_fails_on_read`, `read_to_end_over_limit_fails` |
-| the `$_` handoff socket | report and stop | `send_recv_roundtrip` |
-| the `wait` block | report, its own chain | `a_signal_during_the_blocking_poll_reports_its_own_chain` |
+| site | a caught signal | pinned by | | --- | --- | --- | | the `$( … )`
+capture read | resume, keeping the bytes already read (`X=[end]`) — the bug
+that started this (task #587) |
+`a_signal_during_the_capture_read_keeps_the_bytes` | | the `read` builtin loop
+| resume; the line poked after the action is what `read x` takes |
+`a_signal_during_a_blocking_read_restarts_it` | | the `read -t` poll | resume
+with the time that is left, so the deadline still decides; its status stays
+each shell's own rule (fdshell 1, bash 128+SIGALRM) |
+`a_signal_during_the_read_poll_restarts_it` | | `source`'s file read | report
+and stop | `run_source_directory_fails_on_read`,
+`read_to_end_over_limit_fails` | | the `$_` handoff socket | report and stop |
+`send_recv_roundtrip` | | the `wait` block | report, its own chain |
+`a_signal_during_the_blocking_poll_reports_its_own_chain` |
 
-**Rule:** a shared loop takes the decision as a parameter; a loop whose error arm is
-"propagate" is an *untested* policy in a shell that installs handlers, so ask each site
-what a caught signal means there and pin the answer (task #581).
+**Rule:** a shared loop takes the decision as a parameter; a loop whose error
+arm is "propagate" is an *untested* policy in a shell that installs handlers,
+so ask each site what a caught signal means there and pin the answer (task
+#581).
 
 ## `Line::end_eof`'s `esc` reset is unobservable — an equivalent mutant, removed
 `read/line.rs` had `end_eof()` (mark end of input) whose only body was
@@ -3655,11 +3667,10 @@ pair and quotes nothing (`E\` → `quoted == false`, pinned in
 that *folds* into a byte, and a dropped pair produces none (measured:
 `X=zzz; cat <<a\` + `b` + `$X` + `ab` prints `zzz` and is silent — the joined
 word is unquoted, so the body expands; pinned in
-`bytes/fold/tests.rs::fold_quotes_drops_a_newline_pair_without_the_flag`).
-A quoted body is also verbatim w.r.t.
-`\<newline>`: `parse/heredoc.rs` gates `strip_continuations` on the same flag,
-so flipping it changes the body's **bytes** as well as its expansion — measure
-both.
+`bytes/fold/tests.rs::fold_quotes_drops_a_newline_pair_without_the_flag`). A
+quoted body is also verbatim w.r.t. `\<newline>`: `parse/heredoc.rs` gates
+`strip_continuations` on the same flag, so flipping it changes the body's
+**bytes** as well as its expansion — measure both.
 3. The byte-level word span must consume **both** quote kinds:
 `scan/heredoc/lines/word.rs::word_span` consumed a `'…'` span whole (added by
 #141) and a "…" span byte-by-byte, so `<<'a <<b'` and `<<"a <<b"` cut the word
@@ -3710,8 +3721,8 @@ print their body at rc 0. The **`\` at the end of the word** member is
 narrowed but not closed: the tokenizer's continuation join (`<<E\` + `zzz` →
 the word `Ezzz`, `<<a\` + `a\` → `aa\` — the pinned script's last line has no
 final newline, so bash's trailing lone `\` keeps its backslash; give that line
-a newline and the pair joins and the word is `aa`) is decided by task
-**#489** and landed with task **#555**, in
+a newline and the pair joins and the word is `aa`) is decided by task **#489**
+and landed with task **#555**, in
 `tests/heredoc.rs::an_escaped_delimiter_word_at_the_line_end_keeps_its_owners`
 — since task **#364** both shells run these rows at rc 0 with an end-of-file
 warning, so only the word text (and the warning count it produces) stays with
@@ -3722,17 +3733,17 @@ pins are `scan/heredoc/tests.rs::skip_escaped_delimiter_word_is_one_word` and
 **The join's owner, decided on #489's measurements (the arm landed in #555)**:
 it belongs to the folding machine the delimiter word already shares —
 `bytes/fold/raw.rs::fold_impl`'s escape-pair arm — not to a pre-region-scan
-text pass and not to `parse/heredoc/strip.rs`. The arm landed as planned
-(task #555): a new branch after the two quote-toggle arms, gated on `!single`
-(POSIX §2.2.3 — a `'…'` span has no escape pair), dropping **both** bytes of a
+text pass and not to `parse/heredoc/strip.rs`. The arm landed as planned (task
+#555): a new branch after the two quote-toggle arms, gated on `!single` (POSIX
+§2.2.3 — a `'…'` span has no escape pair), dropping **both** bytes of a
 `\`+newline pair inside double quotes as well as outside, the same arm
 `parse/quotes.rs` runs, and setting no quote flag (the measured exception is
-in rule 2 above). The word text decides both the
-warning *and* the delimiter-line match, and both come from `Operator::new` →
-`fold_quotes` → `fold_impl`, the machine this entry names as shared by the
-byte scanner and the token parser; the rule decided anywhere else is a private
-copy of the folding rule (the #323/#247 drift trap). The word **walk** is
-already right at both levels (`scan/advance.rs` consumes a `\X` pair whole,
+in rule 2 above). The word text decides both the warning *and* the
+delimiter-line match, and both come from `Operator::new` → `fold_quotes` →
+`fold_impl`, the machine this entry names as shared by the byte scanner and
+the token parser; the rule decided anywhere else is a private copy of the
+folding rule (the #323/#247 drift trap). The word **walk** is already right at
+both levels (`scan/advance.rs` consumes a `\X` pair whole,
 `parse/token/escape.rs::read_escape` keeps the pair in the word text), only
 the pair's **fold** is the odd one out — and it must agree with the house's
 own substitution pass for the same word (`substitute/arg/escape.rs::unquoted`
@@ -3845,14 +3856,15 @@ the recorded `IFS` last, after the entry loop.
 IFS — any field a setter syncs from a store name must be carried by both
 save/restore structures under the same first-touch discipline. The `OPTIND`
 counter (`state.optind`, synced by `set_var`/`unset_var`) is the second such
-field: `end_frame`'s per-name `restore()` helper writes the stores directly and
-never goes through `set_var`, and `EnvSave::restore`'s entry loop only syncs the
-field through the setter when an entry existed — the unbound-name branch removes
-the entry **without** the setter, and bash reaches exactly that branch after
-`unset OPTIND`. Record `old_optind` on the same first touch and write it back
-after the entry loop. Pins: `state/frames/tests.rs`
-(`a_local_optind_restores_the_counter`, `first_touch_keeps_the_caller_counter`),
-`run_env/tests.rs` (`apply_syncs_optind_and_restore_reverts_it`,
+field: `end_frame`'s per-name `restore()` helper writes the stores directly
+and never goes through `set_var`, and `EnvSave::restore`'s entry loop only
+syncs the field through the setter when an entry existed — the unbound-name
+branch removes the entry **without** the setter, and bash reaches exactly that
+branch after `unset OPTIND`. Record `old_optind` on the same first touch and
+write it back after the entry loop. Pins: `state/frames/tests.rs`
+(`a_local_optind_restores_the_counter`,
+`first_touch_keeps_the_caller_counter`), `run_env/tests.rs`
+(`apply_syncs_optind_and_restore_reverts_it`,
 `restore_reverts_the_counter_when_the_name_was_unbound`,
 `drop_new_exports_keeps_the_optind_entry_and_the_counter`).
 
@@ -4619,10 +4631,11 @@ the same byte (CATCHING_MUTANTS rules 11/15).
 `scan_brace_block`'s walk runs to the end of the text when a group never
 closes, so in `segment/group/block.rs::group_block` the span end of that arm
 **is** `close`: the `min` it used to carry had nothing to clamp and its `+ 1`
-was a `+`→`*` identity no test could see (measured green once more) — so the operand is gone and the family with it (CATCHING_MUTANTS
-rule 24). The operators left are pinned in both directions, and they are the
-reason the shape is worth keeping: the closed case's `close + 1` feeding
-`statement_end` is killed under `+`→`-` by
+was a `+`→`*` identity no test could see (measured green once more) — so the
+operand is gone and the family with it (CATCHING_MUTANTS rule 24). The
+operators left are pinned in both directions, and they are the reason the
+shape is worth keeping: the closed case's `close + 1` feeding `statement_end`
+is killed under `+`→`-` by
 `segment/group/tests.rs::span_ends_past_the_closing_brace`,
 `glued_comment_after_the_closing_brace_ends_the_statement` and
 `a_multi_line_group_claims_no_bodies`, and under `+`→`*` by
@@ -5893,9 +5906,9 @@ that reached `printf` was therefore `%` where bash passes `%%`, and a trailing
 `%` is POSIX's *missing format character*: `printf '%%'` ended at rc 1,
 `printf 'a%%b'` printed `a`, `echo '%%'` printed `%`. The arm is gone
 (`substitute/percent.rs`): `%%` is two ordinary literal bytes and the `printf`
-builtin (`child/printf/render_loop.rs:41-44`) interprets its own escape, which is the only
-semantics that can match bash — a shell collapse and bash-parity output are
-mutually exclusive.
+builtin (`child/printf/render_loop.rs:41-44`) interprets its own escape, which
+is the only semantics that can match bash — a shell collapse and bash-parity
+output are mutually exclusive.
 
 * The `%` arm consumes **exactly the trigger byte** for a non-name `%`, so
   `arg.rs`'s `realign` keeps the quote mask 1:1 for it. Pin the mask, not just
@@ -6186,12 +6199,11 @@ so their text is never `;`/`|`. The four headline rows of the report —
 its delimiter line, **empty body** — measure rc 0 and silent, bash-equal:
 `tests/heredoc.rs::a_quoted_separator_delimiter_with_an_empty_body_is_parity`
 (the with-body shape is #336's `a_quoted_delimiter_may_be_a_separator_word`;
-the report's rc-1 numbers were measured before #336's gate). The
-path-redirect callers pass `span_quoted=false` because that flag is the
-**empty** arm's input alone (task #530): the separator arms read the mask
-themselves, so `echo x > ";"` is the file name at rc 0 — bash parity, #475
-closed — while `> ""` keeps its documented parse error. The arms' gating is
-pinned by
+the report's rc-1 numbers were measured before #336's gate). The path-redirect
+callers pass `span_quoted=false` because that flag is the **empty** arm's
+input alone (task #530): the separator arms read the mask themselves, so
+`echo x > ";"` is the file name at rc 0 — bash parity, #475 closed — while
+`> ""` keeps its documented parse error. The arms' gating is pinned by
 `scan/heredoc/op/tests.rs::invalid_delimiter_gates_operator_bytes_on_the_quote_mask`,
 the path families' answers by
 `parse/redirect/tests.rs::a_quoted_separator_operand_is_a_path_and_the_unquoted_one_is_not`.
@@ -6209,8 +6221,8 @@ parse layer compares the **folded** word — the signature is the false
 "byte-level and token-level counts must agree". The pair is clipped at the
 window end (`min(to)`): a `\` at the physical line's end stays a lone byte
 (`fold_quotes` keeps the backslash, so the delimiter is the literal `a\`), and
-the `\`+newline continuation join is decided by task **#489** and **landed in
-the folding machine with task #555** — the arm in
+the `\`+newline continuation join is decided by task **#489** and
+**landed in the folding machine with task #555** — the arm in
 `bytes/fold/raw.rs::fold_impl`, gated on `!single` (POSIX §2.2.3), and the
 mask-blind twin in `bytes/fold.rs::fold_mask` (the single-quote-encoding
 reason); the clip at the window end stands. Pins:
@@ -7655,7 +7667,8 @@ says
    nothing run; house rc 1): the decision answers the brace like the other
    closers, and the boundary moved from `decision` to the **two ask-sites** —
 the
-   run path's mark (`segment/marks.rs`) asks it directly and is where the stray `}`
+   run path's mark (`segment/marks.rs`) asks it directly and is where the
+stray `}`
 reports,
    while the `comment` walk's recorder `Pairing::observe` keeps not recording
    braces (its pairing counts exact brace words only, so a glued definer's `{`
@@ -7855,23 +7868,25 @@ a shorter spelling of it.
 ## A gate start measured from the operator pair has a `-2` twin that is killable at the one-byte glued offset (task #236, re-derived by task #477)
 
 `cond.rs::run_cond_list` names the gate start once (`let after = i + 2;` — the
-byte just past the `&&`/`||` pair the boundary scan stopped on) and hands it to
-`gate_end` and `take_bodies`; measuring the start from the pair is the honest
-expression (the pair *is* the boundary). The `+`→`-` twin (`i - 2`) agrees with
-the honest start for every shape with a **multi-byte** left operand — the bytes
-it starts on are the pair's own bytes and the whitespace before them, and the
-gate's run rules normalize that start to exactly the state the `+2` start has
-on the gated list's first word (`strip_at` classifies a `|`/`&` word as a pair
-head/tail and leaves `Place::Command`, `group_at_run` treats a run ending in
-`&&`/`||` as command position, so the gate ends at the same byte and
-`take_bodies` counts the same `<<` operators) — but a **one-byte** left operand
-glued to the pair puts the operator at `i == 1`, where `i - 2` underflows: in
-the dev profile (what nextest and `cargo mutants` build) the shell dies with rc
-101, so the mutant is **killed by its pins**, not an equivalent; in a release
-profile the wrapped index finds no separator and the mutant is equivalent there.
-Pins (both fail on the applied mutant, task #577):
+byte just past the `&&`/`||` pair the boundary scan stopped on) and hands it
+to `gate_end` and `take_bodies`; measuring the start from the pair is the
+honest expression (the pair *is* the boundary). The `+`→`-` twin (`i - 2`)
+agrees with the honest start for every shape with a **multi-byte** left
+operand — the bytes it starts on are the pair's own bytes and the whitespace
+before them, and the gate's run rules normalize that start to exactly the
+state the `+2` start has on the gated list's first word (`strip_at` classifies
+a `|`/`&` word as a pair head/tail and leaves `Place::Command`, `group_at_run`
+treats a run ending in `&&`/`||` as command position, so the gate ends at the
+same byte and `take_bodies` counts the same `<<` operators) — but a
+**one-byte** left operand glued to the pair puts the operator at `i == 1`,
+where `i - 2` underflows: in the dev profile (what nextest and `cargo mutants`
+build) the shell dies with rc 101, so the mutant is **killed by its pins**,
+not an equivalent; in a release profile the wrapped index finds no separator
+and the mutant is equivalent there. Pins (both fail on the applied mutant,
+task #577):
 `tests/glued_pair.rs::one_byte_operand_glued_to_the_pair_keeps_the_gate_behind_the_pair`
-and `safe/fdshell/src/tests/run.rs::the_or_gate_skips_from_behind_the_operator_not_the_left_word`
+and
+`safe/fdshell/src/tests/run.rs::the_or_gate_skips_from_behind_the_operator_not_the_left_word`
 (rule 28, measured). The `+`→`*` twin (`2i`, past the gated text) is killed by
 `cond/tests.rs::gate_end_skips_the_gated_and_list_to_its_separator` and
 `tests/run.rs::short_circuit_gate_consumes_the_gated_list_bodies`.
@@ -8772,14 +8787,13 @@ byte. So every body-slice rule that wants bash's *same-line* semantics must
 test `line[token.start] == b';'` — `do echo a & ; done` is bash's rc 2 while
 `do echo a &\ndone` is bash's rc 0, and the two differ **only** in a byte the
 token list spells identically. A "newline in the gap" test cannot fire (a
-newline emits its own `;` token, so no newline can sit between the `&` and
-the glued `;`), and the body's own scan stays inert to a trailing
-`;`/newline byte in body text — so rc/output pins cannot see a kept `;` and
+newline emits its own `;` token, so no newline can sit between the `&` and the
+glued `;`), and the body's own scan stays inert to a trailing `;`/newline byte
+in body text — so rc/output pins cannot see a kept `;` and
 **body-text unit pins** measure the predicate's arms
-(`parse/semi/trim/tests.rs` asserts the slice's text, never the rc).
-Both maps (`preceded.rs`, `trim/background.rs`)
-run with no miss, and the equivalence record this entry used to carry is
-gone.
+(`parse/semi/trim/tests.rs` asserts the slice's text, never the rc). Both maps
+(`preceded.rs`, `trim/background.rs`) run with no miss, and the equivalence
+record this entry used to carry is gone.
 
 `;;` is a **glued** pair (`head.end == tail.start`), `; ;` is not, and the
 glue is what distinguishes a `case` clause separator from a statement
@@ -8821,22 +8835,21 @@ The same layering decides the newline **behind** a top-level `&&`/`||` (task
 the join is decided in the scan — the one granularity that sees physical lines
 (`segment/join.rs`) — and every granularity that never re-scans keeps its own
 answer: the body-slice trim above, the REPL's own completeness rule (its pins
-are in `repl/complete/tests.rs`). One shape
-cannot travel through the scan: a physical line that claims a body region —
-its `<<` in the joining run's own text **or** in a `;`-separated run ahead of
-it — cannot hand the scan its region text and keep the body attached, so the
-scanner leaves per-line segments, each with its own bodies, the runner's mark
-rides on the run whose own text ends on the terminator (never on a
-`;`-separated run flushed beside it), and the concatenation of the physical
-lines the operator continues onto happens in the runner (`script/merge.rs`)
-**as the same-line spelling**: the links share one line, separated by spaces,
-because the parse layer reads a newline as a `;` token — an operator left at
-the end of a synthesized line is no operator token for it, so a newline
-separator splits a chain of two operators back into statements and loses every
-operator but the first (pinned in `tests/heredoc.rs`). A link that is itself a
-scan-joined run carries the newlines the scan stepped over
-**inside its own text**, so the scan leaves their offsets on the segment
-(`Segment::Statement::joins`, claimed per run by
+are in `repl/complete/tests.rs`). One shape cannot travel through the scan: a
+physical line that claims a body region — its `<<` in the joining run's own
+text **or** in a `;`-separated run ahead of it — cannot hand the scan its
+region text and keep the body attached, so the scanner leaves per-line
+segments, each with its own bodies, the runner's mark rides on the run whose
+own text ends on the terminator (never on a `;`-separated run flushed beside
+it), and the concatenation of the physical lines the operator continues onto
+happens in the runner (`script/merge.rs`) **as the same-line spelling**: the
+links share one line, separated by spaces, because the parse layer reads a
+newline as a `;` token — an operator left at the end of a synthesized line is
+no operator token for it, so a newline separator splits a chain of two
+operators back into statements and loses every operator but the first (pinned
+in `tests/heredoc.rs`). A link that is itself a scan-joined run carries the
+newlines the scan stepped over **inside its own text**, so the scan leaves
+their offsets on the segment (`Segment::Statement::joins`, claimed per run by
 `segment/line/flush.rs::run_joins`) and the chain writes each of those as a
 space too. A newline that is **data** stays a newline: a quoted word's, and
 the one that ends a `#` comment (the parse layer reads comment text only up to
@@ -8847,11 +8860,11 @@ newline, so that one shape does not produce what bash does; closing it means
 discarding comment text, a rule the parse layer owns and the runner must not
 re-derive. The condition granularity closed its own half there (task #498) and
 closed the other half through the **same** scanner (task #557): the slice
-**inherits** the scan's join verbatim — the cond walk splits on operators only,
-so the join rows sit at bash's value — and the run layer now splits a condition
-at a real **separator** too, asking `scan_segments` rather than re-deriving it,
-so a condition runs every command and gates on the last, at bash's value; both
-are pinned at
+**inherits** the scan's join verbatim — the cond walk splits on operators
+only, so the join rows sit at bash's value — and the run layer now splits a
+condition at a real **separator** too, asking `scan_segments` rather than
+re-deriving it, so a condition runs every command and gates on the last, at
+bash's value; both are pinned at
 `tests/cond_blocks.rs::the_condition_runs_every_command_and_gates_on_the_last`,
 and the splitter's own answer is pinned in `cond/units/tests.rs`.
 
@@ -8895,10 +8908,10 @@ rule
 ("the body slice keeps the `&`, its own scan marks the flag — a flag threaded through the `run*` layers is a second source of truth")
 has its boundary there. A body is **re-scanned** (`run_script` →
 `segment::scan_segments`, the single validator), so its text carries the `&`.
-A condition is never scanned **by the parse layer** (task #557 added a run-layer
-scan of a multi-unit condition, through the one shared scanner — this rule is
-the parse layer's and survives): `run_part` → `run_one` → `parse`, and the parse
-layer rejects a bare `&` (`parse/command_args.rs`
+A condition is never scanned **by the parse layer** (task #557 added a
+run-layer scan of a multi-unit condition, through the one shared scanner —
+this rule is the parse layer's and survives): `run_part` → `run_one` →
+`parse`, and the parse layer rejects a bare `&` (`parse/command_args.rs`
 `UnexpectedChar { ch: b'&' }`), so keeping the `&` there turns every accepted
 `&`-terminated condition into rc 1. Making the text carry it would need a
 **second** split-time validator in the run layer (`segment/bg::mark`'s
@@ -9550,8 +9563,8 @@ keyword-branch pins cover the arm; the function branch's pin asserts the mode
 (no bodies, span unchanged).
 
 **Measure the neighbours of the shape you fix — a plan's expectation column is a hypothesis.**
-Six rows a plan expected to reach parity did not, and each keeps its owner:
-a command-not-found is rc 1 here and 127 in bash, `{ cat <<E; }` and the nested
+Six rows a plan expected to reach parity did not, and each keeps its owner: a
+command-not-found is rc 1 here and 127 in bash, `{ cat <<E; }` and the nested
 `f() { { cat <<E; }; }` were **#315**'s (both closed), `f() { …; }; f | cat`
 is **#182**'s, the starved first operator (`f() { cat <<E; }; f` + body, no
 delimiter line) was **#429**'s — closed by **#364**'s accept-and-warn rule,
@@ -10504,10 +10517,9 @@ exactly where bash rejects them at rc 2; those rows moved from the divergence
 pins into the family.
 `tests::run::an_operator_opening_a_part_reports_before_anything_runs` is the
 same shape at unit level (it asserts the report and that nothing ran); the
-loop's `is_empty_part` guard answers these rows,
-the helper's mutants die on the pinned rows — and if that loop is ever split,
-re-derive `cond.rs`'s equivalence list, because that test
-was the only pin walking an empty head.
+loop's `is_empty_part` guard answers these rows, the helper's mutants die on
+the pinned rows — and if that loop is ever split, re-derive `cond.rs`'s
+equivalence list, because that test was the only pin walking an empty head.
 
 **A text that begins mid-line is the tail of a line whose head another layer claimed**,
 so the operator *does* have its command in front of it:
@@ -10667,14 +10679,13 @@ The owned half must be a **word**, so the `for` list's terminator cannot be
 decided inside the closure — the caller hands the predicate the list minus its
 trailing terminator **run**: at most one real `;` byte, then any run of
 newlines, read from the **end** of the slice (task #559 — this gap is one rule
-with the arithmetic tail's, and the byte test plus both run directions now have
-one owner, `parse/semi/gap.rs`, the byte as data; comment rows need no arm
-because the tokenizer drops them, so the newline of the row **before** a
+with the arithmetic tail's, and the byte test plus both run directions now
+have one owner, `parse/semi/gap.rs`, the byte as data; comment rows need no
+arm because the tokenizer drops them, so the newline of the row **before** a
 comment is what stands in the run). The trim stays **asymmetric**: the leading
-side is not the gap. That is why the
-gate reads the **untrimmed** slice and lands before `trim_semi`:
-`for i in ; 1; do` is the leniency flipping to bash's side, and the rule stays
-a builder rule, per LESSONS:
+side is not the gap. That is why the gate reads the **untrimmed** slice and
+lands before `trim_semi`: `for i in ; 1; do` is the leniency flipping to
+bash's side, and the rule stays a builder rule, per LESSONS:
 "A word-list rule lives at **two granularities". Both directions of `owned`
 are pinned at each site: a parameter that never changes the answer is an
 equivalent mutant, per LESSONS:
@@ -10710,17 +10721,7 @@ Pins:
 `parse/case_clause/terminator/tests.rs`,
 `tests/case.rs::the_semi_and_ampersand_clause_terminators_run_the_next_clause`,
 `tests/case.rs::the_glued_only_boundary_stays_as_measured`,
-`parse/for_block/tests.rs::an_operator_word_in_the_word_list_is_a_parse_error, `parse/case_clause/tests.rs::an_operator_word_in_a_pattern_slot_reports_the_empty_pattern`, `tests/loops.rs::a_standalone_operator_word_in_a_for_word_list_is_a_parse_error`, `tests/loops.rs::the_parens_of_a_for_word_list_are_rejected` (renamed and flipped by task #470, which decided the parens it used to leave), `tests/case.rs::an_operator_word_in_the_pattern_list_is_a_parse_error`; the flipped fences `tests/cond_blocks.rs::for_list_with_and_is_a_parse_error`, `tests/block_redirect.rs::closer_shaped_words_stay_word_data` (`done|cat`: the `|` breaks the word, so it was never glued) and `tests/loops.rs::other_operator_words_in_a_for_word_list_stay_words`
-(the glued and quoted spellings that stay divergences); the gate's own
-LESSONS:
-"A separator-shaped word needs the span gate, because the scan-back breaks on the separator byte itself".
-Task **#559**'s gap run is pinned at its owner —
-`parse/semi/gap/tests.rs::the_byte_test_separates_the_semi_byte_from_the_newline`
-and `parse/semi/gap/tests.rs::the_gap_is_one_rule_read_from_both_ends` — with
-the word-form builders
-`parse/for_block/tests.rs::the_terminator_run_before_the_do_belongs_to_the_word_list`,
-`parse/for_block/tests.rs::the_gap_that_breaks_the_run_stays_a_parse_error_for_the_word_form`
-and `tests/loops.rs::a_terminator_run_before_the_word_for_body_matches_bash`.
+`parse/for_block/tests.rs::an_operator_word_in_the_word_list_is_a_parse_error, `parse/case_clause/tests.rs::an_operator_word_in_a_pattern_slot_reports_the_empty_pattern`, `tests/loops.rs::a_standalone_operator_word_in_a_for_word_list_is_a_parse_error`, `tests/loops.rs::the_parens_of_a_for_word_list_are_rejected` (renamed and flipped by task #470, which decided the parens it used to leave), `tests/case.rs::an_operator_word_in_the_pattern_list_is_a_parse_error`; the flipped fences `tests/cond_blocks.rs::for_list_with_and_is_a_parse_error`, `tests/block_redirect.rs::closer_shaped_words_stay_word_data` (`done|cat`: the `|` breaks the word, so it was never glued) and `tests/loops.rs::other_operator_words_in_a_for_word_list_stay_words` (the glued and quoted spellings that stay divergences); the gate's own LESSONS: "A separator-shaped word needs the span gate, because the scan-back breaks on the separator byte itself". Task **#559**'s gap run is pinned at its owner — `parse/semi/gap/tests.rs::the_byte_test_separates_the_semi_byte_from_the_newline` and `parse/semi/gap/tests.rs::the_gap_is_one_rule_read_from_both_ends` — with the word-form builders `parse/for_block/tests.rs::the_terminator_run_before_the_do_belongs_to_the_word_list`, `parse/for_block/tests.rs::the_gap_that_breaks_the_run_stays_a_parse_error_for_the_word_form` and `tests/loops.rs::a_terminator_run_before_the_word_for_body_matches_bash`.
 
 ## A text comparison in the recognition layer is the ONE quotedness gate's answer; the glue row, the payload row and the bare-operand arms are one rule at three granularities (task #530)
 
@@ -10869,9 +10870,9 @@ suite was green. Broadening the filter to the module prefix
 directly. The `*` twin (`in_idx * 1`) no longer sits in the registry:
 re-running this map for task #569 caught it on the current tree, so its old
 equivalence claim (the slot starts at the `in` keyword, never a `;` byte, so
-the guard's answer cannot change) no longer holds. Rule: a per-file filter must
-anchor at the module (or the crate), not at its `tests` submodule, or the gate
-silently under-tests every nested test module.
+the guard's answer cannot change) no longer holds. Rule: a per-file filter
+must anchor at the module (or the crate), not at its `tests` submodule, or the
+gate silently under-tests every nested test module.
 
 ## An error-mapping arm needs a test at the mapping boundary
 
@@ -10939,11 +10940,11 @@ Same mechanism on the read side: seven `child/` builtins each carried a
 byte-identical `resolve(var: &ShortCStr, state: &ShellState)` whose body was a
 lookup in `ShellState`'s own `fds` table, so the getter became
 `ShellState::fd_var(&self, name) -> Option<&FdVar>` in `state/fds.rs` — the
-read half of `set_fd_var`, kept in the `FdVar`-owning family. The error mapping
-stays with the caller (STYLE §4): each site maps `None` itself. Operators
-follow the state too: `ShellState::option_on(bit)` answers for the `options`
-field thirteen files copy-pasted as `options & FLAG != 0`, and `strict()`
-delegates.
+read half of `set_fd_var`, kept in the `FdVar`-owning family. The error
+mapping stays with the caller (STYLE §4): each site maps `None` itself.
+Operators follow the state too: `ShellState::option_on(bit)` answers for the
+`options` field thirteen files copy-pasted as `options & FLAG != 0`, and
+`strict()` delegates.
 
 What cannot cross stays free; each family's reason is in its own module doc —
 four answers, because that is what the code does.
@@ -10951,10 +10952,9 @@ four answers, because that is what the code does.
 `parse/token_word.rs` carries the seven methods `span_word`, `is_semi`,
 `is_list_terminator`, `separator_data`, `is_operator`, `glued`,
 `take_open_paren`.
-**What reads the raw script text `line` — through `quoted_word`,
-`pipe_token_span` or the byte scanners — stays free:** the
-`parse/word_quoted.rs` family (`keyword_word`, `gated_word`, `operator_word`,
-`is_the_word`) and its neighbours `parse/block_tail/word.rs`,
+**What reads the raw script text `line` — through `quoted_word`, `pipe_token_span` or the byte scanners — stays free:**
+the `parse/word_quoted.rs` family (`keyword_word`, `gated_word`,
+`operator_word`, `is_the_word`) and its neighbours `parse/block_tail/word.rs`,
 `parse/semi/preceded.rs::semi_byte` and `parse/function_block.rs::is_definer`.
 **What the orphan rule blocks stays free for that reason alone:** the
 `&ScriptText` family `parse/cond_bodies.rs` and the `&ShortCStr`/`&[MaskBit]`
@@ -10970,23 +10970,22 @@ that reason: `parse/semi/preceded.rs`, `parse/block_tail.rs`,
 two-copy families whose each copy has a single caller, `swap_positional`
 (`function_call.rs`, `intercept/source.rs`) and `write_trace`
 (`child/explain.rs`, `child/fdexplain.rs`).
-**And a method that returns another owner's type or calls that owner's private
-helper keeps its `impl Token` block in that owner's module** —
-`parse/redirect/path_word.rs`, `parse/redirect/attached.rs`,
+**And a method that returns another owner's type or calls that owner's private helper keeps its `impl Token` block in that owner's module**
+— `parse/redirect/path_word.rs`, `parse/redirect/attached.rs`,
 `parse/array_literal/words.rs` — the shape `ShortCStr` already uses inside its
 own family.
 
 Pins: `tests/shortcstr.rs::span_longer_than_the_string`. The sys crate's own
 test binary is the only scope the gate gives a sys file, so the rows live
 there, one per mutation of `end - start > self.len()`: equal span and text, a
-longer span, a non-zero `start` so `-` → `+` changes the answer, and a quotient
-short enough that `-` → `/` changes it too; plus the byte-accessor rows —
-`get_byte` in-range and past-the-end, `first_byte` non-empty and empty, and
-`BadState` answering `None` for both. Getter pins: two rows in
+longer span, a non-zero `start` so `-` → `+` changes the answer, and a
+quotient short enough that `-` → `/` changes it too; plus the byte-accessor
+rows — `get_byte` in-range and past-the-end, `first_byte` non-empty and empty,
+and `BadState` answering `None` for both. Getter pins: two rows in
 `state/fds/tests.rs`, one per answer — a name nothing holds answers `None`, a
 `set_fd_var`-ed name answers `Some` with its fd; `option_on` pins: two rows in
-`state/options/tests.rs`, one per answer — flag set alone `true`, flag off with
-another bit set `false`.
+`state/options/tests.rs`, one per answer — flag set alone `true`, flag off
+with another bit set `false`.
 
 ## A probe only counts if the mutation landed and the filter is the map's filter
 
@@ -11120,27 +11119,28 @@ The report's trailing newline is script-visible and pinned in exact bytes:
 `safe/fdshell/tests/umask.rs` and the quotes-family rows
 `safe/fdshell/tests/quotes.rs::a_quoted_umask_applies_the_mask`.
 
-The symbolic half is bash's `umask.def` rule, not chmod's (task #554): the mode is
-applied to the **complement** of the mask — `bits` starts at `!mask & 0777`, each
-clause moves it, and the result is complemented back — so a symbolic mode can only
-be evaluated where the live mask is, never in the parser. Inside it: a copy spec (a
-`u`/`g`/`o` letter in the action run) **replaces** the permissions the run had
-accumulated, and it and `X` read the **initial** allowed bits, not the bits an
-earlier clause moved — that is why `u=Xg` and `u=gX` answer differently and why a
-later copy erases an earlier `X`. `s` and `t` add only bits above `0777`, which
-`perm &= who` erases: accepted, doing nothing. The operator is mandatory at the
-start of a clause and after a comma (bash's `%c` of the end of the word prints as
-the empty character, and fdshell's operator error names the same empty name), and
-any letter the action run does not know is the character error — bash's rc 1 for
+The symbolic half is bash's `umask.def` rule, not chmod's (task #554): the
+mode is applied to the **complement** of the mask — `bits` starts at
+`!mask & 0777`, each clause moves it, and the result is complemented back — so
+a symbolic mode can only be evaluated where the live mask is, never in the
+parser. Inside it: a copy spec (a `u`/`g`/`o` letter in the action run)
+**replaces** the permissions the run had accumulated, and it and `X` read the
+**initial** allowed bits, not the bits an earlier clause moved — that is why
+`u=Xg` and `u=gX` answer differently and why a later copy erases an earlier
+`X`. `s` and `t` add only bits above `0777`, which `perm &= who` erases:
+accepted, doing nothing. The operator is mandatory at the start of a clause
+and after a comma (bash's `%c` of the end of the word prints as the empty
+character, and fdshell's operator error names the same empty name), and any
+letter the action run does not know is the character error — bash's rc 1 for
 both, fdshell's parse error at rc 1.
 
 `-S` prints after a mode operand too — bash prints, POSIX wants silence, and
-fdshell follows bash (recorded in `POSIX_COMPATIBILITY.md`); `-p`'s reusable prefix
-stays on the no-operand line only. Options cluster and repeat (`-pS`, `-SS`) and a
-lone `--` ends them, which is bash's `internal_getopt`; a lone `-` is an **operand**
-— its operator is that `-`, so it is a no-op. Pins:
-`parse/umask_mode/symbolic/tests.rs` (the bash-measured apply and `-S` tables) and
-the rows in `safe/fdshell/tests/umask.rs`.
+fdshell follows bash (recorded in `POSIX_COMPATIBILITY.md`); `-p`'s reusable
+prefix stays on the no-operand line only. Options cluster and repeat (`-pS`,
+`-SS`) and a lone `--` ends them, which is bash's `internal_getopt`; a lone
+`-` is an **operand** — its operator is that `-`, so it is a no-op. Pins:
+`parse/umask_mode/symbolic/tests.rs` (the bash-measured apply and `-S` tables)
+and the rows in `safe/fdshell/tests/umask.rs`.
 
 ## The `builtin`/`command` prefix is a lookup-layer rule: it reaches name lookups, not parse-level keywords (task #473)
 
@@ -11156,7 +11156,8 @@ recognized as the statement's word 0 by `safe/fdshell/src/parse/detect.rs` and
 `safe/fdshell/src/parse/detect_keyword.rs` — has no entry to reach, so both
 prefixes answer the lookup failure at rc 1 while bash reaches its builtin
 (`umask` prints the mask and `unset x` clears the variable at rc 0,
-`break`/`continue` warn at rc 0, `return` warns at rc 2 — bash 5.3.9, measured). The same rule decides the rest of the class, so it reads as one
+`break`/`continue` warn at rc 0, `return` warns at rc 2 — bash 5.3.9,
+measured). The same rule decides the rest of the class, so it reads as one
 rule: **accepted** on the in-process commands whose semantics the prefix can
 carry — `wait`, `local`, `times`, `export_fd`, `let`
 (`safe/fdshell/src/intercept/validation.rs::validate_intercept_no_builtin`,
@@ -11199,9 +11200,9 @@ opens: a regular file is the refusal; nothing there opens as an
 another errno reports its own errno); an existing non-regular target opens
 with the direction's flags and `O_EXCL` off. The kernel is **not** lenient —
 `O_WRONLY|O_CREAT|O_EXCL|O_TRUNC` answers `EEXIST` for a FIFO, a character
-device and a pipe reached through `/proc/self/fd/1` alike (measured
-with Python and bash 5.3.9) — so an errno-based rule cannot express bash's
-rows and fdshell must classify the target itself: the shared decision in
+device and a pipe reached through `/proc/self/fd/1` alike (measured with
+Python and bash 5.3.9) — so an errno-based rule cannot express bash's rows and
+fdshell must classify the target itself: the shared decision in
 `redirect/open/noclobber.rs` feeds both routes (the process-CWD path and the
 strict/`openat2` route), each with its own anchor (`stat` on the path, `statx`
 through the pinned `%CWD` fd — both follow symlinks, like bash). A divergence
@@ -11222,8 +11223,8 @@ and `safe/fdshell/tests/redirect.rs`
 (`set_c_on_a_pipe_backed_magic_target_writes_through`,
 `set_c_on_a_character_device_target_opens_it`,
 `set_c_on_a_directory_target_reports_the_errno`,
-`set_c_on_a_symlink_to_a_regular_file_refuses` — bash columns measured; the FIFO row stays documented only, its open blocks without a
-reader).
+`set_c_on_a_symlink_to_a_regular_file_refuses` — bash columns measured; the
+FIFO row stays documented only, its open blocks without a reader).
 
 ## A test that measures wall-clock under load cannot pin the number (task #484)
 
@@ -11302,40 +11303,41 @@ divergence — `newline_ends_the_peek`).
 
 ## A condition runs every command and gates on the last (task #557, closing task #498)
 
-`if true; false; then echo y; fi` prints nothing and `if false; true; then
-echo y; fi` prints `y` — bash's answers, and fdshell gives them now. Task #498
-had accepted the first-command answer as the condition granularity's, because a
-condition was never re-scanned and a run-layer split "would need a second
-split-time validator"; the reversal honours that refusal — the validator is the
-**one** shared scanner (`crate::segment::scan_segments`), and `cond/units.rs`
-only dispatches the units the scan produced, so the "no scan-side twin" rule
-stands. Two rules survived the move. The parse-error pre-passes stay the
-entry's, run over the **whole** text before anything runs, because bash parses
-the whole input before running anything — the pinned rows of #367/#406 were
-measured on them and the units dispatcher invents no error paths. And the
-plain-`&` flag rides on the **last** unit only: a plain `&` ends the statement
-before it (task #326), and a condition slice carries no `&` byte (task #356),
-so the flag is the parse layer's, handed to the entry as an argument. A text
-that yields one unit — every top-level statement and every condition whose
-separators are all data — runs the operator walk (now `run_list`) byte-identical
-to the pre-#557 entry. Loop control raised by **any** unit leaves the condition
-at once, and the last unit's status is what the state carries to the test: no
-bookkeeping. **Body accounting is one cursor over one list.** A unit's bodies are
-the ones the scan assigned it, else its share of the caller's list — and the two
-are the **same** bodies: the caller's list is the global per-line order
+`if true; false; then echo y; fi` prints nothing and
+`if false; true; then echo y; fi` prints `y` — bash's answers, and fdshell
+gives them now. Task #498 had accepted the first-command answer as the
+condition granularity's, because a condition was never re-scanned and a
+run-layer split "would need a second split-time validator"; the reversal
+honours that refusal — the validator is the **one** shared scanner
+(`crate::segment::scan_segments`), and `cond/units.rs` only dispatches the
+units the scan produced, so the "no scan-side twin" rule stands. Two rules
+survived the move. The parse-error pre-passes stay the entry's, run over the
+**whole** text before anything runs, because bash parses the whole input
+before running anything — the pinned rows of #367/#406 were measured on them
+and the units dispatcher invents no error paths. And the plain-`&` flag rides
+on the **last** unit only: a plain `&` ends the statement before it (task
+#326), and a condition slice carries no `&` byte (task #356), so the flag is
+the parse layer's, handed to the entry as an argument. A text that yields one
+unit — every top-level statement and every condition whose separators are all
+data — runs the operator walk (now `run_list`) byte-identical to the pre-#557
+entry. Loop control raised by **any** unit leaves the condition at once, and
+the last unit's status is what the state carries to the test: no bookkeeping.
+**Body accounting is one cursor over one list.** A unit's bodies are the ones
+the scan assigned it, else its share of the caller's list — and the two are
+the **same** bodies: the caller's list is the global per-line order
 ("A heredoc body is a property of the logical line, not of a contiguous span"),
 and a scan of a text that spans physical lines hands the same body to the unit
-whose region sits in it. So a unit served from the scan must consume its share of
-the list: in a text that mixes a region inside it with a region travelling in the
-list, serving the scan's copy without advancing the cursor hands the first body
-to the second unit too. Pins: `cond/units/tests.rs` (the split shapes, the per-unit body
-allocation — including the mix of the two sources — the flag on the last unit
-only, the immediate control exit) and
+whose region sits in it. So a unit served from the scan must consume its share
+of the list: in a text that mixes a region inside it with a region travelling
+in the list, serving the scan's copy without advancing the cursor hands the
+first body to the second unit too. Pins: `cond/units/tests.rs` (the split
+shapes, the per-unit body allocation — including the mix of the two sources —
+the flag on the last unit only, the immediate control exit) and
 `tests/cond_blocks.rs::the_condition_runs_every_command_and_gates_on_the_last`
 (this task's table and the flipped #498 family, at bash's measured values; the
-file shape that mixes the sources is pinned at fdshell's value and names bash's,
-because the parse layer hands the condition only the first logical line's region
-— that half is the parse layer's rule, not the split's).
+file shape that mixes the sources is pinned at fdshell's value and names
+bash's, because the parse layer hands the condition only the first logical
+line's region — that half is the parse layer's rule, not the split's).
 
 ## An export dup is only ever created in a forked child (task #503)
 
@@ -11468,35 +11470,37 @@ their own owners pinned them).
 
 ## An operator word is a word: expand it; the outer `${…}` owns the mask (task #561)
 
-The `word` of a colon operator (`:-`, `:=`, `:+`, `:?`) is a **word**, so it runs
-the ordinary word pipeline (`substitute_arg_marked`) before the arm uses it:
-tilde, `$name`, `$(…)`, `$((…))`, backticks, escape folding, quote removal. The
-word's own mask governs only its own expansion, and the sub-mask is
-**discarded** on the way out: the caller pads the whole `${…}` result with the
-outer trigger byte's bit, exactly as it does for any other expansion. That is
-why an unquoted `${u:="a b"}` splits into two fields and `${u:="*"}` globs even
-though the word quoted its own content, while the fully quoted reference keeps
-one field. `:=` stores the **expanded** scalar (space-joining `$@`, first-`IFS`
-joining `$*`); `:?` expands its message word **unquoted** even inside a quoted
-reference, and its message joins space on both spellings whatever the `IFS` is.
-The absent-word test is `literal.is_empty() && !spans.contains(&start)`: a
-zero-byte quote span is a word that is present and empty, and it is the only
-thing that says so — the parser strips the pair, so no mask bit survives (the
-spans are rebased to the word's byte range and a span at the word's start or end
-is what the tilde gate reads). Guard a word that an unclosed `$(…)` or backtick
-cuts in half (the region body is still read to the first `}`, task #174):
-without the guard, expanding the fragment turns an accepted literal into an
-`UnclosedParen` / `UnclosedBacktick` bail.
+The `word` of a colon operator (`:-`, `:=`, `:+`, `:?`) is a **word**, so it
+runs the ordinary word pipeline (`substitute_arg_marked`) before the arm uses
+it: tilde, `$name`, `$(…)`, `$((…))`, backticks, escape folding, quote
+removal. The word's own mask governs only its own expansion, and the sub-mask
+is **discarded** on the way out: the caller pads the whole `${…}` result with
+the outer trigger byte's bit, exactly as it does for any other expansion. That
+is why an unquoted `${u:="a b"}` splits into two fields and `${u:="*"}` globs
+even though the word quoted its own content, while the fully quoted reference
+keeps one field. `:=` stores the **expanded** scalar (space-joining `$@`,
+first-`IFS` joining `$*`); `:?` expands its message word **unquoted** even
+inside a quoted reference, and its message joins space on both spellings
+whatever the `IFS` is. The absent-word test is
+`literal.is_empty() && !spans.contains(&start)`: a zero-byte quote span is a
+word that is present and empty, and it is the only thing that says so — the
+parser strips the pair, so no mask bit survives (the spans are rebased to the
+word's byte range and a span at the word's start or end is what the tilde gate
+reads). Guard a word that an unclosed `$(…)` or backtick cuts in half (the
+region body is still read to the first `}`, task #174): without the guard,
+expanding the fragment turns an accepted literal into an `UnclosedParen` /
+`UnclosedBacktick` bail.
 
 Pins: `substitute/tests.rs::colon_dash_word_expands_*`,
-`colon_assign_stores_the_expanded_word`, `colon_assign_tilde_uses_the_word_mask`,
+`colon_assign_stores_the_expanded_word`,
+`colon_assign_tilde_uses_the_word_mask`,
 `colon_assign_folds_unquoted_backslash`,
 `colon_assign_keeps_single_quoted_dollar_literal`, `colon_plus_word_is_lazy`,
 `colon_question_word_expands_unquoted`,
 `colon_question_message_respects_literal_emptiness`,
 `colon_word_positional_joins_match_bash`,
-`colon_word_truncated_paren_stays_literal`, `colon_word_mask_shorter_than_word_*`,
-`colon_word_spans_are_rebased`;
+`colon_word_truncated_paren_stays_literal`,
+`colon_word_mask_shorter_than_word_*`, `colon_word_spans_are_rebased`;
 `origin/tests.rs::append_boundaries_offsets_and_preserves_order`;
 `tests/unset_expand.rs::colon_word_expansion_matches_bash` (and its sibling
 tests, with bash 5.3.9's measured values), whose
@@ -11507,12 +11511,12 @@ moved to parity; the residuals it lists are task #174 (reader) and task #571
 ## A `\`+newline pair at a word start is joined by the tokenizer (task #570)
 
 bash removes every `\<newline>` pair *before* tokenization, so such a pair can
-never be word bytes. fdshell keeps a pair in the word text (see
-LESSONS: "POSIX #4.1 escapes") because a word's `start`/`end` index the **raw**
-line and the folding surfaces (`bytes/fold/raw.rs::fold_impl`,
-`bytes/fold.rs::fold_mask`, `substitute/arg/escape.rs::unquoted`) are what drop
-it from the text they consume: a tokenizer-wide drop would move every raw offset
-a word surface reads. So the join is gated on the **word start** — the
+never be word bytes. fdshell keeps a pair in the word text (see LESSONS:
+"POSIX #4.1 escapes") because a word's `start`/`end` index the **raw** line
+and the folding surfaces (`bytes/fold/raw.rs::fold_impl`,
+`bytes/fold.rs::fold_mask`, `substitute/arg/escape.rs::unquoted`) are what
+drop it from the text they consume: a tokenizer-wide drop would move every raw
+offset a word surface reads. So the join is gated on the **word start** — the
 tokenizer's `b'\'` arm calls `parse/token/escape.rs::read_line_continuation`,
 which consumes the pair only when no byte has been pushed for the current word
 and no quote has started it (`cur.is_empty() && !word_quoted`) and re-anchors
@@ -11520,27 +11524,28 @@ and no quote has started it (`cur.is_empty() && !word_quoted`) and re-anchors
 
 What the join buys is the plain spelling the gap rules already accept: a `;`
 token, then the body keyword. Accepted at bash's rc 0 (measured, bash 5.3.9):
-`for i in 1 2 ;\` + row + `do …`, the glued `;\`, a space after the joined row,
-a blank row, a tab-only row, a comment row, a body-side here-doc on the same
-shape, and the `if`/`while`/`until`/C-style-`for` twins. Still rejected (bash's
-rc-2 class, fdshell rc 1): the **no-`;`** spellings — the join cannot rescue a
-head with no control operator, which task #559's gap rule owns — a second `;`,
-and the `&`. A pair behind an empty quoted word (`""\` + row + `x`) has already
-started a word, so it stays word text; the shell-visible answer is still bash's,
-because the folding surface drops the pair at expansion — the unit pin pins the
-tokenizer's text, not the expansion.
+`for i in 1 2 ;\` + row + `do …`, the glued `;\`, a space after the joined
+row, a blank row, a tab-only row, a comment row, a body-side here-doc on the
+same shape, and the `if`/`while`/`until`/C-style-`for` twins. Still rejected
+(bash's rc-2 class, fdshell rc 1): the **no-`;`** spellings — the join cannot
+rescue a head with no control operator, which task #559's gap rule owns — a
+second `;`, and the `&`. A pair behind an empty quoted word (`""\` + row +
+`x`) has already started a word, so it stays word text; the shell-visible
+answer is still bash's, because the folding surface drops the pair at
+expansion — the unit pin pins the tokenizer's text, not the expansion.
 
-The residual is the closing-keyword family (`for …; do echo a; \` + row + `done`,
-`if …; then echo a; \` + row + `fi`, `case …;; \` + row + `esac`, `done\` + row
-+ `;`): those report `'for' is missing its closing 'done'` at
-`script/unclosed.rs:20`, because the *scan* layer consumes the pair as one unit
-(rule 1 of LESSONS: "POSIX #4.1 escapes") and never sees the line break; task
-#573 owns it.
+The residual is the closing-keyword family (`for …; do echo a; \` + row +
+`done`, `if …; then echo a; \` + row + `fi`, `case …;; \` + row + `esac`,
+`done\` + row + `;`): those report `'for' is missing its closing 'done'` at
+`script/unclosed.rs:20`, because the *scan* layer consumes the pair as one
+unit (rule 1 of LESSONS: "POSIX #4.1 escapes") and never sees the line break;
+task #573 owns it.
 
 Pins: `parse/token/tests.rs::a_pair_at_a_word_start_is_joined` (the raw range
 starts after the pair),
 `parse/token/tests.rs::a_pair_after_an_empty_quoted_word_stays_in_the_word_text`
-(the `word_quoted` gate), `parse/token/tests.rs::a_word_start_pair_joins_only_before_a_newline`,
+(the `word_quoted` gate),
+`parse/token/tests.rs::a_word_start_pair_joins_only_before_a_newline`,
 `parse/token/tests.rs::a_joined_pair_after_a_separator_keeps_the_separator_token`,
 next to the mid-word `escaped_newline_stays_in_the_word`; and the bash-parity
 rows in `tests/loops.rs`
@@ -11563,18 +11568,17 @@ records the rejection.
 
 ## A boundary comparison with an unproducible equality class is accepted-equivalent at that boundary
 
-When a comparison earns its keep (both neighbours of `<` are pinned and
-behave differently), but its **equality input cannot be produced** (the
-producer's own filter admits only sized results and the byte-level shape
-shows the equality input can never arrive), the mutant that stretches it
-(`<'→`<=`, and the `>`/`>=` mirror) is an accepted equivalent: the census
-that shows no input reaches equality **is** the proof; do not invent a test
-for an input that cannot exist. When the membership can be written through a
-method with no operator at the boundary (CATCHING_MUTANTS rules 22/24),
-simplify the source and retire the record instead; this entry governs the
-comparisons that must stay. Unlike
-"Redundant boundary ±1 produces equivalent mutants", the comparison here is
-**not** redundant — keep the comparison, record the proof.
+When a comparison earns its keep (both neighbours of `<` are pinned and behave
+differently), but its **equality input cannot be produced** (the producer's
+own filter admits only sized results and the byte-level shape shows the
+equality input can never arrive), the mutant that stretches it
+(`<'→`<=`, and the `>`/`>=` mirror) is an accepted equivalent: the census that
+shows no input reaches equality **is** the proof; do not invent a test for an
+input that cannot exist. When the membership can be written through a method
+with no operator at the boundary (CATCHING_MUTANTS rules 22/24), simplify the
+source and retire the record instead; this entry governs the comparisons that
+must stay. Unlike "Redundant boundary ±1 produces equivalent mutants", the
+comparison here is **not** redundant — keep the comparison, record the proof.
 
 Pins: the append-side equality neighbour
 `parse/part_text/tests.rs::a_region_starting_exactly_at_the_slice_end_still_appends`
@@ -11583,133 +11587,151 @@ Pins: the append-side equality neighbour
 
 ## A real signal handler relies on glibc's `sigaction` to fill the restorer (task #582)
 
-`sys::signal::set_action` installs a flag-setting handler with `sa_flags: 0`, an
-empty `sa_mask` and `sa_restorer: None` — the shape a C program hands glibc —
-and it works on x86-64 because glibc's `sigaction` **wrapper** fills in the
+`sys::signal::set_action` installs a flag-setting handler with `sa_flags: 0`,
+an empty `sa_mask` and `sa_restorer: None` — the shape a C program hands glibc
+— and it works on x86-64 because glibc's `sigaction` **wrapper** fills in the
 restorer (and `SA_RESTORER`) for a real handler; the SAFETY note on
 `reset_sigpipe` covers only `SIG_DFL`, which never returns. The handler is a
-`no_std` `extern "C" fn` declaring only `sig` — the standard System V shape, the
-kernel passes three arguments — and it is async-signal-safe because its body is
-that one atomic op: no allocation, no syscall, no libc call, so the trap body
-runs later in the executor (the dash `onsig` / bash `trap_handler` pattern).
-`SA_RESTART` stays off on purpose: an interrupted syscall failing with `EINTR`
-is what that pattern assumes, and restarting is the consumer's decision.
-Per-signal bits, not one shared flag: the pending mask is an `AtomicU64` with
-bit `sig - 1` for signals `1..=64`, so a poll says *which* trap fired, and
-`fetch_or`/`swap` are single lock-free instructions here.
+`no_std` `extern "C" fn` declaring only `sig` — the standard System V shape,
+the kernel passes three arguments — and it is async-signal-safe because its
+body is that one atomic op: no allocation, no syscall, no libc call, so the
+trap body runs later in the executor (the dash `onsig` / bash `trap_handler`
+pattern). `SA_RESTART` stays off on purpose: an interrupted syscall failing
+with `EINTR` is what that pattern assumes, and restarting is the consumer's
+decision. Per-signal bits, not one shared flag: the pending mask is an
+`AtomicU64` with bit `sig - 1` for signals `1..=64`, so a poll says *which*
+trap fired, and `fetch_or`/`swap` are single lock-free instructions here.
 
 Test corollary: a disposition is **process-global**, so a row that installs,
-delivers or queries one does all three inside a forked child and reports over a
-pipe (the `child_reports` pattern) — the child's own copy of the mask is what it
-measures, so rows cannot disturb each other. Self-`kill` delivery is definite
-only across a syscall boundary, and POSIX lets the `kill` call itself answer
-`EINTR` without `SA_RESTART`: assert the recorded flag, never the call's result.
+delivers or queries one does all three inside a forked child and reports over
+a pipe (the `child_reports` pattern) — the child's own copy of the mask is
+what it measures, so rows cannot disturb each other. Self-`kill` delivery is
+definite only across a syscall boundary, and POSIX lets the `kill` call itself
+answer `EINTR` without `SA_RESTART`: assert the recorded flag, never the
+call's result.
 
 Pins: `unsafe/sys/tests/sigaction.rs::flag_handler_records_the_signal` (the
 handler runs, the exact bit, and it *returns* — a broken restorer crashes the
 child), `unsafe/sys/tests/sigaction.rs::poll_consumes`,
 `unsafe/sys/tests/sigaction.rs::per_signal_flags_distinguish`,
 `unsafe/sys/tests/sigaction.rs::ignore_disposition_observed` and
-`unsafe/sys/tests/sigaction.rs::default_disposition_observed` (read-back through
-a `sigaction` query), `unsafe/sys/tests/sigaction.rs::invalid_signal_errors_via_cvt`.
+`unsafe/sys/tests/sigaction.rs::default_disposition_observed` (read-back
+through a `sigaction` query),
+`unsafe/sys/tests/sigaction.rs::invalid_signal_errors_via_cvt`.
 
 ## A list form promised as re-inputtable is parsed by the parser it prints into (task #584)
 
-A list form that must re-input as itself (POSIX's `eval "$(trap)"` round trip) has its
-format, its quoting and its condition spelling as **one** contract with the parser: the
-`--` end-of-options marker, the `'\''` single-quote style and the `SIG`-prefixed name
-spelling each exist so the printed line parses back. So the quoting rule has one owner —
-`safe/fdshell/src/intercept/quoting.rs`, shared with the `alias` definition printer — and
-the signal-name table has one owner for both directions:
-`safe/fdshell/src/intercept/signalfd_cmd/signals.rs` derives the parser and the printer
-from a single `[(name, sig)]` const table. A byte-identical private duplicate of either is
-what drifts: a printer that quotes differently, or a name its own parser cannot read back,
-breaks the round trip on inputs nobody tests. The table answers `None` for numbers it has
-no row for (glibc keeps 32 and 33 for itself on Linux), and the printer's fallback there is
-the decimal spelling — which is also what bash prints.
+A list form that must re-input as itself (POSIX's `eval "$(trap)"` round trip)
+has its format, its quoting and its condition spelling as **one** contract
+with the parser: the `--` end-of-options marker, the `'\''` single-quote style
+and the `SIG`-prefixed name spelling each exist so the printed line parses
+back. So the quoting rule has one owner —
+`safe/fdshell/src/intercept/quoting.rs`, shared with the `alias` definition
+printer — and the signal-name table has one owner for both directions:
+`safe/fdshell/src/intercept/signalfd_cmd/signals.rs` derives the parser and
+the printer from a single `[(name, sig)]` const table. A byte-identical
+private duplicate of either is what drifts: a printer that quotes differently,
+or a name its own parser cannot read back, breaks the round trip on inputs
+nobody tests. The table answers `None` for numbers it has no row for (glibc
+keeps 32 and 33 for itself on Linux), and the printer's fallback there is the
+decimal spelling — which is also what bash prints.
 
-Pins: `safe/fdshell/tests/trap.rs::the_list_form_re_inputs` (a quote inside the action, and
-the line re-inputs through `eval`), `parse_signal`/`signal_name` rows in
-`safe/fdshell/src/intercept/signalfd_cmd/tests.rs` (`every_name_spells_back_the_same_way`
-agrees in both directions, `all_signal_names_resolve` keeps the parser's), the expansion
-rows in `safe/fdshell/tests/trap.rs` — operands go through the shared substitution pipeline,
-so a `$name` value becomes the action and a quoted `*` stays itself.
+Pins: `safe/fdshell/tests/trap.rs::the_list_form_re_inputs` (a quote inside
+the action, and the line re-inputs through `eval`),
+`parse_signal`/`signal_name` rows in
+`safe/fdshell/src/intercept/signalfd_cmd/tests.rs`
+(`every_name_spells_back_the_same_way` agrees in both directions,
+`all_signal_names_resolve` keeps the parser's), the expansion rows in
+`safe/fdshell/tests/trap.rs` — operands go through the shared substitution
+pipeline, so a `$name` value becomes the action and a quoted `*` stays itself.
 
 ## fdshell's inherited-ignored set is not empty, so POSIX's entry rule is observable here (task #584)
 
-POSIX XCU 2.15: signals ignored on entry to a non-interactive shell cannot be trapped or
-reset, "although no error need be reported". In bash that set is empty and the rule never
-fires; in fdshell Rust's own runtime ignores `SIGPIPE`, so `trap 'x' PIPE` is refused in
-`-c` mode where bash traps it — and the refusal is silent with status 0: no registration,
-no `sigaction`, no diagnostic, and the reset form is refused the same way. The set is a
-snapshot taken once at startup (`ShellState::ignored_on_entry`, a `u64` bitmask with bit
-`sig - 1`, the same shape `sys`'s pending mask uses), not a per-registration query: after
-the first `trap` the process disposition is no longer the one the shell started with, so a
-live query would refuse conditions bash would accept.
+POSIX XCU 2.15: signals ignored on entry to a non-interactive shell cannot be
+trapped or reset, "although no error need be reported". In bash that set is
+empty and the rule never fires; in fdshell Rust's own runtime ignores
+`SIGPIPE`, so `trap 'x' PIPE` is refused in `-c` mode where bash traps it —
+and the refusal is silent with status 0: no registration, no `sigaction`, no
+diagnostic, and the reset form is refused the same way. The set is a snapshot
+taken once at startup (`ShellState::ignored_on_entry`, a `u64` bitmask with
+bit `sig - 1`, the same shape `sys`'s pending mask uses), not a
+per-registration query: after the first `trap` the process disposition is no
+longer the one the shell started with, so a live query would refuse conditions
+bash would accept.
 
-The rule has two edges and only one is shared. fdshell refuses **both** forms — the
-registration and the reset — the same silent way at status 0; bash, whose own set is empty
-so the rule never fires for it, *lists* the inherited ignore (`trap -- '' SIGINT`) and
-honours a reset on it: `trap - INT; kill -INT $$; echo after` under a parent that ignored
-`INT` dies of `INT` (its parent sees 130) where fdshell prints `after` at 0
-(bash 5.3.9, this host). So the pinned rows are fdshell's silence at 0 and the
-inherited ignore surviving the `kill`; bash's list line is a comment. The control that
-decides the rule is the **parent's** `trap`: the same rows with nothing inherited are
-ordinary registrations both shells agree on line for line. Put the signal into the set the
-way a real caller does — a parent `sh` that sets it and `exec`s the binary, so the
-disposition is inherited through the `exec` — and the suite keeps to `sh`, which it already
-spawns (bash is never spawned by the suite, so bash rows stay comments).
+The rule has two edges and only one is shared. fdshell refuses **both** forms
+— the registration and the reset — the same silent way at status 0; bash,
+whose own set is empty so the rule never fires for it, *lists* the inherited
+ignore (`trap -- '' SIGINT`) and honours a reset on it:
+`trap - INT; kill -INT $$; echo after` under a parent that ignored `INT` dies
+of `INT` (its parent sees 130) where fdshell prints `after` at 0 (bash 5.3.9,
+this host). So the pinned rows are fdshell's silence at 0 and the inherited
+ignore surviving the `kill`; bash's list line is a comment. The control that
+decides the rule is the **parent's** `trap`: the same rows with nothing
+inherited are ordinary registrations both shells agree on line for line. Put
+the signal into the set the way a real caller does — a parent `sh` that sets
+it and `exec`s the binary, so the disposition is inherited through the `exec`
+— and the suite keeps to `sh`, which it already spawns (bash is never spawned
+by the suite, so bash rows stay comments).
 
-Pins: `safe/fdshell/src/state/tests.rs::the_seed_records_the_signals_ignored_on_entry` (the
-`SIGPIPE` bit set, an ordinary bit clear) with `unsafe/sys/tests/sigpipe.rs` pinning the
-same fact at the `sys` layer, and `safe/fdshell/tests/trap.rs::the_inherited_ignore_is_refused_silently`
-(prints nothing, status 0, and a signal not ignored on entry still traps),
+Pins:
+`safe/fdshell/src/state/tests.rs::the_seed_records_the_signals_ignored_on_entry`
+(the `SIGPIPE` bit set, an ordinary bit clear) with
+`unsafe/sys/tests/sigpipe.rs` pinning the same fact at the `sys` layer, and
+`safe/fdshell/tests/trap.rs::the_inherited_ignore_is_refused_silently` (prints
+nothing, status 0, and a signal not ignored on entry still traps),
 `safe/fdshell/tests/trap.rs::an_entry_ignored_condition_is_refused_and_stays_ignored`,
 `safe/fdshell/tests/trap.rs::an_entry_ignored_reset_is_refused_and_stays_ignored`,
-`safe/fdshell/tests/trap.rs::a_signal_not_ignored_on_entry_is_trapped_as_usual` and
-`safe/fdshell/tests/trap.rs::the_entry_rule_needs_the_parent_to_ignore_the_signal` (the
-no-parent control, and the reset row there is a SIGINT death — a killed shell never
-reaches an exit code, so the pin reads the signal).
+`safe/fdshell/tests/trap.rs::a_signal_not_ignored_on_entry_is_trapped_as_usual`
+and
+`safe/fdshell/tests/trap.rs::the_entry_rule_needs_the_parent_to_ignore_the_signal`
+(the no-parent control, and the reset row there is a SIGINT death — a killed
+shell never reaches an exit code, so the pin reads the signal).
 
 ## The deferred trap executor is the only runner; handlers flag, tables store (task #585)
 
-The trap chain splits three ways: the `sys` handler flags (the pending-mask static —
-see LESSONS: "A real signal handler relies on glibc's `sigaction` to fill the restorer
-(task #582)"), the `ShellState` table stores (task #583), the builtin registers (task
-#584) — and `safe/fdshell/src/trap_exec.rs` *runs*, dash's `trap.c::dotrap` / bash's
-`trap.c::run_pending_traps` shape. Only it may call the runner for a pending trap: the
-handler must stay async-signal-safe (one atomic), so running happens at command
-boundaries after the handler has returned. `$?` is saved before an action and restored
-after — the action must not be able to change what the shell sees (POSIX, Austin Group
-#1602) — and restoring the *code* is exact for every consumer (`$?` renders
-`exit_code()`, and nothing matches `last_status` on its variant). The EXIT trap is a
-one-shot: an `exit` inside an action must exit with that status without re-entering the
-trap (bash 5.3.9, measured), and the guard is a `static` `AtomicBool` because
-dispositions and the pending mask are already process-global. One consequence of the
-wait block's forked arms (task #362): an arm child forked after a flag fired inherits
-the pending mask through CoW and runs the action at its own boundary too, so that pin
-asserts the double run as measured. And because `sa_flags == 0` (no `SA_RESTART`), a
-handled signal interrupts a pidfd `waitid` — `wait_pidfd_rusage` retries it after the
-handler flags: flag-and-resume is the pattern, and an interrupted reap must never abort
-the shell.
+The trap chain splits three ways: the `sys` handler flags (the pending-mask
+static — see LESSONS:
+"A real signal handler relies on glibc's `sigaction` to fill the restorer (task #582)"),
+the `ShellState` table stores (task #583), the builtin registers (task #584) —
+and `safe/fdshell/src/trap_exec.rs` *runs*, dash's `trap.c::dotrap` / bash's
+`trap.c::run_pending_traps` shape. Only it may call the runner for a pending
+trap: the handler must stay async-signal-safe (one atomic), so running happens
+at command boundaries after the handler has returned. `$?` is saved before an
+action and restored after — the action must not be able to change what the
+shell sees (POSIX, Austin Group #1602) — and restoring the *code* is exact for
+every consumer (`$?` renders `exit_code()`, and nothing matches `last_status`
+on its variant). The EXIT trap is a one-shot: an `exit` inside an action must
+exit with that status without re-entering the trap (bash 5.3.9, measured), and
+the guard is a `static` `AtomicBool` because dispositions and the pending mask
+are already process-global. One consequence of the wait block's forked arms
+(task #362): an arm child forked after a flag fired inherits the pending mask
+through CoW and runs the action at its own boundary too, so that pin asserts
+the double run as measured. And because `sa_flags == 0` (no `SA_RESTART`), a
+handled signal interrupts a pidfd `waitid` — `wait_pidfd_rusage` retries it
+after the handler flags: flag-and-resume is the pattern, and an interrupted
+reap must never abort the shell.
 
 Two corollaries of the same split, measured against bash 5.3.9 on this host. A
-signal **blocked** by `signalfd` never reaches the handler at all — `sys::signalfd` blocks
-its signals with `sigprocmask(SIG_BLOCK)`, which is how it receives them — and a blocked
-signal is not delivered to an installed handler, so the fd owns the delivery, no action
-runs while the block holds, and the order of the two registrations changes nothing; the
-table entry survives and still prints, and `EXIT` is not a signal, so its own path runs it
-even while another signal is blocked. Second: a pure-fork child keeps **both** halves the
-executor needs — the disposition (kernel inheritance) and the table (the CoW copy, the same
-route the pending mask already takes) — so the action runs in a `$(…)` capture, a
-background builtin and a `wait` arm alike; POSIX XCU 2.12 resets trapped signals in a child
-process and bash follows it for its subshells, so bash runs nothing there. `exec` is the
-reset for exec'd images, and only bash reaches that reset from a background job: its exec'd
-`sleep` killed by `USR1` dies without acting (eight runs, `child rc=138`),
-while fdshell's `$!` names its forked subshell — disposition and table intact — and acts
-every time (eight runs).
+signal **blocked** by `signalfd` never reaches the handler at all —
+`sys::signalfd` blocks its signals with `sigprocmask(SIG_BLOCK)`, which is how
+it receives them — and a blocked signal is not delivered to an installed
+handler, so the fd owns the delivery, no action runs while the block holds,
+and the order of the two registrations changes nothing; the table entry
+survives and still prints, and `EXIT` is not a signal, so its own path runs it
+even while another signal is blocked. Second: a pure-fork child keeps **both**
+halves the executor needs — the disposition (kernel inheritance) and the table
+(the CoW copy, the same route the pending mask already takes) — so the action
+runs in a `$(…)` capture, a background builtin and a `wait` arm alike; POSIX
+XCU 2.12 resets trapped signals in a child process and bash follows it for its
+subshells, so bash runs nothing there. `exec` is the reset for exec'd images,
+and only bash reaches that reset from a background job: its exec'd `sleep`
+killed by `USR1` dies without acting (eight runs, `child rc=138`), while
+fdshell's `$!` names its forked subshell — disposition and table intact — and
+acts every time (eight runs).
 
-Pins: `safe/fdshell/tests/trap.rs::the_action_sees_the_pre_trap_status_and_restore_is_exact`,
+Pins:
+`safe/fdshell/tests/trap.rs::the_action_sees_the_pre_trap_status_and_restore_is_exact`,
 `safe/fdshell/tests/trap.rs::the_exit_trap_runs_at_most_once_per_shell`,
 `safe/fdshell/tests/trap.rs::the_wait_boundary_runs_the_pending_action`,
 `safe/fdshell/src/trap_exec/tests.rs::the_action_runs_in_the_current_environment`,
@@ -11720,47 +11742,49 @@ Pins: `safe/fdshell/tests/trap.rs::the_action_sees_the_pre_trap_status_and_resto
 
 ## A loop's own status is the body's last command, never the condition's (task #164)
 
-POSIX #2.9.3 gives `while`/`until` (and both `for` forms) the status of the last
-command their **body** ran, `0` when no iteration ran. `loop_.rs` had it backwards:
-the condition test wrote `last_status`, so a `while` ending on a false test reported
-the test's own 1 where bash reports 0, and an `until` ending on a true test reported
-the test's 0 where bash reports the body's 7. The mechanism is a **memory**, not a
-re-read: record the status right after each body run and apply it only at the exit
-the condition decided — the condition's status gates the test and is never the
-loop's status.
+POSIX #2.9.3 gives `while`/`until` (and both `for` forms) the status of the
+last command their **body** ran, `0` when no iteration ran. `loop_.rs` had it
+backwards: the condition test wrote `last_status`, so a `while` ending on a
+false test reported the test's own 1 where bash reports 0, and an `until`
+ending on a true test reported the test's 0 where bash reports the body's 7.
+The mechanism is a **memory**, not a re-read: record the status right after
+each body run and apply it only at the exit the condition decided — the
+condition's status gates the test and is never the loop's status.
 
-The record happens **before** the trap boundary, because a trap action does not move
-`$?` (see LESSONS: "The deferred trap executor is the only runner; handlers flag, tables store")
+The record happens **before** the trap boundary, because a trap action does
+not move `$?` (see LESSONS:
+"The deferred trap executor is the only runner; handlers flag, tables store")
 — pinned at
-`tests/trap.rs::the_action_sees_the_pre_trap_status_and_restore_is_exact`. So the
-body's last command owns the value the loop reports, and the trap boundary changes
-nothing at a loop edge.
+`tests/trap.rs::the_action_sees_the_pre_trap_status_and_restore_is_exact`. So
+the body's last command owns the value the loop reports, and the trap boundary
+changes nothing at a loop edge.
 
-Three owners keep their own arms of the rule and must not be merged: this one, the
-condition-false-on-the-first-test zeroing (`!ran_body`, whose own rows are the ones
-that pin it), and the dispatch-site rule of
-LESSONS: "`break`/`continue` set the exit status where the signal is raised"
+Three owners keep their own arms of the rule and must not be merged: this one,
+the condition-false-on-the-first-test zeroing (`!ran_body`, whose own rows are
+the ones that pin it), and the dispatch-site rule of LESSONS:
+"`break`/`continue` set the exit status where the signal is raised"
 
-`for_run/arith.rs` already had the rule — its
-clauses never touch `last_status`, so the body's value survives — which is what
-makes the pair of rows in
-`safe/fdshell/tests/loops.rs::c_style_for_status_rules_match_bash` green.
+`for_run/arith.rs` already had the rule — its clauses never touch
+`last_status`, so the body's value survives — which is what makes the pair of
+rows in `safe/fdshell/tests/loops.rs::c_style_for_status_rules_match_bash`
+green.
 
-The rule reaches further than the shell's `rc`: the status feeds a `&&`/`||` list
-(`…; done && echo after` runs `after`), `set -e` (the loop's status is what the gate
-sees; the condition itself stays exempt, task #491), and a pipeline **stage**
-(`echo a | while read l; do …; done` — the status is produced in the child and the
-fork reports it, so the `read` class no longer owns that row). Values are bash
-5.3.9's, measured.
+The rule reaches further than the shell's `rc`: the status feeds a `&&`/`||`
+list (`…; done && echo after` runs `after`), `set -e` (the loop's status is
+what the gate sees; the condition itself stays exempt, task #491), and a
+pipeline **stage** (`echo a | while read l; do …; done` — the status is
+produced in the child and the fork reports it, so the `read` class no longer
+owns that row). Values are bash 5.3.9's, measured.
 
-Pins: `safe/fdshell/tests/loops.rs::the_loop_status_is_the_bodys_last_command`,
+Pins:
+`safe/fdshell/tests/loops.rs::the_loop_status_is_the_bodys_last_command`,
 `safe/fdshell/tests/loops.rs::the_last_command_of_the_body_is_what_the_loop_reports`
 (the pair that differs only in which command ran last),
 `safe/fdshell/tests/loops.rs::a_loop_that_never_runs_its_body_reports_zero`,
 `safe/fdshell/tests/loops.rs::a_loop_status_of_zero_does_not_trip_errexit`,
 `safe/fdshell/tests/loops.rs::a_trap_action_at_a_loop_boundary_does_not_move_the_status`,
-`safe/fdshell/tests/arith.rs::arith_increment_in_loop`, and the rows that reached
-parity: `tests/loops.rs::a_stage_block_reads_the_pipe_is_bash_parity`,
+`safe/fdshell/tests/arith.rs::arith_increment_in_loop`, and the rows that
+reached parity: `tests/loops.rs::a_stage_block_reads_the_pipe_is_bash_parity`,
 `tests/loops.rs::glued_arith_conditions_land_on_the_arith_command_rule`,
 `tests/heredoc.rs::function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence`,
 `tests/block_redirect.rs::the_here_doc_tail_rows_that_keep_their_measured_values`.
@@ -11776,6 +11800,7 @@ fdshell's own accepted convention (rc 0, `tests/redirect_scope.rs`) — adopting
 bash's rc 1 there would churn that pin and fix nothing about the data. The
 guard's own pin must not confuse the two halves: it pins the data, not the rc.
 
-Pins: `safe/fdshell/src/intercept/tests.rs::run_shift_beyond_the_list_keeps_positional_args`,
+Pins:
+`safe/fdshell/src/intercept/tests.rs::run_shift_beyond_the_list_keeps_positional_args`,
 `safe/fdshell/tests/positional.rs::shift_beyond_the_list_leaves_the_positionals_alone`
 (function scope included — the same intercept serves it).
