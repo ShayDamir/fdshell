@@ -11807,7 +11807,9 @@ Pins:
 reached parity: `tests/loops.rs::a_stage_block_reads_the_pipe_is_bash_parity`,
 `tests/loops.rs::glued_arith_conditions_land_on_the_arith_command_rule`,
 `tests/heredoc.rs::function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence`,
-`tests/block_redirect.rs::the_here_doc_tail_rows_that_keep_their_measured_values`.
+`tests/block_redirect.rs::the_here_doc_tail_rows_that_keep_their_measured_values`,
+`tests/getopts.rs::the_idiomatic_loop_runs_end_to_end` pins the matrix script
+status at bash parity (the shape POSIX cares about, task #595).
 
 ## Only the unpinned half of a bash divergence is the bug (task #574)
 

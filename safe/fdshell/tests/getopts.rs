@@ -34,10 +34,10 @@
 //! set -u, OPTARG after -a (the unbound read reported?)  yes, aborts 127  yes, continues 0
 //! ```
 //!
-//! Rows whose status a `while` that ends on a false condition reports are pinned
-//! on their observations only, not on the script status (bash reports the last
-//! body command's status, fdshell the condition's — task #595). The `$0` and
-//! `line N:` spellings are the already-documented layers, not new decisions.
+//! Rows whose status a `while` that ends on a false condition reports now pin
+//! the script status too, at bash parity — the body's last command's status, and
+//! `0` when the body never ran (task #595). The `$0` and `line N:` spellings are
+//! the already-documented layers, not new decisions.
 //!
 //! The scan itself is task #590, so the last row pins only that `getopts` is
 //! **claimed** — the forked launch path's `failed to resolve command path` is gone.
@@ -230,10 +230,11 @@ fn an_unbound_optind_stays_unbound_across_a_scoped_prefix() {
 /// the shape POSIX cares about, and it only terminates because `getopts` runs
 /// **in the current shell environment**: every iteration re-invokes the builtin
 /// through the loop and sees the `OPTIND` the previous one committed. The script
-/// status is not pinned (task #595).
+/// status is pinned at bash parity — the body's last command's (task #595) — and
+/// `-c` and script-file modes agree.
 #[test]
 fn the_idiomatic_loop_runs_end_to_end() {
-    let (out, err, _code) = run(
+    let (out, err, code) = run(
         r#"set -- -a -bval x; while getopts "ab:c" o; do echo "o=[$o] i=$OPTIND a=[$OPTARG]"; done"#,
     );
     assert_eq!(
@@ -241,6 +242,26 @@ fn the_idiomatic_loop_runs_end_to_end() {
         "bash measures the same"
     );
     assert_eq!(err, "", "no diagnostic; bash too");
+    assert_eq!(code, 0, "bash measures the same");
+
+    let dir = scratch("parity");
+    let script = dir.join("idiomatic.sh");
+    std::fs::write(
+        &script,
+        "set -- -a -bval x\nwhile getopts \"ab:c\" o; do echo \"o=[$o] i=$OPTIND a=[$OPTARG]\"; done\n",
+    )
+    .unwrap();
+    let path = script.to_str().unwrap().to_string();
+    let (out, err, code) = run_file(&path);
+    assert_eq!(
+        out, "o=[a] i=2 a=[]\no=[b] i=3 a=[val]\n",
+        "bash measures the same"
+    );
+    assert_eq!(err, "", "bash too");
+    assert_eq!(
+        code, 0,
+        "script-file mode agrees with `-c`; bash measures the same"
+    );
 }
 
 /// The argument forms in one loop, measured in both shells: attached `-bval`,
@@ -254,26 +275,30 @@ fn the_idiomatic_loop_runs_end_to_end() {
 fn the_argument_forms_answer_one_loop() {
     let body = r#"while getopts "ab:c" o; do echo "o=[$o] i=$OPTIND a=[$OPTARG]"; done"#;
 
-    let (out, err, _code) = run(&format!("set -- -bval; {body}"));
+    let (out, err, code) = run(&format!("set -- -bval; {body}"));
     assert_eq!(out, "o=[b] i=2 a=[val]\n", "bash measures the same");
     assert_eq!(err, "", "bash too");
+    assert_eq!(code, 0, "the body's last command; bash measures the same");
 
-    let (out, err, _code) = run(&format!("set -- -b val; {body}"));
+    let (out, err, code) = run(&format!("set -- -b val; {body}"));
     assert_eq!(out, "o=[b] i=3 a=[val]\n", "bash measures the same");
     assert_eq!(err, "", "bash too");
+    assert_eq!(code, 0, "bash measures the same");
 
-    let (out, err, _code) = run(&format!("set -- -ab val; {body}"));
+    let (out, err, code) = run(&format!("set -- -ab val; {body}"));
     assert_eq!(
         out, "o=[a] i=1 a=[]\no=[b] i=3 a=[val]\n",
         "the cluster letter takes the whole next word; bash the same"
     );
     assert_eq!(err, "", "bash too");
+    assert_eq!(code, 0, "bash measures the same");
 
-    let (out, err, _code) = run(&format!("set -- -b -a x; {body}"));
+    let (out, err, code) = run(&format!("set -- -b -a x; {body}"));
     assert_eq!(out, "o=[b] i=3 a=[-a]\n", "bash measures the same");
     assert_eq!(err, "", "x ends the walk; bash too");
+    assert_eq!(code, 0, "bash measures the same");
 
-    let (out, err, _code) = run(&format!("set -- -ab; {body}"));
+    let (out, err, code) = run(&format!("set -- -ab; {body}"));
     assert_eq!(
         out, "o=[a] i=1 a=[]\no=[?] i=2 a=[]\n",
         "bash measures the same"
@@ -282,6 +307,7 @@ fn the_argument_forms_answer_one_loop() {
         err, "sh: option requires an argument -- b\n",
         "bash measures the same message under its own name: bash: option requires an argument -- b"
     );
+    assert_eq!(code, 0, "bash measures the same");
 }
 
 /// Silent mode (the optstring's leading `:`) side by side with verbose on the
@@ -291,14 +317,14 @@ fn the_argument_forms_answer_one_loop() {
 /// offender in `OPTARG` for the unknown option, and for the missing
 /// option-argument the option letter in `OPTARG` under the name `:` (the one row
 /// whose name is not `?`). Both reporting calls answer 0 and keep going — the
-/// body line is that proof; POSIX's text stops at the error (task #595 owns the
-/// script-level status, so it is not pinned).
+/// body line is that proof; POSIX's text stops at the error. The script status
+/// is pinned at bash parity (task #595).
 #[test]
 fn silent_mode_answers_without_a_diagnostic() {
     let body = r#"while getopts {OPT} o; do echo "o=[$o] i=$OPTIND a=[$OPTARG]"; done"#;
 
     // verbose: unknown option
-    let (out, err, _code) = run(&format!(
+    let (out, err, code) = run(&format!(
         "set -- -x; {}",
         body.replace("{OPT}", r#""ab:c""#)
     ));
@@ -310,9 +336,10 @@ fn silent_mode_answers_without_a_diagnostic() {
         err, "sh: illegal option -- x\n",
         "bash measures the same message under its own name: bash: illegal option -- x"
     );
+    assert_eq!(code, 0, "bash measures the same");
 
     // silent: unknown option
-    let (out, err, _code) = run(&format!(
+    let (out, err, code) = run(&format!(
         "set -- -x; {}",
         body.replace("{OPT}", r#"":ab:c""#)
     ));
@@ -321,9 +348,10 @@ fn silent_mode_answers_without_a_diagnostic() {
         "the offender lands in OPTARG; bash the same"
     );
     assert_eq!(err, "", "silent mode prints nothing, in bash too");
+    assert_eq!(code, 0, "bash measures the same");
 
     // verbose: missing option-argument
-    let (out, err, _code) = run(&format!(
+    let (out, err, code) = run(&format!(
         "set -- -b; {}",
         body.replace("{OPT}", r#""ab:c""#)
     ));
@@ -335,9 +363,10 @@ fn silent_mode_answers_without_a_diagnostic() {
         err, "sh: option requires an argument -- b\n",
         "bash under its own name"
     );
+    assert_eq!(code, 0, "bash measures the same");
 
     // silent: missing option-argument
-    let (out, err, _code) = run(&format!(
+    let (out, err, code) = run(&format!(
         "set -- -b; {}",
         body.replace("{OPT}", r#"":ab:c""#)
     ));
@@ -346,6 +375,7 @@ fn silent_mode_answers_without_a_diagnostic() {
         "the one row whose name is not `?`; bash the same"
     );
     assert_eq!(err, "", "silent mode prints nothing, in bash too");
+    assert_eq!(code, 0, "bash measures the same");
 
     // the status read inside the script, single call: POSIX's text answers >0
     // (a 2 for this colon row) at the presentation error; bash measures **0**
@@ -384,12 +414,13 @@ fn the_terminator_and_the_first_non_dash_argument_end_the_walk() {
 
 /// `OPTIND=1` restarts the scan for a **new parameter set**: two loops in one
 /// script, each with its own `set --`, both answering their own `OPTARG` (the
-/// script status is #595's, not pinned). The explicit-operand form is a single
-/// call at full parity: the operand list wins and the positionals stay untouched.
+/// script status is pinned at bash parity — task #595). The explicit-operand
+/// form is a single call at full parity: the operand list wins and the
+/// positionals stay untouched.
 #[test]
 fn optind_1_resets_the_scan_for_a_new_parameter_set() {
     let body = r#"while getopts "ab:c" o; do echo "o=[$o] a=[$OPTARG] i=$OPTIND"; done"#;
-    let (out, err, _code) = run(&format!(
+    let (out, err, code) = run(&format!(
         "set -- -b val; {body}; OPTIND=1; set -- -b val2; {body}"
     ));
     assert_eq!(
@@ -397,6 +428,7 @@ fn optind_1_resets_the_scan_for_a_new_parameter_set() {
         "bash measures the same body lines"
     );
     assert_eq!(err, "", "bash too");
+    assert_eq!(code, 0, "bash measures the same");
 
     let (out, err, code) = run(
         r#"set -- keepme; getopts "ab:c" o -a -b val; echo "rc=$? o=[$o] i=$OPTIND a=[$OPTARG] p1=[$1]""#,
