@@ -1916,6 +1916,19 @@ block holds, whichever of the two was registered first. The table entry survives
 still printed — the mask decides delivery, not registration. `EXIT` is not a signal, so
 its trap runs on the exit path even while another signal is blocked.
 
+**What a caught signal does to a blocked read.** The handler is installed without
+`SA_RESTART`, so a signal caught while the shell is blocked in a read answers `EINTR`,
+and every read site must answer that on its own: the chunked loop is shared
+(`safe/fdshell/src/fd_read.rs`) and the *policy* is the parameter, not the loop body. The
+`$( … )` capture read and the `read` builtin **resume** — the capture keeps the bytes it
+already has, and `read` takes the line that arrives after the action ran (bash's rule,
+measured 2026-11-17: `a_signal_during_the_capture_read_keeps_the_bytes`,
+`a_signal_during_a_blocking_read_restarts_it`). The `read -t` poll resumes as well, with
+the time that is left, so a peer that stalls past the deadline still times out — and the
+timeout's status stays each shell's own rule (fdshell 1, bash 128+SIGALRM;
+`a_signal_during_the_read_poll_restarts_it`). `source`'s file read and the `$_` handoff
+socket **report** the errno and stop, as they have always done.
+
 **What crosses into a subshell.** POSIX XCU 2.12 resets *trapped* signals in a child
 process, and bash follows that for its subshells. fdshell's pure-fork children — a `$(…)`
 capture, a background job, a `wait` arm — keep both the disposition (kernel inheritance)

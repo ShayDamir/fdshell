@@ -892,8 +892,9 @@ names the forked subshell, the same pure-fork child as above, so it runs the par
 action every time (eight runs: `hit`, then `child rc=0`).
 
 Pinned in `safe/fdshell/tests/trap.rs`: `a_trap_crosses_into_a_forked_subshell`,
-`a_backgrounded_builtin_runs_the_parents_action` (the forked builtin's own `read` answers
-`EINTR`, which is what `sa_flags == 0` means), and the `wait` arm that runs the action
+`a_backgrounded_builtin_runs_the_parents_action` (the forked builtin's own `read` is
+interrupted by the signal — no `SA_RESTART`, so it answers `EINTR` — and the read then
+resumes and ends at the closed stdin, task #581), and the `wait` arm that runs the action
 twice, `the_wait_boundary_runs_the_pending_action`.
 
 ## Strict mode

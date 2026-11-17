@@ -2999,6 +2999,29 @@ caller. A status out-parameter that only one of two parallel paths sets is a
 latent divergence — give the shared state a single `end()` that both paths
 populate.
 
+Task #581 shared that body (`safe/fdshell/src/fd_read.rs`: read a chunk, hand it to the
+sink, stop on EOF or on the sink's decision) and found the same drift one level up: what
+differs per site is the **answer to a failed syscall**, and four of the five sites had
+never been asked. The handler is installed without `SA_RESTART` (task #582) so a caught
+signal answers `EINTR` (task #585), and each site must state its own policy — the shared
+loop takes it as a parameter (resume / finish with what it has / report) and keeps no
+error type of its own. The table, first three rows measured against bash 5.3.9 on this
+machine 2026-11-17, 3/3 each (the last three are the pre-existing reports, pinned by their
+own unit tests for their own errno):
+
+| site | a caught signal | pinned by |
+| --- | --- | --- |
+| the `$( … )` capture read | resume, keeping the bytes already read (`X=[end]`) — the bug that started this (task #587) | `a_signal_during_the_capture_read_keeps_the_bytes` |
+| the `read` builtin loop | resume; the line poked after the action is what `read x` takes | `a_signal_during_a_blocking_read_restarts_it` |
+| the `read -t` poll | resume with the time that is left, so the deadline still decides; its status stays each shell's own rule (fdshell 1, bash 128+SIGALRM) | `a_signal_during_the_read_poll_restarts_it` |
+| `source`'s file read | report and stop | `run_source_directory_fails_on_read`, `read_to_end_over_limit_fails` |
+| the `$_` handoff socket | report and stop | `send_recv_roundtrip` |
+| the `wait` block | report, its own chain | `a_signal_during_the_blocking_poll_reports_its_own_chain` |
+
+**Rule:** a shared loop takes the decision as a parameter; a loop whose error arm is
+"propagate" is an *untested* policy in a shell that installs handlers, so ask each site
+what a caught signal means there and pin the answer (task #581).
+
 ## `Line::end_eof`'s `esc` reset is unobservable — an equivalent mutant, removed
 `read/line.rs` had `end_eof()` (mark end of input) whose only body was
 `self.esc = false` — resetting the pending-backslash flag after the last byte.
