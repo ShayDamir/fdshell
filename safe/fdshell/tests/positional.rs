@@ -359,3 +359,30 @@ fn digit_run_stays_greedy_for_an_in_range_multi_digit_index() {
     assert_eq!(code, 0, "stderr={err}");
     assert_eq!(out, "[xVALy]");
 }
+
+/// Task #574: `shift N` with `N` greater than `$#` leaves the parameters
+/// unchanged (bash 5.3.9 and its documented rule for `shift n`; POSIX XCU
+/// *shift* agrees the parameters are not touched), before and inside a
+/// function, which the same intercept serves. The status half is fdshell's
+/// accepted divergence (rc 0, pinned in `tests/redirect_scope.rs`). The last
+/// three rows are the controls that already matched before the fix.
+#[test]
+fn shift_beyond_the_list_leaves_the_positionals_alone() {
+    let cases: &[(&str, &str)] = &[
+        (
+            r##"set -- a b c; shift 5; echo "#=$#|$1|$2|$3""##,
+            "#=3|a|b|c\n",
+        ),
+        (r##"set -- a; shift 2; echo "#=$#|$1""##, "#=1|a\n"),
+        (r##"set -- a b; shift 3; echo "#=$#|$1|$2""##, "#=2|a|b\n"),
+        (r#"f(){ shift 3; echo "fn #=$#|$1"; }; f a b"#, "fn #=2|a\n"),
+        (r##"set -- a b; shift 2; echo "#=$#|$1""##, "#=0|\n"),
+        (r##"set -- a b; shift 0; echo "#=$#|$1""##, "#=2|a\n"),
+        (r##"set -- a b c; shift 2; echo "#=$#|$1""##, "#=1|c\n"),
+    ];
+    for (script, want) in cases {
+        let (out, err, code) = run(script);
+        assert_eq!(code, 0, "{script:?} must succeed, stderr={err}");
+        assert_eq!(out, *want, "{script:?}");
+    }
+}

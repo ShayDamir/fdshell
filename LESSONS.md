@@ -11770,3 +11770,18 @@ parity: `tests/loops.rs::a_stage_block_reads_the_pipe_is_bash_parity`,
 `tests/loops.rs::glued_arith_conditions_land_on_the_arith_command_rule`,
 `tests/heredoc.rs::function_body_heredoc_of_an_incomplete_line_stream_is_a_divergence`,
 `tests/block_redirect.rs::the_here_doc_tail_rows_that_keep_their_measured_values`.
+
+## Only the unpinned half of a bash divergence is the bug (task #574)
+
+`shift n` with `n > $#` is not a shift — bash documents the positional
+parameters as unchanged (POSIX XCU *shift* agrees the parameters stay put).
+fdshell consumed them all: silent data loss, fixed with a count guard in the
+builtin (`intercept/shift.rs`), while `state.shift`'s `n.min(len)` clamp stays
+as defense. The **status** half of the same divergence was already pinned as
+fdshell's own accepted convention (rc 0, `tests/redirect_scope.rs`) — adopting
+bash's rc 1 there would churn that pin and fix nothing about the data. The
+guard's own pin must not confuse the two halves: it pins the data, not the rc.
+
+Pins: `safe/fdshell/src/intercept/tests.rs::run_shift_beyond_the_list_keeps_positional_args`,
+`safe/fdshell/tests/positional.rs::shift_beyond_the_list_leaves_the_positionals_alone`
+(function scope included — the same intercept serves it).

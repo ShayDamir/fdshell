@@ -108,6 +108,28 @@ fn run_shift_removes_positional_args() {
     );
 }
 
+/// Task #574: `shift N` with `N` past the end of the list is not a shift
+/// (bash: the parameters are not changed). The status convention stays
+/// fdshell's (rc 0, pinned in `tests/redirect_scope.rs`); this pin is the data.
+#[test]
+fn run_shift_beyond_the_list_keeps_positional_args() {
+    let cell = make_cell();
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state
+            .positional
+            .push_back(sys::ImportedStr::shell(c"a".into()));
+        state
+            .positional
+            .push_back(sys::ImportedStr::shell(c"b".into()));
+    }
+    let cmdline = make_cmdline(b"shift", &["5"]);
+    assert!(shift::run_shift(b"shift", &cmdline, &cell).unwrap());
+    let state = cell.borrow().unwrap();
+    assert_eq!(state.positional.len(), 2);
+    assert_eq!(state.positional.front().unwrap().as_bytes().unwrap(), b"a");
+}
+
 #[test]
 fn run_set_replaces_positional_args() {
     let cell = make_cell();
