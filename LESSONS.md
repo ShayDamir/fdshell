@@ -4030,23 +4030,21 @@ was
 is bash-equal,
   pinned in `tests/heredoc.rs::mid_run_heredoc_parity_family` and
   `midrun_block_body_heredoc_is_region_scanned`; `( cat 3<<T )` is not a
-  subshell at all (task #316); `cat 3<<T <&3`/`1>&3` report `fd 3 is not open`
-  because a `>&N`/`<&N` source is resolved against the *parent's* fd table,
-never
-  against a descriptor a sibling redirect of the same command opens (task
-#178).
+  subshell at all (task #316); `cat 3<<T <&3`/`1>&3` **reported** `fd 3 is
+  not open` because a `>&N`/`<&N` source was resolved against the *parent's*
+  fd table, never against a descriptor a sibling redirect of the same command
+  opened (task #178; the gap closed with task #337).
   Recording the measured behaviour as pins and naming the owning task is the
   deliverable; inventing a bash-parity assertion for a gap this task does not
 own
   is not. The same table defect reappeared on task #312 (`N<<<word`): its
-  acceptance row `cat 3<<<str <&3` (bash prints `str`) is #178's gap,
-unchanged
-  by the here-string fix — the pins are `fd 3 is not open` in
-  `prefixed_here_string_sibling_dup_cannot_see_the_descriptor`, and the
-content
-  rows use `exec 3<<<x; cat <&3`, which *is* observable (the descriptor is in
-the
-  shell's table by the time the next command runs).
+  acceptance row `cat 3<<<str <&3` (bash prints `str`) was #178's gap,
+  unchanged by that task's here-string fix — the pins were `fd 3 is not open`
+  in `prefixed_here_string_sibling_dup_cannot_see_the_descriptor`, renamed
+  `prefixed_here_string_sibling_dup_sees_the_descriptor` and pinned at parity
+  by task #337. The content rows still use `exec 3<<<x; cat <&3`, which *is*
+  observable (the descriptor is in the shell's table by the time the next
+  command runs).
 - **Re-measure a bug on `master` before planning its fix: the task that pins a
   divergence may be the task that closes it** (task #295). A filed divergence
   ("a here-doc in the **body** of a multi-line mid-run keyword block claims no
