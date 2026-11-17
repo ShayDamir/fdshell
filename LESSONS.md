@@ -8398,6 +8398,26 @@ text the parse layer **does** see a bare `&` — it must read it as a
 command-list terminator and keep it in a body slice, where the body's own
 `run_script` scan creates the job; see the #354 entry below.
 
+Task #588 fixed the **order** of that target list: the word being scanned wins
+the tie with the buffered runs, and `has_target` and `mark` must ask in the same
+order. The word between a `;` and the `&` **is** the run the `&` faces — bash's
+`async_list` target — so `echo a; echo b & echo c` prints `a`, `b`, `c` at rc 0
+(measured 5.3.9), and so does `echo a; echo b &`. The `sep_since_run` gate
+answers only for a `&` with **no word of its own** (`echo a ; & b` — bash's
+rc 2, which the preflight mirrors); gating the pending word on it refused a
+shape bash accepts, and `mark` marking runs first would background `echo a` and
+silently lose `echo b`. The tie (runs non-empty **and** pending non-empty) is
+reachable only through a `;`-family separator — `&&` and `|` are word bytes at
+scan time — so the order is the whole fix, and the flush rule above (the `&`
+terminates only the list since the previous `&`) still owns the rest. Pins:
+`segment/bg/split/tests.rs::the_pending_word_wins_the_tie_with_a_sep_closed_buffered_run`
+and `segment/bg/split/tests.rs::mark_pushes_the_pending_word_of_a_sep_closed_run`
+(one per reordered function, each kills the other order; the mark pin also pins
+`pending_off`), and
+`tests/async.rs::the_word_between_a_separator_and_the_ampersand_is_the_job`
+(both bash-accepted rows pinned at the filesystem: one file per writer, `wait`,
+never stdout order).
+
 ## POSIX `wait` with no operands returns 0, whatever the reaped jobs exited with
 POSIX 2.14 (`wait` with no arguments) is not "the last job's status":
 `false & wait; echo $?` is `0` in bash 5.3.9 and in POSIX. fdshell's

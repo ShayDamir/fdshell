@@ -189,3 +189,75 @@ fn valid_is_decided_by_the_byte_behind_the_ampersand() {
         );
     }
 }
+
+/// The tie between the buffered runs and the word being scanned is won by the
+/// **pending word**: the word written between a `;` and the `&` is the run the
+/// `&` faces — bash's `async_list` target (`echo a; echo b & echo c`
+/// backgrounds `echo b` and runs the rest, measured bash 5.3.9, rc 0). Only a
+/// `&` with **no word of its own** is left without a target by the `;` that
+/// closed the buffered run (`echo a ; & b` — bash's syntax error), so both
+/// sides of the gate are pinned here.
+#[test]
+fn the_pending_word_wins_the_tie_with_a_sep_closed_buffered_run() {
+    let line = b"echo a; echo b & echo c";
+    let mut runs = vec![Run {
+        bytes: b"echo a".as_slice(),
+        off: 0,
+        background: false,
+    }];
+    let mut segs: Vec<Segment> = Vec::new();
+    assert!(
+        split(
+            line,
+            7,
+            15,
+            b"echo b".as_slice(),
+            &mut runs,
+            &mut segs,
+            true
+        )
+        .has_target(),
+        "the pending word is the run the `&` faces"
+    );
+    assert!(
+        !split(line, 7, 15, b"", &mut runs, &mut segs, true).has_target(),
+        "with no word of its own, the `&` has no target: the `;` closed the run"
+    );
+}
+
+/// The same tie decided by [`Split::mark`], which must agree with
+/// [`Split::has_target`]: it pushes the **pending** word as the marked run — at
+/// the real offset the pending word starts on the line — and the buffered
+/// `;`-closed run stays foreground. Marking the buffered run first would
+/// background `echo a` and silently lose `echo b`.
+#[test]
+fn mark_pushes_the_pending_word_of_a_sep_closed_run() {
+    let line = b"echo a; echo b & echo c";
+    let mut runs = vec![Run {
+        bytes: b"echo a".as_slice(),
+        off: 0,
+        background: false,
+    }];
+    let mut segs: Vec<Segment> = Vec::new();
+    split(
+        line,
+        7,
+        15,
+        b"echo b".as_slice(),
+        &mut runs,
+        &mut segs,
+        true,
+    )
+    .mark();
+    assert_eq!(runs.len(), 2, "the pending word is pushed as a run");
+    let buffered = runs.first().unwrap();
+    assert_eq!(buffered.bytes, b"echo a".as_slice());
+    assert!(!buffered.background, "the `;`-closed run runs foreground");
+    let marked = runs.get(1).unwrap();
+    assert_eq!(marked.bytes, b"echo b".as_slice());
+    assert_eq!(
+        marked.off, 8,
+        "the pending word's own offset, not the run's"
+    );
+    assert!(marked.background);
+}

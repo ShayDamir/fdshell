@@ -2,6 +2,8 @@
 //! (target), and which run does the `&` mark? Field bundle of the scanner's
 //! state at the cursor (the newtype the validation logic reads as methods).
 
+// mutants: -C --lib -- -E 'test(/^segment::bg::split::/)'
+
 use crate::segment::Segment;
 use crate::segment::book::Run;
 use alloc::vec::Vec;
@@ -27,21 +29,23 @@ impl<'a, 'b> Split<'a, 'b> {
         self.peek().is_none_or(|b| !matches!(b, b';' | b'|' | b'&')) && self.has_target()
     }
 
-    /// Mark the target (see [`Split::has_target`]): the last buffered run; a
-    /// word being scanned becomes a marked run (`echo hi &` — its run is not
-    /// buffered yet); else the last flushed statement (a multi-line split);
-    /// a closed block is marked by nobody (it runs foreground).
+    /// Mark the target, in [`Split::has_target`]'s order: the word being
+    /// scanned becomes a marked run (`echo hi &` — its run is not buffered
+    /// yet, and in `echo a; echo b &` it is the pending `echo b`, never the run
+    /// the `;` closed); else the last buffered run; else the last flushed
+    /// statement (a multi-line split); a closed block is marked by nobody (it
+    /// runs foreground).
     pub(super) fn mark(&mut self) {
-        if let Some(run) = self.runs.last_mut() {
-            run.background = true;
-            return;
-        }
         if !self.pending.is_empty() {
             self.runs.push(Run {
                 bytes: self.pending,
                 off: self.pending_off(),
                 background: true,
             });
+            return;
+        }
+        if let Some(run) = self.runs.last_mut() {
+            run.background = true;
             return;
         }
         if let Some(Segment::Statement { background, .. }) = self.segments.last_mut() {
@@ -55,17 +59,20 @@ impl<'a, 'b> Split<'a, 'b> {
         self.start + raw.iter().take_while(|&&b| b.is_ascii_whitespace()).count()
     }
 
-    /// A `;` past the last buffered run leaves no target for the `&`. The
-    /// target is a buffered run, the word being scanned (`echo hi &` splits
-    /// before its run is pushed), a statement flushed by the deferral above
-    /// (no `;` closed it), or a closed block (`fi &` — foreground: blocks
-    /// carry no background flag).
+    /// The word being scanned wins the tie with the buffered runs: the word
+    /// between a `;` and the `&` **is** the run the `&` faces — bash's
+    /// `async_list` target (`echo a; echo b &` backgrounds `echo b`, and the
+    /// rest runs). A `;` past the last buffered run leaves no target only when
+    /// the `&` has no word of its own (`echo a ; & b` — bash's syntax error).
+    /// The other targets are a buffered run, a statement flushed by the
+    /// deferral above (no `;` closed it), or a closed block (`fi &` —
+    /// foreground: blocks carry no background flag).
     fn has_target(&self) -> bool {
-        if let Some(last) = self.runs.last() {
-            return !self.sep_since_run && !last.bytes.is_empty();
-        }
         if !self.pending.is_empty() {
             return true;
+        }
+        if let Some(last) = self.runs.last() {
+            return !self.sep_since_run && !last.bytes.is_empty();
         }
         match self.segments.last() {
             Some(Segment::Statement { .. }) => !self.sep_since_run,

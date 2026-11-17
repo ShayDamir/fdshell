@@ -305,6 +305,44 @@ fn invalid_splits_run_nothing() {
     }
 }
 
+/// A `;` **before** the `&` is the family above's boundary, and this row is not
+/// in it: bash **accepts** it (measured 5.3.9, rc 0 — every member of the pinned
+/// family above is a shape bash itself rejects at rc 2). The run the `;` closed
+/// is not the `&`'s target; the word written **between** the `;` and the `&` is
+/// (`segment/bg/split.rs`, the pending word wins the tie), and the rest of the
+/// text runs. Each writer gets its own scratch file — async output has no order,
+/// and a killed fix shows up as a missing file, never as an interleaving flake.
+#[test]
+fn the_word_between_a_separator_and_the_ampersand_is_the_job() {
+    let dir = scratch_dir();
+    let a = dir.file("async-semi-a");
+    let b = dir.file("async-semi-b");
+    let c = dir.file("async-semi-c");
+    let out = run(&format!(
+        "builtin echo a >{a}; builtin echo b >{b} & builtin echo c >{c}\nwait"
+    ));
+    assert_eq!(rc(&out), 0, "stderr={:?}", str::from_utf8(&out.stderr));
+    assert_eq!(
+        (contents(&a), contents(&b), contents(&c)),
+        (
+            String::from("a\n"),
+            String::from("b\n"),
+            String::from("c\n")
+        ),
+        "bash runs all three statements"
+    );
+
+    // The same row with the `&` last: the text ends at the operator and both
+    // writers still run.
+    let out = run(&format!("builtin echo a >{a}; builtin echo b >{b} &\nwait"));
+    assert_eq!(rc(&out), 0, "stderr={:?}", str::from_utf8(&out.stderr));
+    assert_eq!(
+        (contents(&a), contents(&b)),
+        (String::from("a\n"), String::from("b\n")),
+        "bash runs both statements"
+    );
+}
+
 /// A `&` glued to a word character is fdshell's task-name word (the
 /// `&>&name`/`waitpid &name` convention), never the async operator.
 #[test]
