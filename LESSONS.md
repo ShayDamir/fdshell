@@ -11362,7 +11362,7 @@ child), `tests/run.rs::a_shell_side_percent_evaluation_opens_no_descriptor`,
 stores that **own** the values — and a name absent from both is not listed, as
 bash lists only bound names (measured 5.3.9: `unset IFS; set` prints no `IFS=`
 row). `state.ifs` is the **split-set field**, kept in sync by `set_var`
-(`state/setters.rs`) so field splitting keeps the default set after
+(`state/setters/vars.rs`) so field splitting keeps the default set after
 `unset IFS`; it is one mechanism's state, not a store entry, and must not feed
 a name-answering surface (listing, expansion, child environment) on its own.
 Cross-ref LESSONS: "Scoped `NAME=value cmd` assigns must apply" and LESSONS:
