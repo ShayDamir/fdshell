@@ -217,7 +217,7 @@ loop level applies to a control raised inside it; task #205 renamed it from
 ## `break`/`continue` set the exit status where the signal is raised, not where a loop consumes it
 bash's `break`/`continue` are builtins, so the signal's own run succeeded and
 `$?` is 0 the moment it is raised: a loop that ends via `break` reports 0, not
-the status of the last command that ran (measured 2026-10-19:
+the status of the last command that ran (measured:
 `for x in 1 2 3; do false; break; done; echo rc=$?` → bash `rc=0`, fdshell
 `rc=1` before task #262). Set it at the dispatch site
 (`run_dispatch/loop_ctl.rs`, beside the clamp), which is where every other
@@ -391,7 +391,7 @@ already applies, the kill rows are the inputs on which the callee's rule
 conjunct.
 
 ## `cargo mutants` gates here: the full-suite sweep costs a relink per mutant, and one harness-sensitive e2e row can make the baseline red
-Two mechanics measured on 2026-10-26 (task #327); both are about the **gate**,
+Two mechanics measured (task #327); both are about the **gate**,
 not about the code.
 
 1. **Cost.** A mutation inside `safe/fdshell/src` relinks every
@@ -410,7 +410,7 @@ first and aborts with
 single test fails, so
 **one harness-sensitive e2e row blocks every mutation sweep in the repo**
 (`safe/fdshell/tests/redirect.rs`'s two harness-sensitive rows are now
-harness-safe and the baseline is green with **no `-E` exclusion**, 2026-11-07:
+harness-safe and the baseline is green with **no `-E` exclusion**:
 the `cat <&{,3}` row asserted `fd 3 is not open` — a jobserver-inherited fd 3
 made it live, and task #460 made it harness-safe by routing it through the
 `run_fd3_closed` spawn, so
@@ -1178,7 +1178,7 @@ the equivalence is back.
 Re-derive the proof against the **current** shape whenever the sweep re-lists
 a site (task #321's 70-file sweep re-listed the then-five; the step and window
 pairs are now resolved by deletion, task #477). The gate's `||`→`&&` was the
-survivor of that re-derivation — measured green by hand again on 2026-11-01 —
+survivor of that re-derivation — measured green by hand again —
 and task #501 **deleted the dead operand**: the truncation gate runs
 **first**, and
 `list_closing_keyword_index(tokens, line, Closer::Esac, List::Case)` reports
@@ -2507,8 +2507,7 @@ an unbalanced `'` reported `unmatched quote` (rc 1, bash prints the body) —
 the **body-line** half of #266's opacity class, flipped to bash parity by #311
 and re-pinned as
 `tests/heredoc.rs::single_line_block_body_heredoc_of_a_quoted_delimiter_and_unbalanced_body_is_verbatim`;
-the **terminator-line** half is closed at bash parity too (task **#266**,
-closer commit `3249ddf`: `cat <<'a <<b'` + body + `a <<b` and `cat <<a\"b` +
+the **terminator-line** half is closed at bash parity too (task **#266**: `cat <<'a <<b'` + body + `a <<b` and `cat <<a\"b` +
 body + `a"b` each print the body, rc 0 = bash), pinned by
 `tests/heredoc.rs::a_terminator_line_with_a_chevron_is_data` and
 `tests/heredoc.rs::a_terminator_line_with_an_unbalanced_quote_is_data`; the
@@ -2896,7 +2895,7 @@ empty). The rewrite was proven behaviour-preserving by a green full suite on
 the clean tree, and the equality shapes from the original probe
 (`cat <<X; f() { echo hi; }` + `bodyX`/`X`, `f() { echo hi; }echo hi`,
 `cat <<X; { echo a; }` + `bodyX`/`X`, and the multi-line follow-on shapes)
-stay green (2026-11-05).
+stay green.
 2. Resolved by task #513 — `comment.rs`'s heredoc branch of `scan_block`
 (`i = resume; *start = i + 1;`, `replace + with -` and `replace + with *`),
 where `resume` indexes the newline terminating the delimiter line. The old
@@ -3006,7 +3005,7 @@ never been asked. The handler is installed without `SA_RESTART` (task #582) so a
 signal answers `EINTR` (task #585), and each site must state its own policy — the shared
 loop takes it as a parameter (resume / finish with what it has / report) and keeps no
 error type of its own. The table, first three rows measured against bash 5.3.9 on this
-machine 2026-11-17, 3/3 each (the last three are the pre-existing reports, pinned by their
+machine, 3/3 each (the last three are the pre-existing reports, pinned by their
 own unit tests for their own errno):
 
 | site | a caught signal | pinned by |
@@ -3787,7 +3786,7 @@ the in-process unit pin
 `test_env_assign_prefix_stops_before_the_keyword_name_word`
 (`parse/tests.rs`), whose `env_assigns.is_empty()` assertions fail on `-`→`/`
 and `-`→`+` for `command X=1`, `builtin X=1` and `A=2 command X=1` with no
-fork and no scratch `PATH` file. A focused run on the 2026-10-13 tree
+fork and no scratch `PATH` file. A focused run on that tree
 (`cargo mutants -j4 --test-tool nextest -f safe/fdshell/src/parse/command_args.rs`,
 11 mutants) measures every generated mutant of this file **caught**, the one
 exception being `command_args.rs:23:5`
@@ -4454,13 +4453,13 @@ rule 26): `i < e` → `<=` — the extra step appended one mask entry at index
 `escape_pair_never_leaves_a_toggle_behind`, and the escape-arm `!in_quote`
 guard → `false` fails those plus `each_quote_arm_is_gated_by_the_other_state`
 and `parse/redirect/clobber/pipe/tests.rs::quoted_pipe_bytes_are_word_content`
-(both re-probed by hand on 2026-11-01). The one **profile-dependent** kill is
+(both re-probed by hand). The one **profile-dependent** kill is
 the word-start walk's `s > 0` → `s >= 0` (`clobber/pipe.rs::word_start`): its
 guard exists so a debug build cannot panic on the `s - 1` underflow at
 `s = 0`, the rows that walk a word back to byte 0 reach it
 (`pipe_at_run_start_is_a_pipe`, `plain_pipe_bytes_are_pipes`,
 `escape_pair_tails_are_not_pipes`, `absorbed_pipe_bytes_are_not_pipes` — 23
-tests in all, re-measured on task #477), and only in release does the wrapped
+tests in all), and only in release does the wrapped
 index read past the slice and make the mutant equivalent — a release-profile
 `Missed` line there is the equivalence, not a gap.
 
@@ -4620,8 +4619,7 @@ the same byte (CATCHING_MUTANTS rules 11/15).
 `scan_brace_block`'s walk runs to the end of the text when a group never
 closes, so in `segment/group/block.rs::group_block` the span end of that arm
 **is** `close`: the `min` it used to carry had nothing to clamp and its `+ 1`
-was a `+`→`*` identity no test could see (measured green once more on
-2026-11-01) — so the operand is gone and the family with it (CATCHING_MUTANTS
+was a `+`→`*` identity no test could see (measured green once more) — so the operand is gone and the family with it (CATCHING_MUTANTS
 rule 24). The operators left are pinned in both directions, and they are the
 reason the shape is worth keeping: the closed case's `close + 1` feeding
 `statement_end` is killed under `+`→`-` by
@@ -5607,8 +5605,7 @@ at
    release `line.get(0..usize::MAX)` is `None`, so the anchor collapses to `0`
 and
     the window widens. `region_window_is_the_runs_own_physical_line` no longer
-    kills the helper's literal mutants `→ 0` and `→ 1` (re-measured
-2026-10-29);
+    kills the helper's literal mutants `→ 0` and `→ 1` (re-measured);
     those are killed by
     `scan/heredoc/opaque/tests.rs::a_window_starting_on_the_claiming_line_blinds_the_terminator_chevron`
     and
@@ -6059,7 +6056,7 @@ parse.
 set from `state.word_active`) while `parse/heredoc/operator.rs::is_operator`
 counts it whenever a **token** precedes it and that token is not a pipeline
 `|`. `is_word_break` ends a word at `>`, `<`, `|`, so a word-seen flag can
-*never* express the token rule: re-measured on master (`f821c94`), `> <<EOF`,
+*never* express the token rule: re-measured on master, `> <<EOF`,
 `>| <<EOF`, `>> <<EOF`, `>& <<EOF`, `<> <<EOF`, `< <<EOF`, `; <<EOF`,
 `& <<EOF`, `&& <<EOF`, `( <<EOF`, `>> >& <<EOF`, `> << EOF`, `> <<EOF <<B`
 (1/2) and `> <<EOF && cat <<A` (1/2) diverged (byte 0 / token 1 where not
@@ -6189,7 +6186,7 @@ so their text is never `;`/`|`. The four headline rows of the report —
 its delimiter line, **empty body** — measure rc 0 and silent, bash-equal:
 `tests/heredoc.rs::a_quoted_separator_delimiter_with_an_empty_body_is_parity`
 (the with-body shape is #336's `a_quoted_delimiter_may_be_a_separator_word`;
-the report's rc-1 numbers were measured on `60a2ebd`, before #336's gate). The
+the report's rc-1 numbers were measured before #336's gate). The
 path-redirect callers pass `span_quoted=false` because that flag is the
 **empty** arm's input alone (task #530): the separator arms read the mask
 themselves, so `echo x > ";"` is the file name at rc 0 — bash parity, #475
@@ -7653,7 +7650,7 @@ before, so
 says
    the scanner did not pair the word, and those rows are bash rc 0. Task
 **#467**
-   implemented bash's rule for a lone `}` (measured 2026-11-07, bash 5.3.9 rc
+   implemented bash's rule for a lone `}` (measured against bash 5.3.9 rc
 2,
    nothing run; house rc 1): the decision answers the brace like the other
    closers, and the boundary moved from `decision` to the **two ask-sites** —
@@ -8061,8 +8058,7 @@ it —
 the
   same index with the same state; #276 measured it three ways and #513
 re-proved
-  it green twice. The full suite is green on the rewritten source
-(2026-11-05),
+  it green twice. The full suite is green on the rewritten source,
   and the one operator the site now carries (`i + p`) keeps the `-`/`*`
 mutants
   that were **caught** by the existing comment tests — the `+`→`*` shape's
@@ -8204,7 +8200,7 @@ rules
   as separate early returns leaves no connective site; each surviving test
 keeps
   the kill it had as a conjunct (`==`→`!=` on `operator_count`, the
-  `Some(&b';')` pattern), and the suite is green on the split (2026-11-05).
+  `Some(&b';')` pattern), and the suite is green on the split.
 - The `ops.is_empty()` guard has **no reachable false branch**:
   `operator_count(line, run_start, semi)` scans the sub-window
 `[run_start, semi)`
@@ -8751,7 +8747,7 @@ mutants this entry recorded as **provably equivalent** (`+`→`*`, `+`→`-`) ar
 now **caught**, killed by existing pins
 (`segment/bg/tests.rs::invalid_splits_are_marked` and
 `tests/run.rs::block_body_ampersand_then_semicolon_records_no_job` go red at
-`-j1`, 2026-11-05). Why they were equivalent before the sharing: the sole
+`-j1`). Why they were equivalent before the sharing: the sole
 advancement rule directly below normalized every value ≤ `amp` to `amp + 1`,
 so the fast path's mutated write was recomputed away and the final `Book`
 state was identical byte-for-byte — the convergence became observable the
@@ -8781,7 +8777,7 @@ the glued `;`), and the body's own scan stays inert to a trailing
 `;`/newline byte in body text — so rc/output pins cannot see a kept `;` and
 **body-text unit pins** measure the predicate's arms
 (`parse/semi/trim/tests.rs` asserts the slice's text, never the rc).
-Re-measured for task #569: both maps (`preceded.rs`, `trim/background.rs`)
+Both maps (`preceded.rs`, `trim/background.rs`)
 run with no miss, and the equivalence record this entry used to carry is
 gone.
 
@@ -10508,7 +10504,7 @@ exactly where bash rejects them at rc 2; those rows moved from the divergence
 pins into the family.
 `tests::run::an_operator_opening_a_part_reports_before_anything_runs` is the
 same shape at unit level (it asserts the report and that nothing ran); the
-loop's `is_empty_part` guard answers these rows — re-measured for task #569,
+loop's `is_empty_part` guard answers these rows,
 the helper's mutants die on the pinned rows — and if that loop is ever split,
 re-derive `cond.rs`'s equivalence list, because that test
 was the only pin walking an empty head.
@@ -10772,7 +10768,7 @@ A byte-level caller passes the neutral `&[]` and stays byte-identical: a short
 or empty mask pads to *unquoted*, so the gate degrades to the text rule it
 already implemented.
 
-Measured 2026-11-06 against bash 5.3.9 (stdout, rc, files created): `> ";"`,
+Measured against bash 5.3.9 (stdout, rc, files created): `> ";"`,
 `> ';'`, `> \;`, `> "|z"`, `>> ";"`, `&> ";"`, `<> ";"`, `> "|"`, `> "&"`,
 `> \&` and `> ";" ; echo after` are bash-equal now; `cat < ";"` is rc parity
 (both rc 1, the message style differs); `> ""` and `> %v` keep their owners'
@@ -11160,8 +11156,7 @@ recognized as the statement's word 0 by `safe/fdshell/src/parse/detect.rs` and
 `safe/fdshell/src/parse/detect_keyword.rs` — has no entry to reach, so both
 prefixes answer the lookup failure at rc 1 while bash reaches its builtin
 (`umask` prints the mask and `unset x` clears the variable at rc 0,
-`break`/`continue` warn at rc 0, `return` warns at rc 2 — bash 5.3.9, measured
-2026-11-10). The same rule decides the rest of the class, so it reads as one
+`break`/`continue` warn at rc 0, `return` warns at rc 2 — bash 5.3.9, measured). The same rule decides the rest of the class, so it reads as one
 rule: **accepted** on the in-process commands whose semantics the prefix can
 carry — `wait`, `local`, `times`, `export_fd`, `let`
 (`safe/fdshell/src/intercept/validation.rs::validate_intercept_no_builtin`,
@@ -11204,7 +11199,7 @@ opens: a regular file is the refusal; nothing there opens as an
 another errno reports its own errno); an existing non-regular target opens
 with the direction's flags and `O_EXCL` off. The kernel is **not** lenient —
 `O_WRONLY|O_CREAT|O_EXCL|O_TRUNC` answers `EEXIST` for a FIFO, a character
-device and a pipe reached through `/proc/self/fd/1` alike (measured 2026-11-10
+device and a pipe reached through `/proc/self/fd/1` alike (measured
 with Python and bash 5.3.9) — so an errno-based rule cannot express bash's
 rows and fdshell must classify the target itself: the shared decision in
 `redirect/open/noclobber.rs` feeds both routes (the process-CWD path and the
@@ -11227,8 +11222,7 @@ and `safe/fdshell/tests/redirect.rs`
 (`set_c_on_a_pipe_backed_magic_target_writes_through`,
 `set_c_on_a_character_device_target_opens_it`,
 `set_c_on_a_directory_target_reports_the_errno`,
-`set_c_on_a_symlink_to_a_regular_file_refuses` — bash columns measured
-2026-11-10; the FIFO row stays documented only, its open blocks without a
+`set_c_on_a_symlink_to_a_regular_file_refuses` — bash columns measured; the FIFO row stays documented only, its open blocks without a
 reader).
 
 ## A test that measures wall-clock under load cannot pin the number (task #484)
@@ -11658,7 +11652,7 @@ registration and the reset — the same silent way at status 0; bash, whose own 
 so the rule never fires for it, *lists* the inherited ignore (`trap -- '' SIGINT`) and
 honours a reset on it: `trap - INT; kill -INT $$; echo after` under a parent that ignored
 `INT` dies of `INT` (its parent sees 130) where fdshell prints `after` at 0
-(bash 5.3.9, this host, 2026-11-16). So the pinned rows are fdshell's silence at 0 and the
+(bash 5.3.9, this host). So the pinned rows are fdshell's silence at 0 and the
 inherited ignore surviving the `kill`; bash's list line is a comment. The control that
 decides the rule is the **parent's** `trap`: the same rows with nothing inherited are
 ordinary registrations both shells agree on line for line. Put the signal into the set the
@@ -11699,7 +11693,7 @@ handled signal interrupts a pidfd `waitid` — `wait_pidfd_rusage` retries it af
 handler flags: flag-and-resume is the pattern, and an interrupted reap must never abort
 the shell.
 
-Two corollaries of the same split, measured against bash 5.3.9 on this host 2026-11-16. A
+Two corollaries of the same split, measured against bash 5.3.9 on this host. A
 signal **blocked** by `signalfd` never reaches the handler at all — `sys::signalfd` blocks
 its signals with `sigprocmask(SIG_BLOCK)`, which is how it receives them — and a blocked
 signal is not delivered to an installed handler, so the fd owns the delivery, no action
@@ -11711,7 +11705,7 @@ route the pending mask already takes) — so the action runs in a `$(…)` captu
 background builtin and a `wait` arm alike; POSIX XCU 2.12 resets trapped signals in a child
 process and bash follows it for its subshells, so bash runs nothing there. `exec` is the
 reset for exec'd images, and only bash reaches that reset from a background job: its exec'd
-`sleep` killed by `USR1` dies without acting (eight runs, `child rc=138`, 2026-11-16),
+`sleep` killed by `USR1` dies without acting (eight runs, `child rc=138`),
 while fdshell's `$!` names its forked subshell — disposition and table intact — and acts
 every time (eight runs).
 
@@ -11757,7 +11751,7 @@ The rule reaches further than the shell's `rc`: the status feeds a `&&`/`||` lis
 sees; the condition itself stays exempt, task #491), and a pipeline **stage**
 (`echo a | while read l; do …; done` — the status is produced in the child and the
 fork reports it, so the `read` class no longer owns that row). Values are bash
-5.3.9's, measured 2026-11-16.
+5.3.9's, measured.
 
 Pins: `safe/fdshell/tests/loops.rs::the_loop_status_is_the_bodys_last_command`,
 `safe/fdshell/tests/loops.rs::the_last_command_of_the_body_is_what_the_loop_reports`
