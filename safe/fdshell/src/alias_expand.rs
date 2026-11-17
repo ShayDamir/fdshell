@@ -18,7 +18,7 @@ pub(crate) fn expand_alias(
     cell: &ForkCell<ShellState>,
 ) -> Result<ScriptText, Report<CmdError>> {
     let state = cell.borrow().change_context(CmdError::Never)?;
-    if state.options & crate::options::EXPAND_ALIASES == 0 {
+    if !state.option_on(crate::options::EXPAND_ALIASES) {
         return Ok(text.clone());
     }
     drop(state);

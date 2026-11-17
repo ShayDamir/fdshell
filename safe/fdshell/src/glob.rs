@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C glob -- -E 'test(/^glob::/) | binary(glob)'
+
 //! Glob (pathname) expansion: a pattern word becomes its sorted matches.
 //!
 //! A word expands when it holds an unquoted, unescaped `*`, `?`, or valid
@@ -43,8 +45,8 @@ pub(crate) fn matches(
     let (dotglob, noglob) = {
         let state = cell.borrow().change_context(ResolveError::RefNotFound)?;
         (
-            state.options & options::DOTGLOB != 0,
-            state.options & options::NOGLOB != 0,
+            state.option_on(options::DOTGLOB),
+            state.option_on(options::NOGLOB),
         )
     };
     if noglob {

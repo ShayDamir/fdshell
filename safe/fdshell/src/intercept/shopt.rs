@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C shopt -- -E 'test(/^intercept::shopt::/) | binary(shopt)'
+
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt, bail};
@@ -26,7 +28,7 @@ pub(crate) fn run_shopt(
                 bail!(CmdError::InvalidArgument { arg: "-q" });
             };
             let bit = lookup_error(name, "shopt")?;
-            let code = (state.options & bit == 0) as i32;
+            let code = i32::from(!state.option_on(bit));
             state.set_last_exit(code);
         }
         Some(flag) if flag.eq_bytes(b"-s") || flag.eq_bytes(b"-u") => {

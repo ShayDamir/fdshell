@@ -25,7 +25,7 @@ impl ShellState {
         name: &ShortCStr,
         nounset_check: bool,
     ) -> Result<Option<ShortCStr>, Report<ResolveError>> {
-        let nounset = nounset_check && self.options & crate::options::NOUNSET != 0;
+        let nounset = nounset_check && self.option_on(crate::options::NOUNSET);
         match name.strip_prefix(b"!") {
             Some(target_name) => self.indirect_value(name, &target_name, nounset),
             None => self.direct_value(name, nounset),

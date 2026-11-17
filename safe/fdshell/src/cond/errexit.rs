@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C errexit -- -E 'test(/^cond::/) | binary(errexit)'
+
 use crate::error::cmd::CmdError;
 use crate::options;
 use crate::state::ShellState;
@@ -11,7 +13,7 @@ use sys::fork_cell::ForkCell;
 /// code, as in bash.
 pub(crate) fn should_exit(cell: &ForkCell<ShellState>) -> Result<bool, Report<CmdError>> {
     let state = cell.borrow().change_context(CmdError::Never)?;
-    Ok(state.options & options::ERREXIT != 0
+    Ok(state.option_on(options::ERREXIT)
         && !state.errexit_gated
         && state.last_status.exit_code() != 0)
 }

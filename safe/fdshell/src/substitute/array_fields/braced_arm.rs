@@ -30,7 +30,7 @@ pub(crate) fn braced(
         return Ok(false);
     };
     let state = borrow_state(cell)?;
-    let nounset = state.options & crate::options::NOUNSET != 0;
+    let nounset = state.option_on(crate::options::NOUNSET);
     match &shape {
         Shape::All { name, star } => {
             let elements = list(name, &state);

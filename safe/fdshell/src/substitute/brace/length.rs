@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C set_opts -C --test -C positional -- -E 'test(/^substitute::/) | binary(set_opts) | binary(positional)'
+
 //! The `${#…}` arm of brace expansion: length of a variable, element count of
 //! an array, or length of an element — task #422, moved out of `brace.rs`.
 
@@ -41,7 +43,7 @@ pub(crate) fn length(
             core::write!(out, "{len}").change_context(ResolveError::Never)?;
         }
         // nounset bails on `${#name}` like bash's `x: unbound variable`.
-        (true, None) if state.options & crate::options::NOUNSET != 0 => {
+        (true, None) if state.option_on(crate::options::NOUNSET) => {
             bail!(ResolveError::UnboundVariable { var: name });
         }
         // POSIX 2.7.1: an unset parameter has length 0.

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C colon -C --test -C unset_expand -C --test -C positional -C --test -C arith -C --test -C quotes -- -E 'test(/^substitute::/) | binary(colon) | binary(unset_expand) | binary(positional) | binary(arith) | binary(quotes)'
+
 use error_stack::{Report, ResultExt};
 
 use crate::error::resolve::ResolveError;
@@ -80,7 +82,7 @@ pub(super) fn resolve_positional_index(
         peek.next();
         num.push_byte(nc).change_context(ResolveError::Never)?;
     }
-    let nounset = state.options & crate::options::NOUNSET != 0;
+    let nounset = state.option_on(crate::options::NOUNSET);
     if let Some(value) = state.positional_value(&num, nounset)? {
         out.push(&value);
     }

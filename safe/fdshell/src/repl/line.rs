@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C repl -C --test -C ignoreeof -- -E 'test(/^repl::/) | binary(repl) | binary(ignoreeof)'
+
 //! Reading one line from the REPL's stdin, with the `ignoreeof` EOF policy.
 
 mod reader;
@@ -41,7 +43,7 @@ pub(crate) fn eof_continues(cell: &ForkCell<ShellState>) -> Result<bool, Report<
     let (ignoreeof, interactive) = {
         let state = cell.borrow().change_context(AppError::Borrow)?;
         (
-            state.options & crate::options::IGNOREEOF != 0,
+            state.option_on(crate::options::IGNOREEOF),
             state.interactive,
         )
     };

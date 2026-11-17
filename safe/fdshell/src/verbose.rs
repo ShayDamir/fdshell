@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C set_opts -- -E 'test(/^verbose::/) | binary(set_opts)'
+
 //! verbose (`set -v` / `set +v`): echo each statement to stderr before it
 //! runs, as bash prints its input lines.
 //!
@@ -16,7 +18,7 @@ pub(crate) fn trace(bytes: &[u8], cell: &ForkCell<ShellState>) {
     let Ok(state) = cell.borrow() else {
         return;
     };
-    if state.options & crate::options::VERBOSITY == 0 {
+    if !state.option_on(crate::options::VERBOSITY) {
         return;
     }
     let mut out = Vec::from(bytes);

@@ -33,7 +33,7 @@ pub fn open_redirect_files(
     let base = strict::strict_base(cell, strict)?;
     let noclobber = {
         let state = cell.borrow().change_context(OpenRedirectError::Never)?;
-        state.options & crate::options::NOCLOBBER != 0
+        state.option_on(crate::options::NOCLOBBER)
     };
     let min_fd = RedirectDef::max_target(redirects)
         .checked_add(1)

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C xtrace -- -E 'test(/^xtrace::/) | binary(xtrace)'
+
 //! xtrace (`set -x` / `set +x`): print `+ <name> <args>` to stderr at each
 //! dispatch entry, before the command runs.
 //!
@@ -26,7 +28,7 @@ pub(crate) fn trace_cmd(
 }
 
 pub(crate) fn trace(name: &[u8], args: &[ShortCStr], state: &ShellState) {
-    if state.options & crate::options::XTRACE == 0 {
+    if !state.option_on(crate::options::XTRACE) {
         return;
     }
     let _ = sys::ERR.write_all(&format_trace(name, args));

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C builtin_first -- -E 'test(/^child::dispatch::/) | binary(builtin_first)'
+
 mod table;
 
 use crate::error::child_process::ChildProcessError;
@@ -19,9 +21,7 @@ pub(crate) fn is_dispatched(name: &ShortCStr) -> bool {
 /// builtin without the `builtin` keyword; names containing `/` always reach
 /// the external.
 pub fn builtin_first(name: &ShortCStr, state: &ShellState) -> bool {
-    state.options & crate::options::BUILTIN_FIRST != 0
-        && !name.contains(b'/')
-        && is_dispatched(name)
+    state.option_on(crate::options::BUILTIN_FIRST) && !name.contains(b'/') && is_dispatched(name)
 }
 
 pub fn dispatch_builtin(
