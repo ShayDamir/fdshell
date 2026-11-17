@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C read -C --test -C trap -- -E 'test(/^intercept::read::tests::/) | binary(read) | binary(trap)'
+
 use crate::error::cmd::CmdError;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -8,11 +10,14 @@ use super::flags::{ReadFlags, SourceFd};
 use super::line::{Line, LineEnd};
 use super::read_from_fd::read_line_from_fd;
 
+/// `poll` timeout meaning "block forever" (`read -t` values that saturate).
+const INFINITE_MS: i32 = -1;
+
 /// Read one line from `source` into a fresh [`Line`].
 ///
-/// The `-t` gate is a one-shot `poll`: bash re-polls per byte, so a peer that
-/// stalls mid-line past the timeout still blocks here; with data ready the
-/// read proceeds to completion like bash.
+/// The `-t` gate is a `poll`: bash re-polls per byte, so a peer that stalls
+/// mid-line past the timeout still blocks here; with data ready the read proceeds
+/// to completion like bash.
 pub(crate) fn read_line(
     source: &SourceFd,
     fd_clone: Option<&sys::LocalFd>,
@@ -60,8 +65,40 @@ fn source_raw_fd(
 }
 
 /// Poll `fd` for input for up to `ms`; true when nothing is ready (timeout).
+///
+/// A handled signal runs its trap and answers `EINTR` (no `SA_RESTART`), and the
+/// poll resumes with the time that is left, so the deadline still holds — measured
+/// 2026-11-17 (task #581's third bug): bash's `read -t 1` with a trap that fires
+/// mid-wait answers the *timeout*, not an error, and the script keeps going.
 fn poll_unready(fd: i32, ms: i32) -> Result<bool, Report<CmdError>> {
+    let deadline = deadline_ms(ms)?;
     let mut fds = [PollFd::new(fd, POLLIN)];
-    let n = sys::poll::poll(&mut fds, ms).change_context(CmdError::Read)?;
-    Ok(n == 0)
+    loop {
+        let wait = match deadline {
+            None => INFINITE_MS,
+            Some(at) => remaining_ms(at)?,
+        };
+        match sys::poll::poll(&mut fds, wait) {
+            Ok(0) => return Ok(true),
+            Ok(_) => return Ok(false),
+            Err(err) if err.errno() == sys::errno::EINTR => continue,
+            Err(err) => return Err(Report::new(err).change_context(CmdError::Read)),
+        }
+    }
+}
+
+/// The monotonic instant `ms` from now; `None` is the infinite (`-1`) poll.
+fn deadline_ms(ms: i32) -> Result<Option<u64>, Report<CmdError>> {
+    if ms < 0 {
+        return Ok(None);
+    }
+    Ok(Some(
+        sys::clock::monotonic_us().change_context(CmdError::Read)? + (ms as u64) * 1000,
+    ))
+}
+
+/// Milliseconds left before `deadline`; never negative, so the poll stays legal.
+fn remaining_ms(deadline: u64) -> Result<i32, Report<CmdError>> {
+    let now = sys::clock::monotonic_us().change_context(CmdError::Read)?;
+    Ok((deadline.saturating_sub(now) / 1000) as i32)
 }

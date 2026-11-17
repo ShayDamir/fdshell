@@ -27,6 +27,7 @@ mod error;
 mod exec;
 mod expand;
 mod exports;
+mod fd_read;
 mod for_run;
 mod function_call;
 mod glob;

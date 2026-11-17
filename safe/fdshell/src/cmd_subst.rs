@@ -1,8 +1,9 @@
-// mutants: -C --lib -C --test -C cmd_subst -C --test -C redirect -C --test -C backtick -- -E 'test(/^cmd_subst::/) | binary(cmd_subst) | binary(redirect) | binary(backtick)'
+// mutants: -C --lib -C --test -C cmd_subst -C --test -C redirect -C --test -C backtick -C --test -C trap -- -E 'test(/^cmd_subst::/) | binary(cmd_subst) | binary(redirect) | binary(backtick) | binary(trap)'
 use crate::error::cmd_subst::CmdSubstError;
+use crate::fd_read::{Decision, read_to_end};
 use crate::state::ShellState;
 use alloc::vec::Vec;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use sys::LocalFd;
 use sys::fork_cell::ForkCell;
 
@@ -81,21 +82,29 @@ pub(crate) fn run_and_capture(
 /// would be captured; the caller must kill the child in that case.
 fn drain(r: &LocalFd, limit: usize) -> Result<Vec<u8>, Report<CmdSubstError>> {
     let mut out = Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        let n = match r.read(&mut buf) {
-            // Preserve prior behavior: a read error ends the capture.
-            Err(_) => break,
-            Ok(0) => break,
-            Ok(n) => n,
-        };
-        if let Some(chunk) = buf.get(..n) {
+    read_to_end(
+        &mut |buf| r.read(buf),
+        &mut |chunk| {
             if out.len() + chunk.len() > limit {
-                bail!(CmdSubstError::OutputTooLarge);
+                return Decision::Report(Report::new(CmdSubstError::OutputTooLarge));
             }
             out.extend_from_slice(chunk);
-        }
-    }
+            Decision::Resume
+        },
+        // A caught signal's handler has run and the pipe is still open, so the
+        // capture carries on with the bytes it has (bash's rule, task #581 — this
+        // is bug #587).
+        &|err| {
+            if err.errno() == sys::errno::EINTR {
+                Decision::Resume
+            } else {
+                // Preserve prior behavior: any other read error ends the capture.
+                Decision::Done
+            }
+        },
+        // The slice a read cannot produce: the old `if let` skipped the chunk.
+        &|| Decision::Resume,
+    )?;
     while out.last() == Some(&b'\n') {
         out.pop();
     }

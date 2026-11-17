@@ -19,3 +19,10 @@ line = 69
 column = 64
 mutant = "replace + with * in report_stray_closer"
 reason = "Task #576, same site and same proof as the 69:57 entry (measured on the full suite with the mutant applied as source): `skip * word.len()` moves the quote gate's window off the quote-free keyword run, and the gate answers the same `false` there as at the word's own end. The `+`→`-` mutant at this coordinate is killed by the pins in `error/parse/position/tests.rs` (it underflows on the zero-skip rows). Re-derive after any change to this line."
+
+[[allow]]
+file = "safe/fdshell/src/intercept/read/io.rs"
+line = 84
+column = 25
+mutant = "replace match guard err.errno() == sys::errno::EINTR with true in poll_unready"
+reason = "Task #581, measured on the mapped suite with the mutant applied as source (the lib's `intercept::read` rows, `tests/read.rs` and all of `tests/trap.rs`: green): `poll` answers `EINTR` for a handled signal and no other errno is reachable from this call (`nfds == 1` over a valid slice, so no `EFAULT`; a legal timeout, so no `EINVAL`), so the guard's false arm — the report — has no input that reaches it. The EINTR arm is what the pins kill (`tests/trap.rs::a_signal_during_the_read_poll_restarts_it` and its two neighbours). Re-derive after any change to this line."

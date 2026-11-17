@@ -22,3 +22,4 @@ pub const ENFILE: i32 = libc::ENFILE;
 pub const ETXTBSY: i32 = libc::ETXTBSY;
 pub const ENOSPC: i32 = libc::ENOSPC;
 pub const ENODATA: i32 = libc::ENODATA;
+pub const EINTR: i32 = libc::EINTR;

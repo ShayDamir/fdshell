@@ -12,6 +12,7 @@ use error_stack::{Report, ResultExt, ensure};
 
 use crate::error::child_process::ChildProcessError;
 use crate::error::launch::LaunchError;
+use crate::fd_read::Decision;
 use sys::Pid;
 use sys::ShortCStr;
 
@@ -79,14 +80,18 @@ pub(crate) fn is_tag(tag: &CStr) -> bool {
 
 fn read_all(fd: &sys::LocalFd) -> Result<Vec<u8>, Report<LaunchError>> {
     let mut data = Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        let n = fd.read(&mut buf).change_context(LaunchError::LastArg)?;
-        if n == 0 {
-            break;
-        }
-        data.extend_from_slice(buf.get(..n).ok_or(LaunchError::Never)?);
-    }
+    crate::fd_read::read_to_end(
+        &mut |buf| fd.read(buf),
+        &mut |chunk| {
+            data.extend_from_slice(chunk);
+            Decision::Resume
+        },
+        // The socket read is reported, not resumed: `$_` is a child-to-parent
+        // handoff, no signal is expected on it, and the chain is this site's own
+        // (task #581's policy table).
+        &|err| Decision::Report(Report::new(*err).change_context(LaunchError::LastArg)),
+        &|| Decision::Report(Report::new(LaunchError::Never)),
+    )?;
     Ok(data)
 }
 

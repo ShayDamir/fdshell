@@ -455,6 +455,178 @@ fn a_signal_during_a_blocking_read_runs_the_action() {
     assert_eq!(status.code(), Some(0), "the script finishes");
 }
 
+// ---- read loops a caught signal interrupts (task #581) -------------------------------
+
+/// The `deliver` shape extended to report everything the shell printed: settle
+/// first, so the signal lands while the shell really is blocked in its read or
+/// its `-t` poll (the settle-then-signal shape of
+/// `a_signal_during_the_blocking_poll_reports_its_own_chain`, ≥200 ms), deliver
+/// `sig`, then poke stdin `poke_after_ms` later (`None` = no poke) and report the
+/// lines printed after `ready`, stderr and the status.
+fn deliver_report(
+    script: &str,
+    sig: i32,
+    poke_after_ms: Option<u64>,
+) -> (Vec<String>, String, i32) {
+    let mut child = Command::new(BIN)
+        .args(["-c", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let ready = lines.next().unwrap().unwrap();
+    assert_eq!(
+        ready, "ready",
+        "the registration must print its marker first"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    sys::signal::kill(Pid::from_raw(child.id() as i32), sig).unwrap();
+    if let Some(ms) = poke_after_ms {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
+    {
+        let mut stdin = child.stdin.take().unwrap();
+        if poke_after_ms.is_some() {
+            stdin.write_all(b"ping\n").ok();
+            stdin.flush().ok();
+        }
+        drop(stdin);
+    }
+    let printed = lines.collect::<Result<Vec<_>, _>>().unwrap();
+    let output = child.wait_with_output().unwrap();
+    (
+        printed,
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+/// Bug #587: the signal is delivered inside the capture, so it interrupts the
+/// parent's capture read — and bash **keeps the bytes** (measured 2026-11-17,
+/// 3/3, the read resuming after the handler ran: `X=[end]`). Before task #581 the
+/// capture came back empty (`X=[]`) because the read's `EINTR` ended it. The order
+/// of the two lines is fdshell's own and predates task #581: an assignment has no
+/// boundary of its own, so the action runs at the next one
+/// (`the_wait_boundary_runs_the_pending_action`); bash runs the trap first and
+/// prints `hit`, `X=[end]`, `after`, rc 0.
+#[test]
+fn a_signal_during_the_capture_read_keeps_the_bytes() {
+    let (out, err, code) = run_script_file(
+        "capture-read",
+        "trap 'echo hit' USR1\nX=$( kill -USR1 $$; echo end )\necho \"X=[$X]\"\necho after\n",
+    );
+    assert_eq!(out, "X=[end]\nhit\nafter\n", "stderr={err:?}");
+    assert_eq!(err, "", "bash is silent here");
+    assert_eq!(code, 0, "stderr={err:?}");
+}
+
+/// The `read` builtin's loop is the sibling that drifted: a caught signal answers
+/// `EINTR` and bash's rule for this site is to **resume** the read, so the poked
+/// line is what `read x` takes. Measured against bash 5.3.9 on this machine,
+/// 2026-11-17, 3/3: `hit`, `x=[ping]`, `after`, rc 0, empty stderr. Before task
+/// #581 the loop reported the interruption and stopped the script at rc 1.
+#[test]
+fn a_signal_during_a_blocking_read_restarts_it() {
+    let (printed, err, code) = deliver_report(
+        r#"trap 'echo hit' USR1; builtin echo ready; read x; echo "x=[$x]"; echo after"#,
+        SIGUSR1,
+        Some(200),
+    );
+    assert_eq!(printed, ["hit", "x=[ping]", "after"], "stderr={err:?}");
+    assert_eq!(err, "", "bash is silent here");
+    assert_eq!(code, 0, "stderr={err:?}");
+}
+
+/// The `-t` poll, same rule: the poll resumes with the time that is left, so the
+/// timeout still decides. bash 5.3.9 measured 3/3: `hit`, `rc=142`, `tail`, rc 0,
+/// empty stderr. The status of the timed-out `read` is the one divergence — it is
+/// each shell's own status rule (fdshell answers 1, pinned for the plain timeout
+/// by `tests/read.rs::timeout_zero_no_data_fifo`; bash's is 128+SIGALRM), not the
+/// interrupt's.
+#[test]
+fn a_signal_during_the_read_poll_restarts_it() {
+    let (printed, err, code) = deliver_report(
+        "trap 'echo hit' USR1; builtin echo ready; read -t 1 x; echo rc=$?; echo tail",
+        SIGUSR1,
+        None,
+    );
+    assert_eq!(
+        printed,
+        ["hit", "rc=1", "tail"],
+        "bash prints `rc=142` here (stderr={err:?})"
+    );
+    assert_eq!(err, "", "bash is silent here");
+    assert_eq!(code, 0, "stderr={err:?}");
+}
+
+/// The resume is **bounded**: the poll re-waits with the time that is left, so
+/// data arriving inside the original deadline is still read. Measured against bash
+/// 5.3.9 on this machine 2026-11-17, 3/3, both shells byte for byte: `hit`,
+/// `rc=0`, `x=[ping]`, `tail`, rc 0, empty stderr (signal 200 ms after `ready`,
+/// stdin poked 300 ms after the signal — well inside the 3 s deadline).
+#[test]
+fn a_signal_during_the_read_poll_keeps_the_time_that_is_left() {
+    let (printed, err, code) = deliver_report(
+        "trap 'echo hit' USR1; builtin echo ready; read -t 3 x; echo rc=$?; echo \"x=[$x]\"; echo tail",
+        SIGUSR1,
+        Some(300),
+    );
+    assert_eq!(
+        printed,
+        ["hit", "rc=0", "x=[ping]", "tail"],
+        "stderr={err:?}"
+    );
+    assert_eq!(err, "", "bash is silent here");
+    assert_eq!(code, 0, "stderr={err:?}");
+}
+
+/// And the deadline is **kept**, not restarted: data that arrives after it has
+/// passed is never read by the timed-out `read`. Measured 3/3, signal 200 ms after
+/// `ready`, stdin poked 1500 ms later — past the 1 s deadline, so the timeout
+/// decides and the poked line belongs to the plain `read y` that follows. Both
+/// shells print `hit`, `x=[]`, `y=[ping]`, `tail`, rc 0, empty stderr; only the
+/// timed-out `read`'s own status differs (fdshell 1, bash 128+SIGALRM — the same
+/// divergence as `a_signal_during_the_read_poll_restarts_it`).
+#[test]
+fn a_signal_during_the_read_poll_keeps_the_deadline() {
+    let (printed, err, code) = deliver_report(
+        "trap 'echo hit' USR1; builtin echo ready; read -t 1 x; echo rc=$?; echo \"x=[$x]\"; \
+         read y; echo \"y=[$y]\"; echo tail",
+        SIGUSR1,
+        Some(1500),
+    );
+    assert_eq!(
+        printed,
+        ["hit", "rc=1", "x=[]", "y=[ping]", "tail"],
+        "bash prints `rc=142` here (stderr={err:?})"
+    );
+    assert_eq!(err, "", "bash is silent here");
+    assert_eq!(code, 0, "stderr={err:?}");
+}
+
+/// The infinite arm of the poll (`-t` values that saturate, the same parse as
+/// `test_parse_flags_t_overflow_saturates_infinite`) has no deadline to keep, so a
+/// caught signal just resumes the wait and the poked line is read. Measured 3/3,
+/// both shells byte for byte: `hit`, `rc=0`, `x=[ping]`, `tail`, rc 0, empty
+/// stderr.
+#[test]
+fn a_signal_during_the_read_poll_with_no_deadline_waits_for_the_data() {
+    let (printed, err, code) = deliver_report(
+        "trap 'echo hit' USR1; builtin echo ready; read -t 4294967295 x; echo rc=$?; echo \"x=[$x]\"; echo tail",
+        SIGUSR1,
+        Some(300),
+    );
+    assert_eq!(
+        printed,
+        ["hit", "rc=0", "x=[ping]", "tail"],
+        "stderr={err:?}"
+    );
+    assert_eq!(err, "", "bash is silent here");
+    assert_eq!(code, 0, "stderr={err:?}");
+}
+
 // ---- the exit paths ----------------------------------------------------------------
 
 /// The `exit` builtin runs the EXIT trap before the process ends, and the
@@ -1001,28 +1173,57 @@ fn a_trap_crosses_into_a_forked_subshell() {
     assert_eq!(err, "");
 }
 
+/// Spawn `script` with stdin a pipe, hold it open for `settle_ms` — so the script's
+/// own `kill` lands while its read is blocked — then close stdin and collect
+/// everything. The close is what ends a read that resumed after its handler (task
+/// #581), and the pending action runs at that boundary, so the action's line comes
+/// after the EOF rather than before it.
+fn run_with_stdin_closed_after(script: &str, settle_ms: u64) -> (Vec<String>, String, i32) {
+    let mut child = Command::new(BIN)
+        .args(["-c", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(settle_ms));
+    drop(child.stdin.take().unwrap());
+    let output = child.wait_with_output().unwrap();
+    (
+        str::from_utf8(&output.stdout)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 /// A backgrounded **builtin** is a pure fork too, so the child runs the parent's
 /// action; its `read` answers `EINTR` (no `SA_RESTART` — LESSONS "A real signal
-/// handler relies on glibc's `sigaction` to fill the restorer (task #582)") and the
-/// child reports that on stderr before the parent reaps it. bash runs no action
-/// there — its subshell reset the trap and the signal killed the child — and
-/// prints only `after`, empty stderr, rc 0 (measured 2026-11-16, with stdin held
-/// open and at EOF). The `&` keeps a line to itself because
+/// handler relies on glibc's `sigaction` to fill the restorer (task #582)"), the
+/// handler has run, and the read **resumes** (task #581) — so it ends at the closed
+/// stdin and reports nothing, and the action prints at that boundary. bash runs no
+/// action there — its subshell reset the trap and the signal killed the child — and
+/// prints only `after`, empty stderr, rc 0 (measured 2026-11-17, 3/3, stdin held
+/// 400 ms then closed). The `&` keeps a line to itself because
 /// a `&` behind a `;` on one line is a parse error here (bash backgrounds the job).
 #[test]
 fn a_backgrounded_builtin_runs_the_parents_action() {
-    let (out, err, code) = run_with_live_stdin(
+    let (printed, err, code) = run_with_stdin_closed_after(
         "trap 'echo hit' USR1\nread x &\npid=$!\nkill -USR1 $pid\nwait $pid\necho after",
+        400,
     );
     assert_eq!(code, 0, "stderr={err:?}");
-    assert!(
-        out.contains("hit"),
-        "the forked child ran the parent's action: {out:?}"
+    assert_eq!(
+        printed,
+        ["hit", "after"],
+        "the child ran the action, the parent reaped it: {printed:?}"
     );
-    assert!(out.contains("after"), "the parent reaped it: {out:?}");
-    assert!(
-        err.contains("errno 4"),
-        "the child's `read` was interrupted: {err:?}"
+    assert_eq!(
+        err, "",
+        "the resumed read reports nothing: bash's job line is its own"
     );
 
     let (out, err, code) =
