@@ -10992,16 +10992,6 @@ short enough that `-` → `/` changes it too; plus the byte-accessor rows —
 `state/options/tests.rs`, one per answer — flag set alone `true`, flag off with
 another bit set `false`.
 
-live there, one per mutation of `end - start > self.len()`: equal span and
-text, a longer span, a non-zero `start` so `-` → `+` changes the answer, and a
-quotient short enough that `-` → `/` changes it too; plus the byte-accessor
-rows — `get_byte` in-range and past-the-end, `first_byte` non-empty and empty,
-and `BadState` answering `None` for both. Getter pins: two rows in
-`state/fds/tests.rs`, one per answer — a name nothing holds answers `None`,
-and a `set_fd_var`-ed name answers `Some` with the descriptor it was given;
-`option_on` pins: two rows in `state/options/tests.rs`, the flag set alone
-answering `true` and the flag off with another bit set answering `false`.
-
 ## A probe only counts if the mutation landed and the filter is the map's filter
 
 Hand-fed mutation probes during task #549's gate lied twice. A `sed` whose
