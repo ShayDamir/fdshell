@@ -346,3 +346,16 @@ fn whole_word_and_embedded_dollar_at_paths_agree() {
         assert_eq!(out, *want, "{script:?}");
     }
 }
+
+/// The digit arm stays greedy inside its region (LESSONS: "A bare name is
+/// capped at the quote region of its trigger byte"): an unquoted `x$12y` over
+/// twelve positionals is positional **12**, not bash's single-digit `$1` plus
+/// a literal `2` (bash 5.3.9 measures `[xa2y]`) — the cap binds only where a
+/// region ends, and nothing ends this one. This row is the pin for the
+/// `num.len() < limit` run condition in `resolve_positional_index`.
+#[test]
+fn digit_run_stays_greedy_for_an_in_range_multi_digit_index() {
+    let (out, err, code) = run(r#"set -- a b c d e f g h i j k VAL; printf "[%s]" x$12y"#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[xVALy]");
+}
