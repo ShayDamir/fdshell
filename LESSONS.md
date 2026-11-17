@@ -992,7 +992,7 @@ A heredoc body (`cmd <<EOF … EOF`) can contain any bytes, including `;`, `&&`,
 `|`, `#`, quotes, `<<`, and keyword-shaped lines (`fi`, `done`, `}`, `;;`).
 Every layer that scans multi-line bytes must jump from the heredoc command
 line past its last delimiter line, or the body corrupts statement splitting
-(`segment.rs`), cond-list splitting (`cond.rs::next_boundary`), block keyword
+(`segment.rs`), cond-list splitting (`cond/boundary.rs::next_boundary`), block keyword
 depth (`comment.rs::scan_block`), and brace depth
 (`brace/block.rs::scan_brace_block`) — four call sites, all fed by the one
 shared helper `scan::heredoc::skip`/`skip_region`. A body's bytes never fold
