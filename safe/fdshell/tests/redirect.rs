@@ -4180,6 +4180,45 @@ fn failing_open_fails_the_command_and_continues() {
             true,
         ),
         ("exec >noperm; echo after", "", 1, "Permission denied", true),
+        // Deterministic arm pins, measured on bash 5.3.9 and this build: the
+        // EACCES-gated rows above only run off-sandbox, so each arm the battery
+        // plans to feed also gets a deterministic EISDIR row. The plain and
+        // multi assignments match bash (the scalars are applied before the
+        // open). The array row **diverges**: bash prints `[1] rc=1` (it applies
+        // the assignment before reporting), fdshell prints `[] rc=1` — the
+        // failing open aborts the arm before the array is applied; task #612
+        // owns the parity fix. The `:` row keeps the POSIX gate's abort (bash's
+        // default mode prints `after` at rc 0; bash's `set -o posix` agrees
+        // with fdshell), and the `wait` row matches bash at parity.
+        (
+            "X=1 >adir; echo [$X] rc=$?",
+            "[1] rc=1\n",
+            0,
+            "Is a directory",
+            false,
+        ),
+        (
+            "X=1 Y=2 >adir; echo [$X][$Y] rc=$?",
+            "[1][2] rc=1\n",
+            0,
+            "Is a directory",
+            false,
+        ),
+        (
+            "A=(1) >adir; echo [${A[@]}] rc=$?",
+            "[] rc=1\n",
+            0,
+            "Is a directory",
+            false,
+        ),
+        (": >adir; echo after", "", 1, "Is a directory", false),
+        (
+            "wait >adir; echo after",
+            "after\n",
+            0,
+            "Is a directory",
+            false,
+        ),
     ] {
         if skip && gated {
             continue;
