@@ -4,7 +4,12 @@
 //! variable when stdin is a terminal, the bash default when the variable is
 //! unset, and nothing off-terminal (bash draws no prompt there either). The
 //! bytes are then decoded and rendered — the record and the contract of that
-//! pass are in the module doc of `decode.rs`.
+//! pass are in the module doc of `decode.rs`. Between the two sits the
+//! expansion stage (task #620): literal runs are expanded by parameter
+//! expansion, command substitution and arithmetic expansion, gated by the
+//! `promptvars` shopt and read here so no borrow of the state is held across it
+//! (LESSONS: "Never hold a ForkCell borrow across a recursive call that
+//! re-borrows"); the grammar of that stage is in `render/expand.rs`.
 
 mod decode;
 mod render;
@@ -12,7 +17,7 @@ mod segment;
 mod value;
 
 use decode::decode;
-use render::render;
+use render::{PromptVars, render};
 use value::clock::ClockValues;
 use value::composite::Providers;
 use value::cwd::CwdValues;
@@ -22,6 +27,7 @@ use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
 use crate::app::AppError;
+use crate::options::PROMPTVARS;
 use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -45,23 +51,36 @@ pub(crate) fn resolve(
     name: &ShortCStr,
     default: &[u8],
 ) -> Result<Vec<u8>, Report<AppError>> {
-    let drawn = {
+    let (drawn, policy) = {
         let state = cell.borrow().change_context(AppError::Borrow)?;
         if !state.interactive {
             return Ok(Vec::new());
         }
-        match state.var_value(name) {
+        let policy = if state.option_on(PROMPTVARS) {
+            PromptVars::On
+        } else {
+            PromptVars::Off
+        };
+        let drawn = match state.var_value(name) {
             None => default.to_vec(),
             Some(value) => value.as_bytes().change_context(AppError::Never)?.to_vec(),
-        }
+        };
+        (drawn, policy)
     };
     let shell = ShellValues::new(cell);
     let clock = ClockValues::new();
     let cwd = CwdValues::new(cell);
-    Ok(render(
+    let record = render(
         &decode(&drawn),
         &Providers::new(&shell, &clock, &cwd),
-    ))
+        policy,
+        cell,
+    );
+    Ok(record
+        .iter()
+        .flat_map(|run| run.bytes.iter())
+        .copied()
+        .collect())
 }
 
 #[cfg(test)]

@@ -23,7 +23,7 @@ use sys::fork_cell::ForkCell;
 use super::Join;
 use super::mask::Counting;
 use super::origin::Origin;
-use super::surface::PercentArm;
+use super::surface::{PercentArm, TildeArm};
 use crate::error::resolve::ResolveError;
 use crate::mask::MaskBit;
 use crate::state::ShellState;
@@ -38,16 +38,19 @@ use crate::state::ShellState;
 /// zero-byte quote-span indices (task #321), input-side only: it feeds the
 /// tilde gate and never affects the output mask. `join` is the `$@`/`$*` arm's
 /// join mode — the caller's surface, not a flag read off the state (task #319)
-/// — and `percent` is the same shape of data for the `%` arm: the policy the
-/// surface was entered with (task #371), decided once, read at the arm.
+/// — and `percent` and `tilde` are the same shape of data for the `%` and `~`
+/// arms: the policy the surface was entered with (tasks #371 and #620), decided
+/// once, read at the arm.
 ///
 /// Invariant: at the top of each loop iteration `idx == peek.consumed()`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn substitute_arg_marked(
     arg: &ShortCStr,
     mask: &[MaskBit],
     spans: &[usize],
     join: Join,
     percent: PercentArm,
+    tilde: TildeArm,
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<(ShortCStr, Vec<MaskBit>, Origin), Report<ResolveError>> {
@@ -65,7 +68,7 @@ pub(super) fn substitute_arg_marked(
         join,
         percent,
     };
-    if super::tilde::leads(bytes, mask, spans) {
+    if tilde == TildeArm::Fires && super::tilde::leads(bytes, mask, spans) {
         super::tilde::expand(
             &mut ex.peek,
             &mut ex.idx,

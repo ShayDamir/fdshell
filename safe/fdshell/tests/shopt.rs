@@ -198,6 +198,16 @@ fn shopt_query_exit_codes() {
 }
 
 #[test]
+fn promptvars_on_by_default() {
+    // bash's default too (measured `shopt promptvars` → `promptvars on`). The
+    // gate itself is the prompt pipeline's, pinned in `tests/repl.rs`.
+    let (_out, _err, code) = run("shopt -q promptvars");
+    assert_eq!(code, 0);
+    let (_out, _err, code) = run("shopt -u promptvars; shopt -q promptvars");
+    assert_eq!(code, 1);
+}
+
+#[test]
 fn expand_aliases_on_by_default() {
     let (_out, _err, code) = run("shopt -q expand_aliases");
     assert_eq!(code, 0);

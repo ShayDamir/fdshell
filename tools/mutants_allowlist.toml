@@ -33,3 +33,10 @@ line = 81
 column = 24
 mutant = "replace match guard failing::classifies_launch(&report) with true in run_cmd"
 reason = "Task #179, measured on the full suite with the mutant applied as source (green): the only launch-error reports reachable at this match over the test inputs carry the redirect-layer frame (fork and capture-socket failures need fd or allocation exhaustion, which never happens inside the tests — the 128 MB-cap rows abort cleanly inside the child), so the guard's false arm has no input and the guard constant is an identity. The true arm's answer is pinned by the unit rows in `run/failing/tests.rs` and the e2e rows in `tests/redirect.rs`; the non-redirect launch frames stay on the abort channel there. Re-derive after any change to this guard."
+
+[[allow]]
+file = "safe/fdshell/src/options.rs"
+line = 45
+column = 42
+mutant = "replace | with ^"
+reason = "The two operands are distinct single bits (`EXPAND_ALIASES`, `PROMPTVARS`), so their union and their symmetric difference are the same value: no bit belongs to both, which is the only case where `|` and `^` differ. Any test on `DEFAULTS` — `options/tests.rs` reads it through `shopt -q` and the `DEFAULTS` pins — sees the same `u32` under either operator, so no test can observe the mutation; the other operators at this site (`&`, `+`, ...) are killed by the file's pins. Re-derive after any change to this line."

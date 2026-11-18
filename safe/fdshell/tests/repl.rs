@@ -1485,6 +1485,179 @@ fn dirtrim_ellipsis_replaces_the_leading_components() {
     assert!(tty.contains("[.../1][1]"), "pty: {tty:?}");
 }
 
+// ——— prompt-time expansion (task #620), measured against bash 5.3.9 on
+// 2026-11-18, `promptvars` on by default (`tests/shopt.rs` pins the shopt). Every
+// stored `PS1` is quoted, so its triggers are prompt-time, and every needle is a
+// byte stream the pty echo cannot produce — the typed line keeps the raw `$v` or
+// `$( … )` text — except where a count says otherwise. The rows are one per fact:
+// every `$( … )` and backtick in a prompt forks, so a prompt with one pays a fork
+// per prompt drawn (the resident-decorator answer is epic #199). ———
+
+/// The two name forms, on both prompts: `PS1` at the `exit` read, and `PS2` at
+/// the buffered one (bash draws `V `, `V ` and — measured with `IFS=,` and two
+/// positionals — `[V|a,b|a b] `).
+#[test]
+fn a_prompt_expands_its_variables() {
+    let (tty, code, _) = run_tty("v=V\nPS1='[$v|${v}] '\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[V|V] ").count(), 1, "pty: {tty:?}");
+
+    let (tty, code, _) = run_tty("v=V\nPS2='[$v] '\nif true; then\nfi\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[V] ").count(), 1, "pty: {tty:?}");
+    assert_eq!(tty.matches(PROMPT).count(), 4, "pty: {tty:?}");
+}
+
+/// The three substitution arms in one prompt: command substitution, backticks and
+/// arithmetic (bash draws `hi `, `bt ` and `2 ` on the same stored shapes).
+#[test]
+fn a_prompt_fires_the_command_and_arithmetic_arms() {
+    let (tty, code, _) = run_tty(
+        "PS1='[a$(echo one)b`echo two`c$((1+1))d] '\nexit\n",
+        Event::Exit,
+    );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[aonebtwoc2d] ").count(), 1, "pty: {tty:?}");
+}
+
+/// `shopt -u promptvars` keeps the decoder's work and skips the expansion — and
+/// quote removal is part of the skipped expansion (measured). Both ways in one
+/// row: the prompt drawn before the `shopt -u` read is the expanded one.
+#[test]
+fn promptvars_off_skips_the_expansion() {
+    let (tty, code, _) = run_tty(
+        "PS1='[a$((1+1))b] '\nshopt -u promptvars\nexit\n",
+        Event::Exit,
+    );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[a2b] ").count(), 1, "pty: {tty:?}");
+    assert_eq!(
+        tty.matches("[a$((1+1))b] ").count(),
+        2,
+        "echo + prompt: {tty:?}"
+    );
+}
+
+/// The nounset row (D-620-8): bash reports on stderr, draws the prompt as the
+/// unexpanded text and keeps prompting. fdshell's wording is its own (#623
+/// documents it); the shell stays alive on bash's input, and the report names the
+/// variable bash names.
+#[test]
+fn nounset_in_a_prompt_reports_and_keeps_the_shell() {
+    let (tty, code, _) = run_tty("set -u\nPS1='[a$nope] '\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "the REPL must keep prompting: {tty:?}");
+    assert!(tty.contains("nope: unbound variable"), "pty: {tty:?}");
+    assert_eq!(
+        tty.matches("[a$nope] ").count(),
+        2,
+        "echo + prompt: {tty:?}"
+    );
+}
+
+/// The `%fd` arm is live on this surface (D-620-5): a bound name draws its fd
+/// number, where bash draws `%CWD` literally — fdshell's own answer, pinned by
+/// its shape, since the number is the shell's own bookkeeping.
+#[test]
+fn the_prompt_fd_arm_fires() {
+    let (tty, code, _) = run_tty("PS1='[a%CWD] '\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    let groups: Vec<&str> = tty.split(['[', ']']).skip(1).step_by(2).collect();
+    assert_eq!(groups.len(), 2, "the echo and the drawn prompt: {tty:?}");
+    assert_eq!(
+        groups.first().copied(),
+        Some("a%CWD"),
+        "the typed line: {tty:?}"
+    );
+    let drawn = groups.get(1).unwrap_or(&"");
+    assert!(
+        drawn
+            .strip_prefix('a')
+            .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())),
+        "the drawn prompt names the fd's number: {tty:?}"
+    );
+}
+
+/// `set -- a b` + `IFS=,` + `[${*}|${@}] ` → `[a,b|a b] ` (measured): `$*` joins
+/// with the first `IFS` byte, `$@` **space**-joins — the join mode the prompt's
+/// entry point names (D-620-6, LESSONS: "`$@` has two join rules").
+#[test]
+fn the_prompt_positional_join_is_the_measured_one() {
+    let (tty, code, _) = run_tty("set -- a b\nIFS=,\nPS1='[${*}|${@}] '\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[a,b|a b] ").count(), 1, "pty: {tty:?}");
+}
+
+/// Nothing else expands on this surface (all measured): no tilde — the runner's
+/// `HOME` is set, so a live arm would print it — no globbing, no field splitting,
+/// and the separator bytes are kept. The row counts the typed shape because the
+/// drawn prompt is byte-identical to it.
+#[test]
+fn nothing_else_expands_on_the_prompt_surface() {
+    let (tty, code, _) = run_tty("PS1='[~|*|a  b|a;b] '\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(
+        tty.matches("[~|*|a  b|a;b] ").count(),
+        2,
+        "echo + prompt: {tty:?}"
+    );
+}
+
+/// Quote characters are literal data **and** they do not protect (measured
+/// `"$v" ` → `"V" `): the quotes survive and the expansion inside them fires.
+#[test]
+fn quote_characters_in_a_prompt_are_data() {
+    let (tty, code, _) = run_tty("v=V\nPS1='[\"$v\"] '\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[\"V\"] ").count(), 1, "pty: {tty:?}");
+}
+
+/// The backslash set, end to end (measured): `\` before `$ \`" ' \ is a quote
+/// operator and loses its own byte; before anything else it survives. The `\\`
+/// pair is the decoder's mechanical escape, so its drawn byte is one backslash —
+/// and `\q` stays, which is what separates the two arms of the escape grammar.
+#[test]
+fn the_prompt_backslash_quotes_only_the_special_set() {
+    let (tty, code, _) = run_tty(
+        concat!(r#"PS1='[a\"b|a\\b|\\qX] '"#, "\nexit\n"),
+        Event::Exit,
+    );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[a\"b|a\\b|\\qX] ").count(), 1, "pty: {tty:?}");
+}
+
+/// The `\xHH` divergence end to end (decision D1 of task #616: bash measures
+/// `\x` literal, fdshell decodes it): a byte the decoder produced is part of the
+/// run and **is** scanned, so fdshell draws `[V] ` where bash draws `\x24v `.
+#[test]
+fn a_hex_decoded_dollar_expands_in_a_prompt() {
+    let (tty, code, _) = run_tty("v=V\nPS1='[\\x24v] '\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[V] ").count(), 1, "pty: {tty:?}");
+}
+
+/// A capture-limit failure in the prompt path follows D-620-8: the cap
+/// (`MAX_CAPTURED`, lowered by `set --stdout-capture-limit`) applies to a prompt's
+/// `$( … )` exactly as it does anywhere else, but the REPL reports and keeps
+/// prompting — it must not die because a prompt grew past the cap — and the prompt
+/// is drawn as the unexpanded text.
+#[test]
+fn an_over_cap_command_substitution_keeps_the_shell() {
+    let (tty, code, _) = run_tty(
+        "set --stdout-capture-limit 4\nPS1='[a$(echo toolongword)b] '\ntrue\nexit\n",
+        Event::Exit,
+    );
+    // Kept prompting: the report and the unexpanded prompt come out once per
+    // prompt drawn, twice. The exit code is the last status, as `exit` takes it
+    // with no argument: the over-cap producer is SIGKILLed (128 + 9).
+    assert_eq!(code, Some(137), "pty: {tty:?}");
+    assert_eq!(tty.matches("capture limit").count(), 2, "pty: {tty:?}");
+    assert_eq!(
+        tty.matches("[a$(echo toolongword)b] ").count(),
+        3,
+        "echo + two prompts: {tty:?}"
+    );
+}
+
 /// The gate itself over a pipe (bash draws no prompt off-terminal, measured): a
 /// set `PS1`/`PS2` produce no prompt bytes at all, so stdout is the body alone.
 /// The pty rows above are the other half of the gate.

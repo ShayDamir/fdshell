@@ -1,10 +1,12 @@
 #![allow(clippy::unwrap_used)]
 
+use alloc::format;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
+use sys::unistd::geteuid;
 use sys::{ImportedStr, ShortCStr};
 
 /// bash 5.3.9's default `PS1`, the `run.rs` constant the call sites pass.
@@ -124,5 +126,49 @@ fn the_resolver_answers_a_clock_escape() {
     assert!(
         out.len() == 10 && out.starts_with(b"a") && out.ends_with(b"b") && mid_ok,
         "aHH:MM:SSb: {out:?}"
+    );
+}
+
+#[test]
+fn the_shopt_gates_the_expansion_stage() {
+    // `promptvars` is on by default (bash's default too), so a literal run is
+    // expanded; clearing the bit — what `shopt -u promptvars` does — pastes the
+    // run as it stands, while the decoder's work stays.
+    let cell = cell(true);
+    set(&cell, c"v", c"V");
+    set(&cell, c"PS1", c"[$v]");
+    assert_eq!(resolve(&cell, c"PS1", DEFAULT), b"[V]");
+    cell.borrow_mut().unwrap().options &= !crate::options::PROMPTVARS;
+    assert_eq!(resolve(&cell, c"PS1", DEFAULT), br"[$v]");
+}
+
+#[test]
+fn a_decoded_dollar_is_a_live_trigger() {
+    // The decoder's mechanical/octal bytes are part of the literal run and are
+    // scanned, so an octal-decoded `$` expands (measured: bash 5.3.9 draws
+    // `[V] ` for `[\044v] `). The `\xHH` extension (decision D1 of task #616)
+    // therefore expands where bash stays literal — the decoder's divergence,
+    // inherited here and pinned end to end.
+    let cell = cell(true);
+    set(&cell, c"v", c"V");
+    set(&cell, c"PS1", c"[\\044v]");
+    assert_eq!(resolve(&cell, c"PS1", DEFAULT), b"[V]");
+    set(&cell, c"PS1", c"[\\x24v]");
+    assert_eq!(resolve(&cell, c"PS1", DEFAULT), b"[V]");
+}
+
+#[test]
+fn the_dollars_escape_answer_is_not_a_trigger() {
+    // `\$` is the decoder's escape and its byte is not a trigger (measured
+    // `\$v ` → `$v `): the renderer pastes a provider answer verbatim, so the
+    // `v` after it is literal text, not a parameter reference. The answer is the
+    // uid's character, as bash's is for a non-root runner.
+    let cell = cell(true);
+    set(&cell, c"v", c"V");
+    set(&cell, c"PS1", c"[\\$v]");
+    let dollars = if geteuid() == 0 { "#" } else { "$" };
+    assert_eq!(
+        resolve(&cell, c"PS1", DEFAULT),
+        format!("[{dollars}v]").as_bytes()
     );
 }

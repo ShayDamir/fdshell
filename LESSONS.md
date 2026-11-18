@@ -12010,3 +12010,46 @@ Pins: `safe/fdshell/src/repl/prompt/value/cwd/tests.rs`
 `the_dirtrim_value_is_strictly_decimal`,
 `separators_are_collapsed_before_the_ellipsis_is_counted`) and the pty row
 `safe/fdshell/tests/repl.rs::dirtrim_ellipsis_replaces_the_leading_components`.
+
+## A prompt expansion acts only on the decoder's bytes, never on a provider's answer (task #620)
+
+Bash's PROMPTING order is **decode, then expand**, and fdshell's prompt pipeline
+follows it; the half that is fdshell's own is **which bytes the expansion stage
+may act on**, and it splits the bytes into two classes. A byte the decoder
+produced mechanically — three-octal `\044`, the fdshell-only hex `\x24`, the
+`\\` pair — is part of the literal run and **is** scanned, so `\044v ` expands. A
+byte a value **provider** answered with is pasted **verbatim and never scanned**:
+providers run after the decoder, their answers are data, and scanning them would
+re-trigger every value escape whose answer holds a `$` or a `~` (the pins whose
+answers contain them — `the_home_hop_draws_a_tilde`, the identity rows — are the
+guard). The decoder's own escape is not a trigger either: `\$v ` draws `$v `,
+which is exactly the row the two classes are read from.
+
+Because the stage is a byte loop over a run, the run has **no quote spans and no
+mask bits** — quote characters are literal data and they do not protect (`"$v" `
+draws `"V" `) — so the mask the engine is entered with is the surface's grammar,
+and it is **not** uniformly unquoted: `\` before `` $ ` " ' \ `` is a quote
+operator (its own byte goes), before anything else it survives (`\qX ` draws
+`\qX `). A name arm must never span a backslash that is not a quote operator,
+because a backslash is not a name byte. This is the second escape/expansion
+grammar in the tree, after
+LESSONS: "The two escape decoders have different grammars, and the record keeps the boundary (task #616)";
+they are not interchangeable and neither is the word grammar's.
+
+The join mode is the surface's own data, and the measured prompt row
+(`IFS=,`, two positionals, `[${*}|${@}] ` → `[a,b|a b] `) is the
+`` `$@` ``-space-joins-`$*`-takes-the-`IFS`-byte one — `Join::Pattern`, whose
+existing rows say so; `Join::Message` (both space-join) is wrong on a non-empty
+`IFS`, and an empty `IFS` separates them too (`$*` concatenates).
+
+Pins: `safe/fdshell/src/repl/prompt/render/expand/tests.rs`
+(`the_backslash_quotes_only_the_special_set`,
+`quote_characters_are_data_and_do_not_protect`,
+`the_positional_join_reproduces_the_measured_row`,
+`no_tilde_no_globbing_no_splitting_no_separators`,
+`a_nul_splits_the_run_and_is_pasted`),
+`safe/fdshell/src/repl/prompt/render/tests.rs::a_provider_answer_is_data_and_never_a_trigger`,
+`safe/fdshell/src/repl/prompt/tests.rs::a_decoded_dollar_is_a_live_trigger`,
+`safe/fdshell/src/repl/prompt/tests.rs::the_dollars_escape_answer_is_not_a_trigger`,
+and the pty rows `safe/fdshell/tests/repl.rs::a_hex_decoded_dollar_expands_in_a_prompt`,
+`safe/fdshell/tests/repl.rs::the_prompt_positional_join_is_the_measured_one`.

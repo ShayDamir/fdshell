@@ -23,7 +23,7 @@ use crate::state::ShellState;
 use crate::substitute::Join;
 use crate::substitute::arg::substitute_arg_marked;
 use crate::substitute::origin::Origin;
-use crate::substitute::surface::PercentArm;
+use crate::substitute::surface::{PercentArm, TildeArm};
 
 mod truncated;
 
@@ -83,6 +83,7 @@ impl Word<'_> {
             &spans,
             self.join,
             PercentArm::Fires,
+            TildeArm::Fires,
             &mut cache,
             self.cell,
         )?;

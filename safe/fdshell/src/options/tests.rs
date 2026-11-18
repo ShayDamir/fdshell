@@ -4,8 +4,9 @@ use alloc::vec::Vec;
 use sys::ShortCStr;
 
 use super::{
-    DOTGLOB, ERREXIT, EXPAND_ALIASES, FAILGLOB, IGNOREEOF, NOCLOBBER, NOGLOB, NOUNSET, NULLGLOB,
-    OPTIONS, STRICT, VERBOSITY, XTRACE, flag_lookup, flags, lookup, name_of, set,
+    DEFAULTS, DOTGLOB, ERREXIT, EXPAND_ALIASES, FAILGLOB, IGNOREEOF, NOCLOBBER, NOGLOB, NOUNSET,
+    NULLGLOB, OPTIONS, PROMPTVARS, STRICT, VERBOSITY, XTRACE, flag_lookup, flags, list, lookup,
+    name_of, set,
 };
 
 #[test]
@@ -23,6 +24,7 @@ fn lookup_known_names() {
     assert_eq!(lookup(&ShortCStr::from(c"nounset")), Some(NOUNSET));
     assert_eq!(lookup(&ShortCStr::from(c"noglob")), Some(NOGLOB));
     assert_eq!(lookup(&ShortCStr::from(c"verbose")), Some(VERBOSITY));
+    assert_eq!(lookup(&ShortCStr::from(c"promptvars")), Some(PROMPTVARS));
 }
 
 #[test]
@@ -43,8 +45,9 @@ fn name_of_round_trips() {
     assert_eq!(name_of(NOUNSET), Some(b"nounset".as_slice()));
     assert_eq!(name_of(NOGLOB), Some(b"noglob".as_slice()));
     assert_eq!(name_of(VERBOSITY), Some(b"verbose".as_slice()));
+    assert_eq!(name_of(PROMPTVARS), Some(b"promptvars".as_slice()));
     assert_eq!(name_of(0), None);
-    assert_eq!(name_of(1 << 13), None);
+    assert_eq!(name_of(1 << 14), None);
 }
 
 #[test]
@@ -58,6 +61,10 @@ fn flags_lists_active_short_flags_in_table_order() {
     assert_eq!(flags(NOUNSET), &b"u"[..]);
     assert_eq!(flags(NOGLOB), &b"f"[..]);
     assert_eq!(flags(VERBOSITY), &b"v"[..]);
+    // `promptvars` is a `shopt`-only option (bash has no `set -o promptvars`), so
+    // it never shows in `$-` and the cluster parser keeps rejecting it.
+    assert_eq!(flags(PROMPTVARS), &b""[..]);
+    assert_eq!(flags(DEFAULTS), &b""[..]);
     // Table order: existing flags precede the appended POSIX ones.
     assert_eq!(flags(NOCLOBBER | ERREXIT | NOUNSET), &b"Ceu"[..]);
 }
@@ -72,6 +79,29 @@ fn set_toggles_bits() {
     assert_eq!(both, NOCLOBBER | EXPAND_ALIASES);
     assert_eq!(set(both, NOCLOBBER, false), EXPAND_ALIASES);
     assert_eq!(set(both, NOCLOBBER, true), both);
+}
+
+#[test]
+fn promptvars_is_on_by_default_and_shopt_turns_it_off() {
+    // bash's default (`shopt promptvars` → `promptvars on`, measured 2026-11-18);
+    // `shopt -u` goes through `set`, and the rest of the defaults stay put.
+    assert_ne!(DEFAULTS & PROMPTVARS, 0);
+    assert_eq!(set(DEFAULTS, PROMPTVARS, false), EXPAND_ALIASES);
+    assert_eq!(
+        set(set(DEFAULTS, PROMPTVARS, false), PROMPTVARS, true),
+        DEFAULTS
+    );
+    assert_eq!(flag_lookup(b'p'), None);
+}
+
+#[test]
+fn list_shows_the_default_on_lines() {
+    // The `shopt` list's two branches, pinned on a state that has one bit of each.
+    let out = list(DEFAULTS);
+    let text = core::str::from_utf8(&out).unwrap();
+    assert!(text.contains("promptvars on"), "{text}");
+    assert!(text.contains("expand_aliases on"), "{text}");
+    assert!(text.contains("noclobber off"), "{text}");
 }
 
 #[test]

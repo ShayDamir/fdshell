@@ -16,7 +16,7 @@ use crate::substitute::arg::substitute_arg_marked;
 use crate::substitute::mask::Counting;
 use crate::substitute::origin::Origin;
 use crate::substitute::split::split_word;
-use crate::substitute::surface::PercentArm;
+use crate::substitute::surface::{PercentArm, TildeArm};
 
 use super::{handle, scan_body};
 
@@ -48,6 +48,7 @@ fn expand(word: &ShortCStr, mask: &[MaskBit]) -> (ShortCStr, Vec<MaskBit>, bool)
         &[],
         Join::Args,
         PercentArm::Fires,
+        TildeArm::Fires,
         &mut cache,
         &cell,
     )
@@ -65,6 +66,7 @@ fn fields(word: &ShortCStr, mask: &[MaskBit]) -> Vec<ShortCStr> {
         &[],
         Join::Args,
         PercentArm::Fires,
+        TildeArm::Fires,
         &mut cache,
         &cell,
     )

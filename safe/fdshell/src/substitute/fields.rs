@@ -23,7 +23,7 @@ use super::array_fields;
 use super::borrow_state;
 use super::positional::expand_positional_word;
 use super::split::split_word;
-use super::surface::PercentArm;
+use super::surface::{PercentArm, TildeArm};
 
 /// One word as the field list a caller globs: `$( … )`, `` ` … ` ``,
 /// `$(( … ))`, `$name`, `%fd` and `~` are substituted, the result is split on
@@ -62,8 +62,16 @@ pub(crate) fn word_fields(
         // positional one, so the two shapes are pinned side by side.
         return array_fields::fields(&name, is_star, fq, quoted, cell);
     }
-    let (text, text_mask, origin) =
-        substitute_arg_marked(word, mask, spans, Join::Args, percent, cache, cell)?;
+    let (text, text_mask, origin) = substitute_arg_marked(
+        word,
+        mask,
+        spans,
+        Join::Args,
+        percent,
+        TildeArm::Fires,
+        cache,
+        cell,
+    )?;
     // A fully quoted word is exactly one word — kept even when the expansion
     // is empty (`"${Y:+a}"` → one empty argument).
     let mut fields = if fq && text.is_empty() {

@@ -1,3 +1,5 @@
+// mutants: -C --lib -- -E 'test(/^options::/)'
+
 use sys::ShortCStr;
 
 pub const NOCLOBBER: u32 = 1;
@@ -13,6 +15,7 @@ pub const ERREXIT: u32 = 512;
 pub const NOUNSET: u32 = 1024;
 pub const NOGLOB: u32 = 2048;
 pub const VERBOSITY: u32 = 4096;
+pub const PROMPTVARS: u32 = 8192;
 
 /// All shell options, bash-compatible names.
 ///
@@ -34,10 +37,12 @@ pub const OPTIONS: &[(&[u8], u32, u8)] = &[
     (b"nounset", NOUNSET, b'u'),
     (b"noglob", NOGLOB, b'f'),
     (b"verbose", VERBOSITY, b'v'),
+    (b"promptvars", PROMPTVARS, 0),
 ];
 
-/// The options on by default (bash: `expand_aliases` is on in interactive shells).
-pub const DEFAULTS: u32 = EXPAND_ALIASES;
+/// The options on by default (bash: `expand_aliases` is on in interactive shells,
+/// and so is `promptvars` — measured `shopt promptvars` → `promptvars on`).
+pub const DEFAULTS: u32 = EXPAND_ALIASES | PROMPTVARS;
 
 pub fn lookup(name: &ShortCStr) -> Option<u32> {
     OPTIONS

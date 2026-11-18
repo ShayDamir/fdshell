@@ -19,7 +19,8 @@ use super::fields::word_fields;
 use super::mask::Counting;
 use super::origin::Origin;
 use super::substitute_arg;
-use super::surface::PercentArm;
+use super::substitute_prompt_run;
+use super::surface::{PercentArm, TildeArm};
 
 fn fdvar(fd: sys::LocalFd) -> FdVar {
     FdVar {
@@ -278,6 +279,7 @@ fn expand_marked_cached(
         spans,
         Join::Args,
         PercentArm::Fires,
+        TildeArm::Fires,
         cache,
         cell,
     )
@@ -3771,6 +3773,7 @@ fn expand_origin(
         &[],
         Join::Args,
         PercentArm::Fires,
+        TildeArm::Fires,
         &mut cache,
         cell,
     )
@@ -3837,6 +3840,7 @@ fn percent_arm_records_its_fd_number() {
         &[],
         Join::Args,
         PercentArm::Fires,
+        TildeArm::Fires,
         &mut cache,
         &cell,
     )
@@ -4431,4 +4435,27 @@ fn colon_word_spans_are_rebased() {
         .unwrap(),
         b"/h/o/m/e/x"
     );
+}
+
+fn prompt_run(word: &'static core::ffi::CStr, cell: &ForkCell<ShellState>) -> Vec<u8> {
+    substitute_prompt_run(&ShortCStr::from(word), &[], cell)
+        .unwrap()
+        .as_bytes()
+        .unwrap()
+        .to_vec()
+}
+
+/// The prompt surface's entry point, pinned at its own granularity (task #620).
+/// Its only caller is `repl::prompt::render::expand`, whose rows pin the mask
+/// grammar; what is pinned here is what *this* function decides — the policies it
+/// names — on the empty mask every prompt caller passes. The `%` arm fires, the
+/// tilde arm is off, and no splitting runs (D-620-4, D-620-5).
+#[test]
+fn the_prompt_entry_point_names_the_policies_it_is_called_with() {
+    let cell = dummy_cell();
+    assert_eq!(prompt_run(c"$hello", &cell), b"world");
+    assert_eq!(prompt_run(c"$((1+1))", &cell), b"2");
+    assert_eq!(prompt_run(c"a  $hello  b", &cell), b"a  world  b");
+    assert_eq!(prompt_run(c"$var", &cell), b"value");
+    assert_eq!(prompt_run(c"\"$var\"", &cell), b"\"value\"");
 }

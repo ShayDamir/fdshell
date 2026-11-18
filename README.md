@@ -2035,6 +2035,48 @@ pipe (its non-interactive `set -i` is a `set: -i: invalid option` error, so a
 bash script never reaches the policy); fdshell keeps the hint, the only
 observable that shows the option took effect.
 
+### Prompt-time expansion
+
+A prompt is expanded **after** its escape decoding — bash's PROMPTING order — by
+**parameter expansion**, **command substitution**, **arithmetic expansion** and
+**quote removal**, and the whole stage is gated by the `promptvars` shell option,
+which is **on** by default:
+
+```shell
+v=V
+PS1='[$v|${v}|$(echo hi)|`echo bt`|$((1+1))] '
+shopt -s promptvars   # default — draws [V|V|hi|bt|2]
+shopt -u promptvars   # draws [$v|${v}|$(echo hi)|`echo bt`|$((1+1))]
+```
+
+`PS1` and `PS2` both go through it. Only the run's own bytes are scanned, and
+only the **decoder's** products among them: a `\044` or an fdshell-only `\x24`
+decodes to a live `$` and expands, while a value provider's answer — `\a`'s bell,
+`\d`'s date, `\u`'s username — is pasted verbatim and never re-scanned, and the
+decoder's own escape `\$` is not a trigger (`\$v ` draws `$v `). `\` before
+`` $ ` " ' \ `` is a quote operator and loses its own byte; before anything else
+it keeps it.
+
+Nothing else expands here: **no tilde expansion**, **no pathname expansion**, **no
+field splitting** — `~ `, `* `, `a  b `, `a;b `, `a|b ` draw verbatim — and quote
+characters are **data**: they survive and they do not protect, so `"$v" ` draws
+`"V" `. `$*` joins with the first `IFS` byte and `$@` **space**-joins (`IFS=,`, two
+positionals, `[${*}|${@}] ` draws `[a,b|a b] `), and fdshell's own `%name` fires
+here too: `[a%CWD] ` draws the fd variable's number, where bash draws `%CWD`.
+
+A **failing** expansion — `set -u` and an unbound `[a$nope] `, an unclosed `$( `
+or `$(( ` — is reported on stderr, the prompt is drawn as its **unexpanded** text,
+and the shell keeps reading: a prompt can never end a session. The capture limit
+applies to a prompt's `$( … )` exactly as it does anywhere else (`MAX_CAPTURED`,
+`set --stdout-capture-limit`); in the prompt path an over-cap substitution follows
+the same rule, report and keep prompting.
+
+The cost is one **fork per prompt drawn** for every `$( … )` or backtick in a
+prompt — arithmetic and parameters stay in-process — so a prompt with a command
+substitution forks each time it is drawn. Keeping those resident is epic #199's
+question; epic #198's width math reads the **expanded** record, since the bytes
+drawn are the expanded ones.
+
 ## Strict mode
 
 The `strict` shell option (off by default) turns fdshell into a capability

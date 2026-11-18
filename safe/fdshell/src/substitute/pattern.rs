@@ -24,7 +24,7 @@ use crate::state::ShellState;
 use super::Join;
 use super::arg::substitute_arg_marked;
 use super::split::split_word;
-use super::surface::PercentArm;
+use super::surface::{PercentArm, TildeArm};
 
 /// One `case` pattern clause element as the `(pattern text, parallel mask)`
 /// `glob::match_component` matches with. The expanded text is cut on the
@@ -45,6 +45,7 @@ pub(crate) fn word(
         spans,
         Join::Pattern,
         PercentArm::Fires,
+        TildeArm::Fires,
         cache,
         cell,
     )?;

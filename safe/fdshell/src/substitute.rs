@@ -25,7 +25,7 @@ pub use words::substitute_args;
 
 pub(crate) use fields::word_fields;
 pub(crate) use join::Join;
-pub(crate) use surface::PercentArm;
+pub(crate) use surface::{PercentArm, TildeArm};
 
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -51,9 +51,48 @@ pub(crate) fn substitute_arg(
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<(ShortCStr, Vec<MaskBit>), Report<ResolveError>> {
-    let (out, out_mask, _origin) =
-        arg::substitute_arg_marked(arg, mask, spans, Join::Args, PercentArm::Fires, cache, cell)?;
+    let (out, out_mask, _origin) = arg::substitute_arg_marked(
+        arg,
+        mask,
+        spans,
+        Join::Args,
+        PercentArm::Fires,
+        TildeArm::Fires,
+        cache,
+        cell,
+    )?;
     Ok((out, out_mask))
+}
+
+/// The **prompt** surface's entry point (task #620), the prompt renderer's only
+/// caller: one literal run of the decoded prompt, expanded by parameter
+/// expansion, command substitution, arithmetic expansion and quote removal —
+/// and nothing else. No tilde arm (measured: `PS1='~ '` draws `~ `), no field
+/// splitting, no pathname expansion, quote characters as literal data; the
+/// grammar is recorded in `repl/prompt/render/expand.rs`. `mask` is the run's
+/// own mask — every byte unquoted, since nothing here was tokenized and no quote
+/// protects — except the bits the surface's grammar routes to another arm
+/// (expand.rs states which). `spans` is empty: a zero-byte quote span is the
+/// tokenizer's, and this surface has none. The output mask and provenance come
+/// back unused because nothing splits or globs the text; `Join::Pattern` is the
+/// one join mode reproducing the prompt's measured `$@`/`$*` rows (D-620-6).
+pub(crate) fn substitute_prompt_run(
+    run: &ShortCStr,
+    mask: &[MaskBit],
+    cell: &ForkCell<ShellState>,
+) -> Result<ShortCStr, Report<ResolveError>> {
+    let mut cache = HashMap::new();
+    let (out, _out_mask, _origin) = arg::substitute_arg_marked(
+        run,
+        mask,
+        &[],
+        Join::Pattern,
+        PercentArm::Fires,
+        TildeArm::Off,
+        &mut cache,
+        cell,
+    )?;
+    Ok(out)
 }
 
 pub(crate) fn borrow_state(
