@@ -1457,6 +1457,23 @@ fn the_home_hop_draws_a_tilde() {
     assert!(tty.contains("[~][~]"), "pty: {tty:?}");
 }
 
+/// The `unset HOME` half of D-619-4: `unset` clears the inherited `environ`
+/// row as well as the store (LESSONS: "A parse-level keyword inherits an
+/// operand grammar — check the grammar you inherit"), so the shell's `HOME`
+/// lookup answers `None` and the abbreviation is dropped — byte-identical to
+/// bash 5.3.9 measured on 2026-11-18: `[~][~]` while `HOME` is `/tmp`,
+/// `[/tmp][tmp]` after the `unset`. The unit row
+/// `value/cwd/tests.rs::an_absent_home_drops_the_abbreviation` is the other
+/// half. `HOME=/tmp` is assigned in-session so the row is deterministic on a
+/// sandbox with no `HOME`, and `/tmp` exists on both sides.
+#[test]
+fn unset_home_drops_the_abbreviation() {
+    let (tty, code) = run_tty_ps1(r"[\w][\W]", "HOME=/tmp\ncd /tmp\nunset HOME\nexit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[~][~]").count(), 1, "pty: {tty:?}");
+    assert_eq!(tty.matches("[/tmp][tmp]").count(), 1, "pty: {tty:?}");
+}
+
 /// `PROMPT_DIRTRIM` on `/proc/1` (two components): the plain rule trims at
 /// `components > n`, so n=1 **does** trim — the measured row is `[.../1][1]`,
 /// bash-identical (a one-component `/tmp` here cannot trim: count == n,

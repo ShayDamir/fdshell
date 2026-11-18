@@ -105,6 +105,35 @@ fn the_home_prefix_becomes_a_tilde() {
 }
 
 #[test]
+fn an_absent_home_drops_the_abbreviation() {
+    // D-619-4's `HOME`-absent half, and the row that keeps the `None` arm of
+    // `tilde_rest` alive: `unset HOME` clears the inherited `environ` row as
+    // well as the string table (`state/setters/vars.rs`, LESSONS #290), so
+    // `var_value(HOME)` answers `None`, the abbreviation is off, and both
+    // shells draw the plain path and basename — measured byte-identical
+    // (`[/home/damir/rust][rust]` on both sides, bash 5.3.9, 2026-11-18).
+    // The pty row `tests/repl.rs::unset_home_drops_the_abbreviation` is the
+    // end-to-end half.
+    let cell = seeded(Origin::File(c"/home/test/rust".into()), None);
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.unset_var(&c"HOME".into());
+    }
+    assert_eq!(
+        answers(&cell),
+        (Some(b"/home/test/rust".to_vec()), Some(b"rust".to_vec()))
+    );
+    // The store row the `seeded` helper writes is what makes the same origin
+    // abbreviate, so the assertion above measures the name's *absence* and not
+    // a `HOME` leaking in from the process environment.
+    let cell = seeded(Origin::File(c"/home/test/rust".into()), None);
+    assert_eq!(
+        answers(&cell),
+        (Some(b"~/rust".to_vec()), Some(b"rust".to_vec()))
+    );
+}
+
+#[test]
 fn an_env_var_origin_answers_only_home() {
     // D-619-2: `EnvVar(HOME)` answers `~` — the two interactive routes `cd ~`
     // and `cd ~/x` land on bash parity; any other name names no path and

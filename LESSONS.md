@@ -11959,8 +11959,12 @@ what the rule refuses. The divergence is recorded for #623.
 The display rules measured off bash 5.3.9 (2026-11-18) and pinned as fdshell's
 own answer: the `~` abbreviation applies when the path **is** `$HOME` or starts
 with `$HOME/`, through the shell's own `var_value` lookup (the same one `$HOME`
-and `~` use, LESSONS #282 — so after `unset HOME`, fdshell still abbreviates
-and bash does not: pinned divergence); a relative origin displays as typed
+and `~` use, LESSONS #282). A shell with no `HOME` has no abbreviation, and
+there fdshell **agrees** with bash: `unset HOME` clears the startup `environ`
+snapshot as well as the string table (LESSONS: "A parse-level keyword inherits
+an operand grammar"), so the lookup answers `None` and both shells draw the
+plain path and basename — measured byte-identical (`[/home/damir/rust][rust]`
+on both sides); a relative origin displays as typed
 (D-619-3); separators collapse before anything is counted or drawn
 (D-619-7); and no dirstack means the `+`/`-` prefix never appears (D-619-8).
 The provider makes **no** syscall — every source is a `ShellState` read
@@ -11971,12 +11975,14 @@ for its three state reads; say so in the module doc, do not re-litigate them.
 Pins: `safe/fdshell/src/repl/prompt/value/cwd/tests.rs`
 (`a_path_origin_draws_the_origin_itself`,
 `a_relative_origin_draws_what_was_typed`,
-`the_home_prefix_becomes_a_tilde`, `an_env_var_origin_answers_only_home`,
+`the_home_prefix_becomes_a_tilde`, `an_absent_home_drops_the_abbreviation`,
+`an_env_var_origin_answers_only_home`,
 `an_origin_without_a_path_answers_no_value`,
 `no_dirstack_means_no_plus_or_minus_prefix`) and the pty rows
 `safe/fdshell/tests/repl.rs::the_working_directory_escape_draws_the_provenance`,
 `safe/fdshell/tests/repl.rs::an_origin_without_a_path_draws_the_escape_text`,
-`safe/fdshell/tests/repl.rs::the_home_hop_draws_a_tilde`, plus the D2-through-
+`safe/fdshell/tests/repl.rs::the_home_hop_draws_a_tilde`,
+`safe/fdshell/tests/repl.rs::unset_home_drops_the_abbreviation`, plus the D2-through-
 `resolve` row `safe/fdshell/src/repl/prompt/tests.rs`.
 
 ## `PROMPT_DIRTRIM`'s ellipsis has two thresholds (task #619)

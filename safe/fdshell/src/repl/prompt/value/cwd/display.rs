@@ -63,9 +63,12 @@ fn origin_path<'s>(origin: &'s Origin, state: &'s ShellState) -> Option<&'s Shor
 }
 
 /// The `~` branch's remainder: `Some` when the path **is** `$HOME` (bash draws
-/// `~` alone there — measured `[~][~]`) or starts with `$HOME/`. D-619-4
-/// divergences pinned in `cwd/tests.rs`: after `unset HOME` bash drops the
-/// abbreviation while fdshell still sees `HOME` through the startup snapshot.
+/// `~` alone there — measured `[~][~]`) or starts with `$HOME/`. D-619-4: a
+/// shell with no `HOME` has no abbreviation — `unset HOME` clears the startup
+/// `environ` row as well as the string table (LESSONS #290), so the lookup
+/// answers `None` and **both** shells draw the plain path (measured
+/// byte-identical, 2026-11-18). Pinned in `cwd/tests.rs` and by the pty row
+/// `tests/repl.rs::unset_home_drops_the_abbreviation`.
 fn tilde_rest<'a>(path: &'a [u8], home: Option<&ShortCStr>) -> Option<&'a [u8]> {
     let home = home?.as_bytes().ok()?;
     if path == home {
