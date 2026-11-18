@@ -97,16 +97,15 @@ fn saved_copy_fd(orig: &String, target: i32, path: &String, cell: &ForkCell<Shel
     copy
 }
 
-/// POSIX #2.4 on the parent-side handler: the scope's saved copy **is** a
-/// script-nameable fd, so a function body can close it and the parent's
-/// `scope.restore()?` (`run/parent.rs:40`) fails the command. Measured in the
-/// shell binary with strace for the `f(){ :; }; f >copy_probe` case: the copy of
-/// fd 1 lands at fd 6 (`fcntl(1, F_DUPFD_CLOEXEC, 2) = 6`), and
-/// `fdshell -c 'f(){ echo ok; exec 6>&-; }; f >q'` reports rc 1 with the
-/// two-frame `redirection failed` + `EBADF` at `redirect/scope.rs:60`, while the
-/// control `f(){ echo ok; }; f >q` is rc 0. bash 5.3.9 gives rc 0 for the same
-/// script: its `-c` fd table is 0-2,3 and its save sits at fd >= 10, outside the
-/// script-visible range. The floor that makes the copy unreachable is task #184.
+/// POSIX #2.4 on the parent-side handler: closing the scope's saved copy in a
+/// function body fails the parent's `scope.restore()?` (`run/parent.rs`). This is the
+/// proof of the **mechanism**, so the copy fd is measured (`saved_copy_fd`), never
+/// hardcoded: a script cannot name it any more — every fd the shell allocates for
+/// itself sits at or above `MIN_SHELL_FD`, out of the script-visible range, and the
+/// script-level pin of that floor is
+/// `tests/redirect_scope.rs::body_that_closes_the_saved_copy_above_the_floor_fails_the_restore`
+/// — but a test can reach it and pin the report shape. The control
+/// `f(){ echo ok; }; f 9> target` is rc 0.
 #[test]
 fn body_that_closes_the_saved_copy_fails_the_command() {
     let (orig, _so) = temp_path("orig");

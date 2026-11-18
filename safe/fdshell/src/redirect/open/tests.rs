@@ -13,7 +13,9 @@ use sys::fork_cell::ForkCell;
 use crate::error::redirect::OpenRedirectError;
 use crate::mask::MaskBit::Unquoted;
 use crate::options::{NOCLOBBER, STRICT};
-use crate::redirect::{RedirectDef, RedirectDirection, RedirectSource, open_redirect_files};
+use crate::redirect::{
+    MIN_SHELL_FD, RedirectDef, RedirectDirection, RedirectSource, open_redirect_files,
+};
 use crate::state::ShellState;
 use sys::fcntl::{O_DIRECTORY, O_RDONLY};
 use sys::pipe::pipe2;
@@ -129,8 +131,11 @@ fn combined_def(path: &str) -> RedirectDef {
 }
 
 /// The single-open pin: one `combined` def yields **one** opened fd, above
-/// every target of the command, and the path is opened exactly once (fd 2 is
-/// fed by a clone of that fd in `resolve`, not by a second open).
+/// every target of the command **and** at or above the shell's fd floor, and the
+/// path is opened exactly once (fd 2 is fed by a clone of that fd in `resolve`,
+/// not by a second open). The def's highest target is fd 2, so the number here is
+/// the floor's, not the anti-clobber minimum's: deleting the floor lands the open
+/// at fd 3 and fails this pin.
 #[test]
 fn combined_def_opens_the_path_once() {
     let (dir, _scratch) = scratch();
@@ -143,8 +148,8 @@ fn combined_def_opens_the_path_once() {
         "one operator, one open: fd 2 is a clone, not a second open"
     );
     assert!(
-        fds.first().unwrap().fd.as_ref().unwrap().as_raw() >= 3,
-        "the open sits above the def's highest target (fd 2)",
+        fds.first().unwrap().fd.as_ref().unwrap().as_raw() >= MIN_SHELL_FD,
+        "the open sits above the def's highest target (fd 2) and the floor",
     );
 }
 

@@ -12,7 +12,7 @@ use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedFd, LocalFd};
 
-use super::RedirectDef;
+use super::{MIN_SHELL_FD, RedirectDef};
 
 /// The target fds of one command's redirections, saved in apply order.
 pub struct Scope {
@@ -30,8 +30,12 @@ impl Scope {
     ///
     /// A saved copy is allocated strictly above every target of the command, so
     /// no `dup2` of a later redirection can clobber it; a closed target records
-    /// `None` because `EBADF` is not an error the user can fix (§4.12). Saving
-    /// rides the apply loop rather than pre-passing over the whole list, and
+    /// `None` because `EBADF` is not an error the user can fix (§4.12). The minimum
+    /// never goes below [`MIN_SHELL_FD`], so the copy sits above the range a script
+    /// can name — as bash's does — and no `exec N>&-` in a body can close it: the
+    /// parent-level `restore` failure is unconstructible from a script
+    /// (`scope/tests.rs::saved_copy_lands_above_the_shell_fd_floor`). Saving rides
+    /// the apply loop rather than pre-passing over the whole list, and
     /// that stays sound under the fd-state resolution: for a fd touched by
     /// several redirections the **first** save of that fd precedes its first
     /// export, so the shell's original value is the earliest copy and
@@ -45,9 +49,11 @@ impl Scope {
             super::open_redirect_files(redirects, cell).change_context(CmdError::Redirect)?;
         let resolved = super::resolve_redirects(redirects, &opened, &[], cell)
             .change_context(CmdError::Redirect)?;
-        let min_fd = RedirectDef::max_target(redirects)
-            .checked_add(1)
-            .ok_or(CmdError::Redirect)?;
+        let min_fd = MIN_SHELL_FD.max(
+            RedirectDef::max_target(redirects)
+                .checked_add(1)
+                .ok_or(CmdError::Redirect)?,
+        );
         let mut saved = Vec::new();
         for r in &resolved {
             let target = r.target();

@@ -23,6 +23,12 @@ use sys::LocalFd;
 
 use crate::error::redirect::OpenRedirectError;
 
+/// The lowest fd number fdshell allocates for itself: bash keeps its own redirect
+/// bookkeeping at fd >= 10, out of the range a script can name, so no `exec N>&-`
+/// can close a saved copy or a source clone. The anti-clobber rule
+/// (`max_target + 1`) still raises this floor for commands that name high fds.
+pub(crate) const MIN_SHELL_FD: i32 = 10;
+
 /// A resolved redirection: either a local fd to dup2 onto `export_to`,
 /// or a request to close `export_to` (`N>&-`).
 pub enum Redirect {

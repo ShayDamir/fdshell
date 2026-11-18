@@ -362,6 +362,12 @@ stage's own pipe ends are part of that state before the stage's redirections
 run, so `cat missing 2>&1 | cat > g` puts the message into the pipe, and
 `cat missing > f 2>&1 | cat > g` puts it in `f`.
 
+The fds fdshell allocates for a command — the saved copies of the redirected
+descriptors and the clones of the sources — start at fd **10**, above the range a
+script can name, as bash keeps its own bookkeeping. So a script cannot close one
+of the shell's own fds with `exec N>&-`: the redirections are always undone when
+the command ends.
+
 The target of `>` can also be `%var` (an fd variable), `/dev/fd/N` (the file
 that open fd `N` points at — the magic path is **opened** with the operator's
 flags as the redirection runs, so `> /dev/fd/1` truncates the file stdout is on

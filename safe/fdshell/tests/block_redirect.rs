@@ -6,7 +6,7 @@
 //! `{ …; } > f` already implements, and every expectation below is bash 5.3.9's
 //! own output for the same script — except the rows that name their owner task
 //! (the rc-convention family #179, the word-behind-the-closer family #405, the
-//! saved-copy floor #184). Task **#408** landed the
+//! close-of-an-already-closed-fd family #613). Task **#408** landed the
 //! here-doc / here-string half of the same tail; its matrix is
 //! `a_here_doc_or_here_string_on_a_closer_feeds_the_block`. Task **#409** landed
 //! the `&>` family; its matrix is
@@ -777,11 +777,12 @@ fn the_pinned_divergences_behind_a_closer() {
     );
 }
 
-/// The saved copy is a script-nameable fd, so a body that closes it fails the
-/// restore at rc 1: the block twin of
-/// `tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call`,
-/// whose floor fix is owned by **#184** (bash: rc 0). The body's output is
-/// already in the file when the restore fails.
+/// The body's `exec 6>&-` closes a fd the script never had: with every fd the shell
+/// allocates for itself floored at `MIN_SHELL_FD`, no saved copy sits at fd 6, so the
+/// failure is the close's own. The block twin of
+/// `tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call`. bash
+/// 5.3.9 is silent at rc 0 with `f` = `a\n` — the close-of-an-already-closed-fd rule
+/// **#613** owns it. The body's output is already in the file when the run ends.
 #[test]
 fn a_body_that_closes_the_saved_copy_fails_the_block() {
     let dir = Scratch::new();
@@ -796,12 +797,12 @@ fn a_body_that_closes_the_saved_copy_fails_the_block() {
     assert_eq!(file(&dir, "f"), Some(b"a\n".to_vec()));
 }
 
-/// The same floor with the close **in the tail** (`done > f 6>&-`): the scope
-/// cannot close a saved copy the script never had, so the block fails at
-/// status 1 and the shell continues now (task #179) — `tail` prints and the
-/// failed open rolls back, leaving the target created empty. bash gives rc 0
-/// with `tail` printed and the block's output in `f`, no message; the owner of
-/// the floor (a script-nameable fd 6 is the saved copy) is **#184**.
+/// The same close **in the tail** (`done > f 6>&-`), on a fd the script never had
+/// (the shell's own fds sit at or above `MIN_SHELL_FD`): the close fails at the
+/// def's own arm, so the block fails at status 1 and the shell continues now (task
+/// #179) — `tail` prints and the failed open rolls back, leaving the target created
+/// empty. bash gives rc 0 with `tail` printed and the block's output in `f`, no
+/// message — the close-of-an-already-closed-fd rule **#613** owns it.
 #[test]
 fn a_tail_that_closes_the_saved_copy_fails_the_block() {
     let dir = Scratch::new();

@@ -19,6 +19,32 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
+/// Run with every fd in `fds` **closed from the start**: `sh` closes them before
+/// `exec`-ing fdshell, so the fd table the child sees — and therefore which fd a
+/// redirect's saved copy lands on — is deterministic whatever the harness
+/// inherited.
+///
+/// LESSONS: "A pin that asserts "the parent's fd N is closed" must close it in the child's start state (task #276)"
+fn run_fds_closed(fds: &[u32], script: &str) -> (String, String, i32) {
+    let mut cmd = String::new();
+    for fd in fds {
+        cmd.push_str(&format!("exec {fd}>&-; "));
+    }
+    cmd.push_str(r#"exec "$0" -c "$1""#);
+    let output = Command::new("sh")
+        .args(["-c", &cmd, BIN, script])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        str::from_utf8(&output.stderr).unwrap().to_string(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// A per-test scratch dir (pid + counter), removed on drop. pid + counter is
@@ -270,31 +296,79 @@ fn closed_fd_redirect_is_restored_after_the_call() {
     assert_eq!(body(&a), "x\n");
 }
 
-/// The scope's saved copy is a script-nameable fd, so a body can close it and
-/// the parent's `scope.restore()?` (`run/parent.rs:40`) fails the command.
-/// Measured with strace: `f(){ :; }; f >copy_probe` saves fd 1 with
-/// `fcntl(1, F_DUPFD_CLOEXEC, 2) = 6` — the copy lands at fd 6, inside the
-/// range a script can name. So `f(){ echo ok; exec 6>&-; }; f >q` restores with
-/// no source: rc 1, a two-frame `redirection failed` + `EBADF` at
-/// `redirect/scope.rs:60` (no `redirect.rs:48` middle frame, so the EBADF is the
-/// restore's `dup2`, not the `exec`'s own close), and `q` holds the body. bash
-/// 5.3.9 gives rc 0 for the same script: its `-c` fd table is 0-2,3 and its save
-/// is at fd >= 10, outside the script-visible range. The fd floor that makes the
-/// copy unreachable is task #184; until then this rc-1 divergence is accepted.
+/// The saved copy sits **above the range a script can name** (`MIN_SHELL_FD`, as
+/// bash keeps its own bookkeeping), so `f(){ echo ok; exec 6>&-; }; f >q` no longer
+/// closes the shell's copy: fd 6 is a never-opened fd, so the failure is the
+/// `exec`'s **own** close — the report gains the `failed to close redirection target
+/// fd 6` middle frame — the body's command fails, the function returns 1, the shell
+/// **continues**, the restore succeeds and the next command's stdout works. bash
+/// 5.3.9 runs both rows silently at rc 0; the report — the close of an
+/// already-closed fd — is the rule **#613** owns. fd 6 is closed in the child's start
+/// state so the fd table is deterministic (LESSONS, task #276); the unit twin that
+/// measures the copy fd is
+/// `run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command`.
 #[test]
 fn body_that_closes_the_saved_copy_fails_the_call() {
     let (a, _sa) = temp_path("lost_save_a");
-    let (out, err, code) = run(&format!("f(){{ echo ok; exec 6>&-; }}; f > {a}"));
+    let (out, err, code) = run_fds_closed(
+        &[6],
+        &format!("f(){{ echo ok; exec 6>&-; }}; f > {a}; echo after"),
+    );
+    assert_eq!(
+        code, 0,
+        "the shell continues after the failed command: stderr={err:?}"
+    );
+    assert_eq!(out, "after\n", "stdout is back for the next command");
+    assert_eq!(body(&a), "ok\n", "the body ran under the redirection");
+    assert!(
+        err.contains("failed to close redirection target fd 6"),
+        "the report names the fd the exec could not close: stderr={err:?}"
+    );
+
+    let (b, _sb) = temp_path("lost_save_b");
+    let (out, err, code) = run_fds_closed(&[6], &format!("f(){{ echo ok; exec 6>&-; }}; f > {b}"));
     assert_eq!(
         code, 1,
-        "the restore failure fails the command; stderr={err:?}"
+        "the failed close fails the command; stderr={err:?}"
     );
     assert_eq!(out, "");
     assert!(
-        err.contains("redirection failed"),
-        "the report is the redirect error: stderr={err:?}"
+        err.contains("redirection failed")
+            && err.contains("failed to close redirection target fd 6"),
+        "the close arm, not the restore: stderr={err:?}"
     );
-    assert_eq!(body(&a), "ok\n", "the body ran under the redirection");
+    assert_eq!(body(&b), "ok\n", "the body ran under the redirection");
+}
+
+/// The floor seen from a script: with fds 3-9 closed in the child's start state,
+/// `f > a` spends fd 10 on the target's fresh open, fd 11 on the resolved source
+/// clone and fd **12** on the saved copy of stdout (strace: `fcntl(4,
+/// F_DUPFD_CLOEXEC, 10) = 10`, `fcntl(10, F_DUPFD_CLOEXEC, 10) = 11`, `fcntl(1,
+/// F_DUPFD_CLOEXEC, 10) = 12`). Closing fd 6 — below the floor — cannot reach any of
+/// them (`body_that_closes_the_saved_copy_fails_the_call`); closing fd 12 closes the
+/// copy the parent's restore needs, so the close itself succeeds, the restore fails
+/// with the two-context report (**no** `failed to close redirection target fd N`
+/// middle frame) and the run ends at rc 1. bash 5.3.9 keeps its own bookkeeping
+/// above the script-visible range too: rc 0, no message, and the `echo`'s `rc=0`
+/// lands on stdout.
+#[test]
+fn body_that_closes_the_saved_copy_above_the_floor_fails_the_restore() {
+    let (a, _sa) = temp_path("floor_save_a");
+    let (out, err, code) = run_fds_closed(
+        &[3, 4, 5, 6, 7, 8, 9],
+        &format!("f(){{ exec 12>&-; }}; f > {a}; echo rc=$?"),
+    );
+    assert_eq!(code, 1, "the restore failure ends the run: stderr={err:?}");
+    assert_eq!(out, "", "the `echo` never ran");
+    assert_eq!(body(&a), "", "the body wrote nothing under the redirection");
+    assert!(
+        err.contains("redirection failed") && err.contains("Bad file descriptor"),
+        "the restore's report: stderr={err:?}"
+    );
+    assert!(
+        !err.contains("failed to close redirection target"),
+        "fd 12 was the copy: the close succeeded, its loss is the restore's problem: stderr={err:?}"
+    );
 }
 
 /// A failing redirection open fails the command before its handler runs: the

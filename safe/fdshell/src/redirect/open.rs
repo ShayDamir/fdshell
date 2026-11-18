@@ -7,7 +7,7 @@ mod target;
 
 use noclobber::Decision;
 
-use super::{RedirectDef, RedirectSource};
+use super::{MIN_SHELL_FD, RedirectDef, RedirectSource};
 use crate::error::redirect::OpenRedirectError;
 use crate::redirect::OpenedTarget;
 use crate::state::ShellState;
@@ -35,9 +35,11 @@ pub fn open_redirect_files(
         let state = cell.borrow().change_context(OpenRedirectError::Never)?;
         state.option_on(crate::options::NOCLOBBER)
     };
-    let min_fd = RedirectDef::max_target(redirects)
-        .checked_add(1)
-        .ok_or(OpenRedirectError::FdNumberOutOfRange)?;
+    let min_fd = MIN_SHELL_FD.max(
+        RedirectDef::max_target(redirects)
+            .checked_add(1)
+            .ok_or(OpenRedirectError::FdNumberOutOfRange)?,
+    );
     let mut fds = Vec::new();
     // One `%fd` cache per open call: the target word runs through the
     // substitution pipeline, whose `%name` arm looks fds up in a cache exactly
@@ -94,8 +96,9 @@ fn open_redirect(
     }
     let opened = cwd::open(r, &name, decision)?;
     // Re-home the freshly opened fd above every redirect target of this
-    // command: a `dup2` of another redirect must never clobber the open
-    // fd and then have this descriptor's drop close the target.
+    // command (and above the floor): a `dup2` of another redirect must never
+    // clobber the open fd and then have this descriptor's drop close the
+    // target.
     let rehomed = opened
         .try_clone_above(min_fd)
         .change_context(OpenRedirectError::Open)?;

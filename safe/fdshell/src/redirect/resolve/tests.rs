@@ -877,3 +877,28 @@ fn a_magic_def_opens_through_the_fd_an_earlier_def_left() {
         "the magic def's open went through the table's answer for fd 3"
     );
 }
+
+/// The floor pin for the resolve pass: this command's highest target is fd 1, so
+/// the anti-clobber minimum is `2` and the source clone sits at `MIN_SHELL_FD`
+/// **only** because of the floor — every fd the shell allocates for itself stays
+/// out of the range a script can name, so no `exec N>&-` in the command's own list
+/// can close a source. Deleting the floor lands the clone on the lowest free fd
+/// (below the floor) and fails this pin; the existing `>= 4` / `> 5` assertions are
+/// true either way and are not the pin.
+#[test]
+fn resolved_source_lands_above_the_shell_fd_floor() {
+    let c = cell();
+    let (path, _scratch) = temp_path("floor_source");
+    let src = vec![opened_target(&path)];
+    let redirects = vec![RedirectDef::write_path(1, cstr(&path))];
+    let resolved = resolve_redirects(&redirects, &src, &[], &c).unwrap();
+    let source = dup_of(resolved.first().unwrap());
+    assert!(
+        source.as_raw() >= MIN_SHELL_FD,
+        "the source clone sits at fd {}, inside the range a script can name",
+        source.as_raw()
+    );
+    source.write_all(b"x").unwrap();
+    drop(resolved);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "x");
+}

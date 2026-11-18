@@ -371,10 +371,12 @@ fn restore_of_a_lost_saved_copy_is_a_redirect_error() {
 
 #[test]
 fn saved_copy_survives_a_later_dup2() {
-    // Closing fd 2 leaves a hole below `min_fd` (max target 2 + 1 = 3). A plain
-    // `dup_cloexec` save would land the copy of fd 1 in that hole, and the
-    // `2>&1` `dup2` — which closes fd 2 — would clobber it, so the restore would
-    // put the wrong fd back on stdout. Saving above every target keeps it safe.
+    // Closing fd 2 leaves a hole below `min_fd`. A plain `dup_cloexec` save would
+    // land the copy of fd 1 in that hole, and the `2>&1` `dup2` — which closes fd
+    // 2 — would clobber it, so the restore would put the wrong fd back on stdout.
+    // Saving above every target keeps it safe; with the floor the *binding*
+    // minimum here is the floor (`MIN_SHELL_FD`), so the fold above the floor is
+    // pinned by `saved_copy_above_the_floor_survives_a_lower_target_dup2`.
     let _ = sys::dup::close(2);
     let (a, _sa) = temp_path("dup_a");
     let before = link(1);
@@ -399,6 +401,90 @@ fn saved_copy_survives_a_later_dup2() {
     // Give the harness a stderr again so a failure below is reportable.
     open_at(&"/dev/null".to_string(), 2);
     assert_eq!(body(&a), "x");
+}
+
+/// A fresh `/dev/null` for the fd-table pins below (kept alive by the caller).
+fn open_dev_null() -> LocalFd {
+    sys::openat2::open(c"/dev/null", sys::fcntl::O_RDONLY).unwrap()
+}
+
+/// The floor pin: this command's only target is fd 1, so the anti-clobber minimum
+/// is `2` and the copy sits at `MIN_SHELL_FD` **only** because of the floor — out
+/// of the range a script can name, which is what makes the parent-level `restore`
+/// failure unconstructible from a script. Deleting the floor lands the copy on the
+/// lowest free fd (a slot below the floor) and fails this pin;
+/// `saved_copy_above_the_floor_survives_a_lower_target_dup2` keeps the fold
+/// observable above the floor.
+#[test]
+fn saved_copy_lands_above_the_shell_fd_floor() {
+    let (a, _sa) = temp_path("floor_copy");
+    let cell = cell();
+    let scope = Scope::open(&[RedirectDef::write_path(1, cstr(&a))], &cell).unwrap();
+    let copy = scope.saved.first().unwrap().1.as_ref().unwrap().as_raw();
+    assert!(
+        copy >= MIN_SHELL_FD,
+        "the saved copy sits at fd {copy}, inside the range a script can name"
+    );
+    scope.restore().unwrap();
+    assert_eq!(body(&a), "");
+}
+
+/// The LESSONS rule "A command's fds must be saved above every redirect target of
+/// that command", pinned **above** the floor: the test fills the fd table below the
+/// floor with its own opens, so the hole the second def's `dup2` closes is the lowest
+/// free fd and the binding minimum is `max_target + 1` — the write target's fd plus
+/// one — not the floor. A save that used the lowest free fd — the plain
+/// `dup_cloexec`, or the floor alone — lands the copy in that hole, the `dup2` closes
+/// it, and the restore puts the file back on `target` instead of `/dev/null`.
+#[test]
+fn saved_copy_above_the_floor_survives_a_lower_target_dup2() {
+    let mut fill: Vec<LocalFd> = Vec::new();
+    while fill.last().map(|f| f.as_raw()).unwrap_or(0) < MIN_SHELL_FD - 1 {
+        fill.push(open_dev_null());
+    }
+    let probe = open_dev_null();
+    let hole = probe.as_raw();
+    let target_fd = hole + 1;
+    // The second def's target is a hole when the scope opens, so its save is
+    // `None` and its `dup2` closes whatever the *first* def's save landed on.
+    drop(probe);
+    // The save only copies shell fds, so the target is a plain (non-`CLOEXEC`) fd
+    // like `exec 9> file` leaves, one number above the hole so `max_target + 1` is
+    // the binding minimum.
+    open_at(&"/dev/null".to_string(), target_fd);
+    let (a, _sa) = temp_path("fold_above_floor");
+    let before = link(target_fd);
+    assert_eq!(
+        before,
+        std::path::Path::new("/dev/null"),
+        "the fd table is as built"
+    );
+    let cell = cell();
+    let scope = Scope::open(
+        &[
+            RedirectDef::write_path(target_fd, cstr(&a)),
+            RedirectDef::dup(hole, target_fd),
+        ],
+        &cell,
+    )
+    .unwrap();
+    assert_eq!(
+        link(target_fd),
+        std::path::Path::new(&a),
+        "the write applied"
+    );
+    assert_eq!(
+        link(hole),
+        std::path::Path::new(&a),
+        "the dup copies what the write installed"
+    );
+    scope.restore().unwrap();
+    assert_eq!(
+        link(target_fd),
+        before,
+        "the restore put `target` back on its original /dev/null"
+    );
+    assert_eq!(body(&a), "", "nothing was written through the scope");
 }
 
 /// The save/restore invariant under the fd-state resolution: a scope whose

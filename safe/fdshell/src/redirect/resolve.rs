@@ -5,7 +5,7 @@ mod fd_path;
 mod here;
 mod table;
 
-use super::{Redirect, RedirectDef};
+use super::{MIN_SHELL_FD, Redirect, RedirectDef};
 use crate::error::redirect::OpenRedirectError;
 use crate::redirect::OpenedTarget;
 use crate::state::ShellState;
@@ -36,10 +36,13 @@ pub fn resolve_redirects(
     let mut resolved = Vec::new();
     // Sources must be cloned above every target of this command, not just the
     // one they apply to: a later dup2 can otherwise clobber and then close an
-    // earlier redirect's target fd.
-    let min_fd = RedirectDef::max_target(redirects)
-        .checked_add(1)
-        .ok_or(OpenRedirectError::FdNumberOutOfRange)?;
+    // earlier redirect's target fd — and above the floor, so a source never sits
+    // in the range a script can name.
+    let min_fd = MIN_SHELL_FD.max(
+        RedirectDef::max_target(redirects)
+            .checked_add(1)
+            .ok_or(OpenRedirectError::FdNumberOutOfRange)?,
+    );
     for r in redirects {
         let (one, pair) = resolve_one(
             r,

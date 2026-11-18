@@ -4335,7 +4335,14 @@ can be a hole below a later target; the next `dup2` (e.g. `2>&1`) closes its
 target fd and clobbers the saved copy, so the restore resurrects the wrong fd.
 Fix: `try_dup_above(max_target + 1)` — the same rule the redirect sources
 already follow (`resolve_redirects`' `min_fd`). A closed target saves as
-`None`.
+`None`. Since task **#184** the minimum is `max(max_target + 1, 10)`: the floor
+swallows every target below fd 10, so the fold is only observable for a command
+that names an fd at or above it, and the pin for the fold is
+`redirect/scope/tests.rs::saved_copy_above_the_floor_survives_a_lower_target_dup2`
+(it fills the table below the floor with its own opens, so the hole the later
+`dup2` closes is the lowest free fd); the neighbouring
+`saved_copy_survives_a_later_dup2` now tests the floor, and
+`saved_copy_lands_above_the_shell_fd_floor` pins the floor alone.
 
 ## The redirect scope restores in reverse apply order, on every exit path
 The last redirection to a fd is its winner, so restoring forward leaves the
@@ -4350,26 +4357,31 @@ as `let _ =` (the handler's report is the actionable error). Pins, all through
 must land on the restored target, so a forward restore leaves the loser's file
 holding that write).
 
-**The saved copy is a script-nameable fd, so the parent-level restore failure is constructible.**
-For target fd 1 the copy lands at **fd 6**
-(`fcntl(1, F_DUPFD_CLOEXEC, 2) = 6`; nested scopes land 6 then 7), inside the
-script-visible range, where bash's save sits at fd >= 10. A body closes it
-with `exec 6>&-`, so the parent's `scope.restore()?` (`run/parent.rs:40`)
-fails: rc 1, `redirection failed` + `Bad file descriptor` (errno `EBADF`'s
-standard description), the two-frame `scope.rs:60` report with **no**
-`redirect.rs:48` middle frame. Pins:
-`run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command` (the
-copy fd measured by opening the same scope once) and
-`tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call`.
-Know the distinction a fd sweep misses: `exec 4>&-`, `5>&-` and `7..11>&-`
-also exit rc 1, but they fail at the `exec`'s **own** close
-(`become_cmd.rs:41` plus the middle frame
-`failed to close redirection target fd N` at `redirect.rs:48`), not at the
-restore — rc 1 alone does not identify the restore arm. The shell's `-c` fd
-table is `0,1,2,3,8,9`, not "0-2 plus its own CLOEXEC fds". The copy is
-script-nameable **today**; the fix that makes it unreachable is task **#184**
-(`min_fd = max(max_target + 1, 10)`), which owns the floor and its own
-README/LESSONS rewrite.
+**The saved copy sits above the range a script can name (fd >= 10, as bash's save
+does), so the parent-level restore failure is unconstructible: the copy is
+unreachable.** Task **#184** floored every fd the shell allocates for itself — the
+saved copies, the re-homed opens and the source clones — at fd 10. Before it, target
+fd 1's copy landed at **fd 6** (`fcntl(1, F_DUPFD_CLOEXEC, 2) = 6`; nested scopes
+landed 6 then 7), inside the script-visible range, and a body closed it with
+`exec 6>&-`, so the parent's `scope.restore()?` failed: rc 1, `redirection failed` +
+`Bad file descriptor` (errno `EBADF`'s standard description), the two-context report
+with **no** `failed to close redirection target fd N` middle frame. Pins:
+`run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command` (the copy fd
+measured by opening the same scope once, so it is the proof of the mechanism, not of a
+number), `tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call`
+(fd 6 closed in the child's start state: the close now fails at the `exec`'s **own**
+arm — the report gains the middle frame — the restore succeeds, the shell continues
+and the next command's stdout works; bash 5.3.9 runs it silently at rc 0, and the
+close-of-an-already-closed-fd rule that decides the message is **#613**'s) and its
+floor twin `tests/redirect_scope.rs::body_that_closes_the_saved_copy_above_the_floor_fails_the_restore`
+(with fds 3-9 closed in the child the open pass takes fd 10, the source clone 11 and
+the saved copy 12, so `exec 12>&-` closes the copy and the restore fails). Know the
+distinction a fd sweep misses: `exec 4>&-`, `5>&-` and `7..11>&-` also exit rc 1, but
+they fail at the `exec`'s **own** close (the report gains the middle
+`failed to close redirection target fd N` frame), not at the restore — rc 1 alone does
+not identify the restore arm. The shell's `-c` fd table is `0,1,2,3` plus whatever the
+harness left above it (the original strace saw `8,9`), not "0-2 plus its own CLOEXEC
+fds" — which is why fd 6 was nameable, and why the floor is 10.
 
 ## A test that hand-copies the implementation pins the copy, not the code
 Four `redirect/scope/tests.rs` pins copied `Scope::restore`'s loop by hand
