@@ -91,11 +91,36 @@ fn the_resolver_decodes_a_mechanical_escape() {
 
 #[test]
 fn a_value_escape_renders_as_its_literal_text() {
-    // Decision D2 through the shell's provider: an escape whose owner has no
-    // value yet answers `None` and draws its own text — here #618's `\t`. What
-    // keeps the D2 contract pinned now that #617's escapes answer real values
-    // (their own pins are in `value/shell/tests.rs`).
+    // Decision D2 through the composite: an escape whose owner has no value yet
+    // answers `None` and draws its own text — here #619's `\w`, the only escape
+    // left without an owner, so this row moves again when #619 lands. The
+    // permanent D2 pin is `render/tests.rs`'s `NoValues` row.
+    let cell = cell(true);
+    set(&cell, c"PS1", c"a\\wb");
+    assert_eq!(resolve(&cell, c"PS1", DEFAULT), br"a\wb");
+}
+
+#[test]
+fn the_resolver_answers_a_clock_escape() {
+    // Through the composite the resolver reaches the clock provider, and the
+    // machine's own clock rides into the value — so this row pins the shape
+    // (LESSONS: "A test that measures wall-clock under load cannot pin the
+    // number"); exact bytes are pinned at injected instants in
+    // `value/clock/tests.rs`.
     let cell = cell(true);
     set(&cell, c"PS1", c"a\\tb");
-    assert_eq!(resolve(&cell, c"PS1", DEFAULT), br"a\tb");
+    let out = resolve(&cell, c"PS1", DEFAULT);
+    let mid_ok = out.get(1..9).is_some_and(|mid| {
+        mid.iter().enumerate().all(|(i, &b)| {
+            if matches!(i, 2 | 5) {
+                b == b':'
+            } else {
+                b.is_ascii_digit()
+            }
+        })
+    });
+    assert!(
+        out.len() == 10 && out.starts_with(b"a") && out.ends_with(b"b") && mid_ok,
+        "aHH:MM:SSb: {out:?}"
+    );
 }

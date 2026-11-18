@@ -13,6 +13,8 @@ mod value;
 
 use decode::decode;
 use render::render;
+use value::clock::ClockValues;
+use value::composite::Providers;
 use value::shell::ShellValues;
 
 use alloc::vec::Vec;
@@ -28,9 +30,10 @@ use sys::fork_cell::ForkCell;
 /// unset (which is why the default is a read-time fallback and not a seeded
 /// `strings` row: seeding would erase the unset-vs-empty distinction), and
 /// nothing when it is not. The bytes are then decoded into the record
-/// (`decode.rs`) and rendered through the shell's value provider (`value.rs`'s
-/// seam): `\u \h \H \l \$ \s \v \V \j \! \#` answer real values (task #617), and
-/// the escapes #618 and #619 own still render as their literal text. bash
+/// (`decode.rs`) and rendered through the composite of the value providers
+/// (`value.rs`'s seam): `\u \h \H \l \$ \s \v \V \j \! \#` answer real values
+/// (task #617) and so do `\d \t \T \@ \A` through `clock.rs` (task #618), while
+/// the escapes #619 owns still render as their literal text. bash
 /// re-reads the variable for every prompt, so an assignment run as a command
 /// changes the *next* prompt. The bytes are owned and the borrow ends inside
 /// the block, before the caller's `write_all` syscall (LESSONS: never hold a
@@ -50,7 +53,9 @@ pub(crate) fn resolve(
             Some(value) => value.as_bytes().change_context(AppError::Never)?.to_vec(),
         }
     };
-    Ok(render(&decode(&drawn), &ShellValues::new(cell)))
+    let shell = ShellValues::new(cell);
+    let clock = ClockValues::new();
+    Ok(render(&decode(&drawn), &Providers::new(&shell, &clock)))
 }
 
 #[cfg(test)]

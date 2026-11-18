@@ -1334,6 +1334,88 @@ fn the_job_escape_counts_the_task_map() {
     assert_eq!(tty.matches("[1]").count(), 2, "pty: {tty:?}");
 }
 
+/// The row's hand-rolled shape predicates (no regex dev-dep): the exact byte
+/// pins live in the unit tests at injected instants; here the machine's own
+/// clock rides into every group (LESSONS).
+fn the_digits(s: &str, n: usize) -> bool {
+    s.len() == n && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn the_hhmm(s: &str) -> bool {
+    match s.split_once(':') {
+        Some((a, b)) => the_digits(a, 2) && the_digits(b, 2),
+        None => false,
+    }
+}
+
+fn the_hhmmss(s: &str) -> bool {
+    match s.split_once(':') {
+        Some((a, rest)) => the_digits(a, 2) && the_hhmm(rest),
+        None => false,
+    }
+}
+
+fn the_letters3(s: &str) -> bool {
+    s.len() == 3 && s.bytes().all(|b| b.is_ascii_alphabetic())
+}
+
+/// `%a %b %e`: three letters, space, three letters, then the space-padded day
+/// as 1–2 digits (`split_whitespace` folds the pad, which is what makes the
+/// single-digit-day spelling part of the shape).
+fn the_date_shape(s: &str) -> bool {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    match (parts.first(), parts.get(1), parts.get(2)) {
+        (Some(wd), Some(mo), Some(day)) if parts.len() == 3 => {
+            the_letters3(wd) && the_letters3(mo) && (the_digits(day, 1) || the_digits(day, 2))
+        }
+        _ => false,
+    }
+}
+
+/// The 12-hour hour of `\T` and `\@`: `01..09` or `10..12`.
+fn the_hour12(s: &str) -> bool {
+    matches!(s, "10" | "11" | "12")
+        || (s.starts_with('0')
+            && matches!(
+                s.get(1..2),
+                Some("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+            ))
+}
+
+fn the_ampm_shape(s: &str) -> bool {
+    match s.split_once(' ') {
+        Some((t, ap)) => the_hhmm(t) && matches!(ap, "AM" | "PM"),
+        None => false,
+    }
+}
+
+/// The clock escapes on a terminal, one row for the family (the #617 rows'
+/// one-rule posture). fdshell formats in UTC at the C locale, so the exact
+/// bytes depend on the machine's clock — and on bash's box, on its timezone —
+/// and this row can only pin shapes: `\d` is `%a %b %e` (space-padded `%e`),
+/// `\t` is 24-hour `\d\d:\d\d:\d\d`, `\T` the 12-hour spelling, `\@` is
+/// `\d\d:\d\d` + space + `AM|PM` (the space is in bash's format), `\A` is
+/// 24-hour `\d\d:\d\d` — all measured against bash 5.3.9 under `TZ=UTC
+/// LC_ALL=C`, and pinned byte-for-byte at injected instants in
+/// `value/clock/tests.rs`.
+#[test]
+fn the_clock_escapes_draw_their_shapes_on_a_terminal() {
+    let (tty, code) = run_tty_ps1(r"[\d] [\t] [\T] [\@] [\A] ", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    let groups: Vec<&str> = tty.split(['[', ']']).skip(1).step_by(2).collect();
+    assert_eq!(
+        groups.len(),
+        5,
+        "five bracketed groups in the one prompt: {tty:?}"
+    );
+    assert!(the_date_shape(groups.first().unwrap()), "\\d: {tty:?}");
+    assert!(the_hhmmss(groups.get(1).unwrap()), "\\t: {tty:?}");
+    let (hour, rest) = groups.get(2).unwrap().split_once(':').unwrap();
+    assert!(the_hour12(hour) && the_hhmm(rest), "\\T: {tty:?}");
+    assert!(the_ampm_shape(groups.get(3).unwrap()), "\\@: {tty:?}");
+    assert!(the_hhmm(groups.get(4).unwrap()), "\\A: {tty:?}");
+}
+
 /// The gate itself over a pipe (bash draws no prompt off-terminal, measured): a
 /// set `PS1`/`PS2` produce no prompt bytes at all, so stdout is the body alone.
 /// The pty rows above are the other half of the gate.

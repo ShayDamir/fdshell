@@ -201,8 +201,9 @@ fn the_counters_draw_the_number_the_command_gets() {
 
 #[test]
 fn the_sibling_owners_escapes_answer_no_value() {
-    // The seam's contract for #618 and #619: `None` here is what keeps their rows
-    // rendering literally through `resolve`.
+    // One provider, one family: this provider answers `None` for all seven.
+    // #618's clock escapes are answered now — by `clock.rs`'s own provider
+    // through the composition — and only #619's remain to render literally.
     let cell = cell(true);
     for esc in [
         ValueEscape::Date,

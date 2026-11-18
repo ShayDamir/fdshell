@@ -11908,3 +11908,31 @@ answers — `\u`, `\h`/`\H`, `\$`, the off-terminal `None`, `\s` through its set
 `safe/fdshell/tests/repl.rs::the_tty_escape_draws_the_last_component_of_its_path`,
 `safe/fdshell/tests/repl.rs::the_command_counter_counts_commands_and_no_blank_line`,
 `safe/fdshell/tests/repl.rs::the_job_escape_counts_the_task_map`.
+
+## The clock escapes pin fdshell's own answer because bash's is machine-dependent (task #618)
+
+bash's five clock formats are what bash *does*, not what the PROMPTING table
+says (measured against bash 5.3.9 on 2026-11-18): `\d` is `%a %b %e` with no
+time tail (the manual shows `+%a %b %e %H:%M:%S %Z %Y`), `\@` is `%I:%M %p`
+**with** the space (the manual says `%I:%M%p`), and `\t`/`\T` swap spellings
+against their manual lines — `\t` prints the 24-hour `%H:%M:%S`, `\T` the
+12-hour `%I:%M:%S`.
+
+bash formats these through glibc `strftime` after `localtime`, so the machine's
+timezone rides into every answer (on this box `TZ=UTC` bash differs from the
+box's own by the local offset, and `\d` can shift a whole day near midnight),
+and the locale rides in through `%p` (uppercase in `C`, lowercase under this
+box's `en_GB.UTF-8`). A `no_std` shell reaches neither tzdata nor locale
+tables, so fdshell formats in **UTC** at the **C locale** — byte-identical to
+what bash prints under `TZ=UTC LC_ALL=C`, and fdshell's own answer by
+definition. The consequence for tests is LESSONS: "A test that measures
+wall-clock under load cannot pin the number", applied to the value itself: exact
+bytes are pinnable only where the clock is injected — the unit rows pin exact
+strings through the provider's `fn()` clock field, and the end-to-end row pins
+shapes only, the posture LESSONS: "The value provider answers per escape, and a
+pty pin computes its expectation" already set for the machine's uid and hostname.
+
+Pins: `safe/fdshell/src/repl/prompt/value/clock/tests.rs` (the injected-instant
+table, UTC + C spelled), `safe/fdshell/src/repl/prompt/value/clock/civil/tests.rs`
+(the weekday anchor, the era and leap boundaries, 2038), and the pty row
+`safe/fdshell/tests/repl.rs::the_clock_escapes_draw_their_shapes_on_a_terminal`.
