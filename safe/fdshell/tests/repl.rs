@@ -1,20 +1,169 @@
 #![allow(clippy::unwrap_used)]
 
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::io::{Read, Write};
+use std::os::unix::io::AsRawFd;
+use std::process::{Child, Command, Stdio};
 use std::str;
+use std::time::{Duration, Instant};
+use sys::poll::{POLLIN, PollFd, poll};
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
-/// The prompt printed before every read. Pinned byte-for-byte: it is the
-/// counter the blank-line tests below use, so it pins one prompt per read.
-const PROMPT: &str = "fdshell> ";
+/// The prompt the REPL draws on a **terminal**: fdshell's own default, the
+/// bash 5.3.9 default `PS1` string printed verbatim (measured 2026-11-18;
+/// escape decoding is epic #197's #616, so the bytes are the raw string).
+/// Pinned byte-for-byte: it is the counter the pty rows below use, so they pin
+/// one prompt per read.
+const PROMPT: &str = "\\s-\\v\\$ ";
+
+/// The continuation prompt on a terminal: bash's `PS2` default, the string the
+/// pty rows count. It is fdshell's own since before epic #197, byte-identical.
+const CONT: &str = "> ";
 
 /// The `ignoreeof` hint printed at an ignored EOF (task #291).
 const HINT: &str = "use `exit' to leave";
 
+/// The bounded event a pty row decides on: the row's shell exiting (rows that
+/// end with `exit`), or `needle` landing on stdout while the shell is still
+/// alive (EOF rows, where the tty-default `ignoreeof` keeps the loop reading).
+/// A wall-clock budget instead of one of these is what makes a row load-flaky
+/// (LESSONS: "A mutant \"caught\" by a flaky test is a false kill — re-run the
+/// gate honestly after fixing the test").
+enum Event {
+    Exit,
+    Seen(&'static str),
+}
+
+/// The event loop's bound — the repo's documented one (`tests/ignoreeof.rs`):
+/// strictly under nextest's 10 s `slow-timeout`.
+const SETTLE: Duration = Duration::from_secs(5);
+
+/// The `poll` timeout, i.e. the event loop's cadence.
+const POLL_STEP_MS: i32 = 50;
+
+/// Bytes one poll-guarded read takes; prompt lines are far shorter.
+const CHUNK: usize = 1024;
+
+/// Poll std's own stdout pipe for [`POLL_STEP_MS`] and append what a
+/// poll-guarded read yields: readiness means data or EOF is available, so the
+/// read cannot block, and nothing is read after the event. The fd is std's own
+/// pipe, borrowed for one `poll`, so no fd-type rule is bent (STYLE §5.1).
+fn poll_into(child: &mut Child, observed: &mut Vec<u8>) {
+    let Some(pipe) = child.stdout.as_mut() else {
+        return;
+    };
+    let mut pfd = [PollFd::new(pipe.as_raw_fd(), POLLIN)];
+    if poll(&mut pfd, POLL_STEP_MS).unwrap() == 0 {
+        return;
+    }
+    let mut buf = vec![0u8; CHUNK];
+    let read = pipe.read(&mut buf).unwrap();
+    buf.truncate(read);
+    observed.append(&mut buf);
+}
+
+/// The prompt tally of pty output: `(primary, continuation)` counts. Typed
+/// lines never contain either needle, so the counts are the shell's own
+/// prompts — the pty's echo is what rules out exact equality instead.
+fn tally(out: &str) -> (usize, usize) {
+    (out.matches(PROMPT).count(), out.matches(CONT).count())
+}
+
+/// The pty shape of a line buffered until **end of input**: the primary prompt
+/// for the shape line, at least one continuation prompt, and the `ignoreeof`
+/// hint exactly once. Past the hint nothing is deterministic (the terminal loop
+/// prompts again and blocks in `read`), so nothing beyond `contains` is
+/// pinned; the read-count pins live in the rows that end with `exit`.
+fn assert_buffered_until_eof(out: &str) {
+    assert!(out.contains(PROMPT), "primary prompt missing: {out:?}");
+    assert!(
+        out.contains(CONT),
+        "the first line was dispatched, not buffered: {out:?}"
+    );
+    assert_eq!(out.matches(HINT).count(), 1, "hint count: {out:?}");
+}
+
+/// The pty shape of a line answered **at once**: no continuation prompt at all
+/// (the pin — the shape never enters the buffer), a primary prompt, and the
+/// `ignoreeof` hint once at end of input. The primary count past the hint is
+/// racy, so it is not pinned.
+fn assert_answered_at_once(out: &str) {
+    assert!(out.contains(PROMPT), "primary prompt missing: {out:?}");
+    assert_eq!(out.matches(CONT).count(), 0, "continuation prompt: {out:?}");
+    assert_eq!(out.matches(HINT).count(), 1, "hint count: {out:?}");
+}
+
+/// The REPL under a pty (`script -qec <bin>`, so `isatty(0)` is true): write
+/// `input`, close the pty's stdin (that does deliver a pty EOF), wait for
+/// `event`, then `kill` a live child, then drain. Reports the captured stream,
+/// the exit code (`None` while the shell is alive) and whether it was.
+///
+/// The child's stdout **and** stderr both go to the pty, so the returned stream
+/// is the two of them as the pty saw them, plus the echo of the input and the
+/// pty's `\r\n`; stderr-only assertions read this stream. Assert `contains` and
+/// count matches, never exact equality. The wait is the event, never a fixed
+/// sleep (LESSONS: "Test tty-gated behavior from safe-crate integration tests
+/// via `script`"); `tests/ignoreeof.rs::run_tty` is the same shape.
+fn run_tty(input: &str, event: Event) -> (String, Option<i32>, bool) {
+    let mut child = Command::new("script")
+        .args(["-qec", BIN, "/dev/null"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    drop(child.stdin.take().unwrap());
+    let mut observed: Vec<u8> = Vec::new();
+    if matches!(event, Event::Exit) {
+        // The row ends with `exit`: the child's exit closes the pty's pipes, so
+        // the drain itself is the event — no sleep, no kill.
+        let output = child.wait_with_output().unwrap();
+        return (
+            str::from_utf8(&output.stdout).unwrap().to_string(),
+            output.status.code(),
+            false,
+        );
+    }
+    if let Event::Seen(needle) = &event {
+        let deadline = Instant::now() + SETTLE;
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            poll_into(&mut child, &mut observed);
+            if String::from_utf8_lossy(&observed).contains(needle) {
+                break;
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+        }
+    }
+    let alive = child.try_wait().unwrap().is_none();
+    if alive {
+        let _ = child.kill();
+    }
+    let output = child.wait_with_output().unwrap();
+    let mut bytes = observed;
+    bytes.extend_from_slice(&output.stdout);
+    (
+        str::from_utf8(&bytes).unwrap().to_string(),
+        output.status.code(),
+        alive,
+    )
+}
+
 /// Spawn the REPL (no `-c`), pipe `input` to stdin, close it, and capture
-/// stdout/stderr/exit code.
+/// stdout/stderr/exit code. stdin is **not** a terminal, so no prompt is drawn
+/// (bash draws none off-terminal either) and stdout is the body alone — the
+/// pty rows are where the prompts are pinned, and these exact-stdout assertions
+/// double as the non-tty-silence pin.
 fn run_repl(input: &str) -> (String, String, i32) {
     let mut child = Command::new(BIN)
         .stdin(Stdio::piped())
@@ -35,39 +184,6 @@ fn run_repl(input: &str) -> (String, String, i32) {
         str::from_utf8(&output.stderr).unwrap().to_string(),
         output.status.code().unwrap_or(-1),
     )
-}
-
-/// Spawn the REPL under a pty (`script -qec <bin>`, so `isatty(0)` is true),
-/// write `input`, close the pty's stdin (that does deliver a pty EOF), settle,
-/// and report stdout plus whether the shell was still alive.
-///
-/// No stdout read loop: after the `ignoreeof` hint a pty with closed stdin
-/// delivers nothing, so a blocking `read` hangs to nextest's 10 s
-/// slow-timeout. Sleep → `try_wait` → `kill` → drain is the shape that bounds
-/// the output. The pty echoes the input and inserts `\r\n`, so assertions
-/// `contains` and count matches, never exact stdout equality.
-fn run_tty(input: &str) -> (String, bool) {
-    let mut child = Command::new("script")
-        .args(["-qec", BIN, "/dev/null"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(input.as_bytes())
-        .unwrap();
-    drop(child.stdin.take().unwrap());
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    let alive = child.try_wait().unwrap().is_none();
-    if alive {
-        let _ = child.kill();
-    }
-    let output = child.wait_with_output().unwrap();
-    (str::from_utf8(&output.stdout).unwrap().to_string(), alive)
 }
 
 /// A single input line beyond the size cap must fail with the size error
@@ -152,11 +268,13 @@ fn line_at_cap_is_accepted() {
 
 #[test]
 fn if_block_spans_lines() {
+    // Piped stdin draws no prompt, so this row is body/stderr only; the
+    // continuation prompt the buffering earns is pinned by
+    // [`if_block_spans_lines_under_tty`].
     let (out, err, code) = run_repl("if true; then\necho in-if\nfi\nexit\n");
     assert_eq!(code, 0);
     assert!(out.contains("in-if"), "output: {out:?}");
     assert!(!err.contains("parse error"), "stderr: {err:?}");
-    assert!(out.contains("> "), "continuation prompt missing: {out:?}");
 }
 
 #[test]
@@ -167,10 +285,10 @@ fn heredoc_spans_lines() {
 }
 
 /// Task #322: a here-doc inside a **closed** single-line keyword block keeps
-/// the prompt reading for its body lines (`> ` ×2) and the buffer runs with
-/// the body attached — bash 5.3.9 prints `{a,b}`, rc 0 on every row; the
-/// prompt trail is two `fdshell> ` reads (the shape, then `exit`) around the
-/// two `> ` continuations.
+/// reading for its body lines (two continuation reads on a terminal) and the
+/// buffer runs with the body attached — bash 5.3.9 prints `{a,b}`, rc 0 on
+/// every row; on piped stdin nothing but the body is printed (no prompt
+/// off-terminal), so the exact stdout pinned below is the body alone.
 ///
 /// Measured against `bash --norc --noprofile` on the same stdin (its prompts
 /// excluded): all six arm sites print `{a,b}` rc 0, and fdshell now matches
@@ -194,31 +312,26 @@ fn single_line_block_heredoc_spans_lines() {
     ] {
         let (out, err, code) = run_repl(&format!("{row}\n{{a,b}}\nT\nexit\n"));
         assert_eq!(code, 0, "{row}: stderr={err}");
-        assert_eq!(
-            out, "fdshell> > > {a,b}\nfdshell> ",
-            "{row}: stdout: {out:?}"
-        );
+        assert_eq!(out, "{a,b}\n", "{row}: stdout: {out:?}");
         assert!(err.is_empty(), "{row}: stderr={err}");
     }
 }
 
 /// Task **#332**: a here-doc statement **before** a `{ …; }` group and a
 /// statement after the group's own `;`. The line carries two body regions, so the
-/// prompt reads four `> ` continuations — bash's continuation count on the same
-/// stdin — and the buffer runs as `bodyX`, `a`, `bodyB` at rc 0.
+/// read keeps buffering through four continuation reads — bash's continuation
+/// count on the same stdin — and the buffer runs as `bodyX`, `a`, `bodyB` at
+/// rc 0. Piped stdin draws no prompt, so the exact stdout is the body alone.
 ///
-/// `master` stopped after two `> ` reads (the line looked complete with region 0
-/// consumed) and then reported the body lines of region 1 as missing commands,
-/// `"bodyX" not found` … ; with the group's resume fixed the trailing statement
-/// is scanned where its own region lives. Measured byte-for-byte.
+/// `master` stopped after two continuation reads (the line looked complete with
+/// region 0 consumed) and then reported the body lines of region 1 as missing
+/// commands, `"bodyX" not found` … ; with the group's resume fixed the trailing
+/// statement is scanned where its own region lives. Measured byte-for-byte.
 #[test]
 fn pre_block_heredoc_behind_a_group_spans_both_regions() {
     let (out, err, code) = run_repl("cat <<X; { echo a; }; cat <<B\nbodyX\nX\nbodyB\nB\nexit\n");
     assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(
-        out, "fdshell> > > > > bodyX\na\nbodyB\nfdshell> ",
-        "stdout: {out:?}"
-    );
+    assert_eq!(out, "bodyX\na\nbodyB\n", "stdout: {out:?}");
     assert!(err.is_empty(), "stderr={err}");
 }
 
@@ -234,10 +347,11 @@ fn pre_block_heredoc_behind_a_group_spans_both_regions() {
 /// **#315** and is pinned in the family above.
 #[test]
 fn closed_block_heredoc_prompt_reaches_parity() {
-    // EOF (no `exit`): the third `> ` consumes EOF, the buffer executes.
+    // EOF (no `exit`): the third continuation read consumes EOF, the buffer
+    // executes. Piped stdin draws no prompt, so the body is the whole stdout.
     let (out, err, code) = run_repl("if false; then :; elif true; then cat <<E; fi\n{a,b}\nT\n");
     assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(out, "fdshell> > > > {a,b}\nT\nfdshell> ", "stdout: {out:?}");
+    assert_eq!(out, "{a,b}\nT\n", "stdout: {out:?}");
     assert!(err.contains("delimited by end-of-file"), "stderr={err}");
 }
 
@@ -282,8 +396,15 @@ fn trailing_ampersand_is_complete_input() {
     let (out, err, code) = run_repl("echo hi &\nwait\nexit\n");
     assert_eq!(code, 0, "stderr: {err:?}");
     assert!(out.contains("hi"), "output: {out:?}");
-    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
     assert!(!err.contains("parse error"), "stderr: {err:?}");
+    // The prompt-shape pin lives on a terminal (the pty's echo would make the
+    // body assertion above meaningless there): the shape earns no continuation
+    // prompt, and the reads — the `&` line, `wait`, `exit` — are three.
+    let (tty, code, alive) = run_tty("echo hi &\nwait\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(!alive, "pty: {tty:?}");
+    assert_eq!(tally(&tty), (3, 0), "prompts: {tty:?}");
+    assert!(!tty.contains("parse error"), "pty: {tty:?}");
 }
 
 #[test]
@@ -303,13 +424,17 @@ fn single_line_unchanged() {
 /// A blank line is not an input: the shell re-prompts and keeps reading, so
 /// only end of input (`exit`, EOF) ends it. Prompt counts are read counts —
 /// line, blank line, `exit` — and a shell that quit on the blank line prints
-/// two.
+/// two; the count is pinned on a terminal, where prompts are drawn at all.
 #[test]
 fn blank_line_does_not_end_the_shell() {
     let (out, err, code) = run_repl("echo hi\n\nexit\n");
     assert_eq!(code, 0, "stderr: {err:?}");
     assert!(out.contains("hi"), "output: {out:?}");
-    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
+    // The prompt count is the read counter, so it is a terminal assertion:
+    // line, blank line, `exit`. A shell that quit on the blank line draws two.
+    let (tty, code, _) = run_tty("echo hi\n\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tally(&tty), (3, 0), "prompts: {tty:?}");
 }
 
 /// Whitespace-only input is blank too: it is skipped with a prompt and never
@@ -320,7 +445,12 @@ fn whitespace_line_is_skipped_not_executed() {
     assert_eq!(code, 0, "stderr: {err:?}");
     assert!(out.contains("hi"), "output: {out:?}");
     assert!(!err.contains("parse error"), "stderr: {err:?}");
-    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
+    // The skipped line is still a read, so a terminal shows three prompts:
+    // the whitespace line, `echo hi`, `exit`.
+    let (tty, code, _) = run_tty("   \necho hi\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tally(&tty), (3, 0), "prompts: {tty:?}");
+    assert!(!tty.contains("parse error"), "pty: {tty:?}");
 }
 
 #[test]
@@ -342,21 +472,23 @@ fn eof_mid_if_executes_buffer() {
 }
 
 /// `ignoreeof` on a terminal, EOF mid-continuation: the terminal delivers one
-/// EOF event, the hint prints and the shell stays alive at the `> ` prompt
-/// (measured: `fdshell> > use \`exit' to leave\r\n> `, then blocked).
+/// EOF event, the hint prints and the shell stays alive at the continuation
+/// prompt (measured shape: the primary prompt, the echoed input line, a
+/// continuation prompt, the hint, then blocked — the pty's echo and `\r\n` are
+/// part of the stream, so the row counts and contains, never matches exactly).
 #[test]
 fn ignoreeof_mid_continuation_keeps_shell_alive_on_terminal() {
-    let (out, alive) = run_tty("if true; then\n");
+    let (out, _code, alive) = run_tty("if true; then\n", Event::Seen(HINT));
     assert!(alive, "shell died at tty EOF mid-continuation: {out:?}");
     assert_eq!(
         out.matches(HINT).count(),
         1,
         "ignoreeof hint count: {out:?}"
     );
-    assert!(
-        out.replace(PROMPT, "").contains("> "),
-        "continuation prompt missing: {out:?}"
-    );
+    // Both prompts precede the event, so they are deterministic; the loop
+    // prompts again after it and blocks, so nothing past the hint is pinned.
+    assert!(out.contains(PROMPT), "primary prompt missing: {out:?}");
+    assert!(out.contains(CONT), "continuation prompt missing: {out:?}");
 }
 
 /// The same shape over a pipe ends the input: the continuation read hits EOF,
@@ -374,24 +506,13 @@ fn ignoreeof_mid_continuation_on_pipe_exits() {
 
 #[test]
 fn if_block_spans_lines_under_tty() {
-    // `script` (util-linux) attaches a pty, so fdshell's stdin is a terminal.
-    let mut child = Command::new("script")
-        .args(["-qec", BIN, "/dev/null"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(b"if true; then\necho in-if\nfi\nexit\n")
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    let out = str::from_utf8(&output.stdout).unwrap();
+    // `script` (util-linux) attaches a pty, so fdshell's stdin is a terminal
+    // and the continuation prompt the buffering earns is drawn: bash's `PS2`
+    // default, which epic #197 leaves byte-identical.
+    let (out, code, _) = run_tty("if true; then\necho in-if\nfi\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {out:?}");
     assert!(out.contains("in-if"), "output: {out:?}");
-    assert!(out.contains("> "), "continuation prompt missing: {out:?}");
+    assert!(out.contains(CONT), "continuation prompt missing: {out:?}");
 }
 
 /// Task #236 §9.5 (plan §9.5): a closer written in a block body's **argument
@@ -440,15 +561,11 @@ fn glued_closer_shapes_buffer_in_the_repl() {
             "\"a\" not found",
         ),
     ] {
+        // The joined buffer on a pipe is body-only (no prompt off-terminal),
+        // so the exact stdout is the buffer's own output.
         let (out, err, code) = run_repl(input);
         assert_eq!(code, 0, "stderr={err}");
-        assert!(
-            out.contains("> "),
-            "{input}: no continuation prompt: {out:?}"
-        );
-        assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
-        let body = out.replace(PROMPT, "").replace("> ", "");
-        assert_eq!(body, want, "{input}: stdout: {out:?}");
+        assert_eq!(out, want, "{input}: stdout: {out:?}");
         assert!(
             !err.contains("parse error"),
             "{input}: parse error: {err:?}"
@@ -457,22 +574,36 @@ fn glued_closer_shapes_buffer_in_the_repl() {
             want_err.is_empty() || err.contains(want_err),
             "{input}: stderr={err:?}"
         );
+        // Three prompts (the shape, the joined buffer, `exit`) — a shell that
+        // ran each line by itself would draw four, and `master` did (its answer
+        // to line 1 is a parse error, which is why these rows must not carry
+        // one); plus the single continuation prompt of the buffered read.
+        let (tty, code, _) = run_tty(input, Event::Exit);
+        assert_eq!(code, Some(0), "{input}: pty: {tty:?}");
+        assert_eq!(tally(&tty), (3, 1), "{input}: prompts: {tty:?}");
+        assert!(
+            !tty.contains("parse error"),
+            "{input}: pty parse error: {tty:?}"
+        );
     }
-    // EOF mid-buffer: the buffer is executed and reports the parse error —
-    // master's infinite loop (`while :; do echo x done` was accepted) is a
-    // regression here, so the row is pinned with a closed stdin.
+    // EOF mid-buffer on a pipe: the buffer is executed and reports the parse
+    // error — master's infinite loop (`while :; do echo x done` was accepted)
+    // is a regression here, so the row is pinned with a closed stdin.
     for input in ["while :; do echo x done\n", "if a; then b fi\n"] {
         let (out, err, code) = run_repl(input);
         assert_eq!(code, 0, "stderr={err}");
-        assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-        assert!(
-            out.replace(PROMPT, "").contains("> "),
-            "{input}: no continuation prompt: {out:?}"
-        );
+        assert!(out.is_empty(), "no prompt, no output: {out:?}");
         assert!(
             err.contains("parse error"),
             "{input}: the buffer was not executed: {err:?}"
         );
+        // The same shape on a terminal: the first line is buffered (a
+        // continuation prompt is drawn), and the tty's `ignoreeof` hint is the
+        // event that bounds the row — the buffer is not run there.
+        let (tty, code, alive) = run_tty(input, Event::Seen(HINT));
+        assert!(alive, "{input}: pty: {tty:?}");
+        assert_eq!(code, None, "{input}: pty: {tty:?}");
+        assert_buffered_until_eof(&tty);
     }
 }
 
@@ -488,31 +619,36 @@ fn glued_closer_shapes_buffer_in_the_repl() {
 /// REPL rc-1-vs-2 family, README).
 #[test]
 fn for_with_a_closer_shaped_list_word_buffers_until_the_closer() {
+    // The completed statement, piped: body-only stdout, so the loop's own
+    // output is the whole answer.
     let (out, err, code) = run_repl("for i in done\ndo echo \"$i\"; done\nexit\n");
     assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-    assert!(
-        out.contains("> "),
-        "the first line was dispatched, not buffered: {out:?}"
-    );
     assert_eq!(
-        out.replace(PROMPT, "").replace("> ", ""),
-        "done\n",
+        out, "done\n",
         "the loop iterates over the list word: {out:?}"
     );
     assert!(!err.contains("parse error"), "parse error: {err:?}");
-    // EOF mid-buffer: the buffer is executed and reports the missing closer.
+    // Two prompts (the buffered line, `exit`) plus the one continuation prompt
+    // that proves the first line was buffered, not dispatched.
+    let (tty, code, _) = run_tty("for i in done\ndo echo \"$i\"; done\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tally(&tty), (2, 1), "prompts: {tty:?}");
+
+    // EOF mid-buffer on a pipe: the buffer is executed and reports the missing
+    // closer, and nothing is printed to stdout (no prompt off-terminal).
     let (out, err, code) = run_repl("for i in done\nexit\n");
     assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-    assert!(
-        out.replace(PROMPT, "").contains("> "),
-        "no continuation prompt: {out:?}"
-    );
+    assert!(out.is_empty(), "no prompt, no output: {out:?}");
     assert!(
         err.contains("'for' is missing its closing 'done'"),
         "the buffer was not executed as an unclosed block: {err:?}"
     );
+    // The same shape on a terminal: the line is buffered (a continuation prompt
+    // is drawn) and the tty's `ignoreeof` hint bounds the row.
+    let (tty, code, alive) = run_tty("for i in done\nexit\n", Event::Seen(HINT));
+    assert!(alive, "pty: {tty:?}");
+    assert_eq!(code, None, "pty: {tty:?}");
+    assert_buffered_until_eof(&tty);
 }
 
 /// Task **#396**: the glued `for((…))` is a keyword word at the byte level
@@ -525,32 +661,31 @@ fn for_with_a_closer_shaped_list_word_buffers_until_the_closer() {
 /// dispatched each line by itself (`do`/`done` ran as commands).
 #[test]
 fn glued_arith_for_buffers_until_the_closer() {
+    // The completed glued loop, piped: the two numbers are the whole stdout.
     let (out, err, code) = run_repl("for((i=0;i<2;i++))\ndo echo $i; done\nexit\n");
     assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-    assert!(
-        out.contains("> "),
-        "the first line was dispatched, not buffered: {out:?}"
-    );
-    assert_eq!(
-        out.replace(PROMPT, "").replace("> ", ""),
-        "0\n1\n",
-        "the completed glued loop runs: {out:?}"
-    );
+    assert_eq!(out, "0\n1\n", "the completed glued loop runs: {out:?}");
     assert!(!err.contains("parse error"), "parse error: {err:?}");
-    // EOF mid-buffer: the buffer is executed and reports the missing closer,
-    // naming the word the byte scan measured (`for((i=0`).
+    // Two prompts (the buffered line, `exit`) plus the continuation prompt that
+    // proves the first line was buffered, not dispatched.
+    let (tty, code, _) = run_tty("for((i=0;i<2;i++))\ndo echo $i; done\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tally(&tty), (2, 1), "prompts: {tty:?}");
+
+    // EOF mid-buffer on a pipe: the buffer is executed and reports the missing
+    // closer, naming the word the byte scan measured (`for((i=0`).
     let (out, err, code) = run_repl("for((i=0;i<2;i++))\n");
     assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-    assert!(
-        out.replace(PROMPT, "").contains("> "),
-        "no continuation prompt: {out:?}"
-    );
+    assert!(out.is_empty(), "no prompt, no output: {out:?}");
     assert!(
         err.contains("'for((i=0' is missing its closing 'done'"),
         "the buffer was not executed as an unclosed block: {err:?}"
     );
+    // The same shape on a terminal: buffered, then the `ignoreeof` hint.
+    let (tty, code, alive) = run_tty("for((i=0;i<2;i++))\n", Event::Seen(HINT));
+    assert!(alive, "pty: {tty:?}");
+    assert_eq!(code, None, "pty: {tty:?}");
+    assert_buffered_until_eof(&tty);
 }
 
 /// Task #294: an **unclosed mid-run construct** (a `{ …` cond part, a keyword
@@ -571,22 +706,25 @@ fn unclosed_midrun_constructs_buffer_until_eof() {
             "function definition is missing a closing brace",
         ),
     ] {
+        // Piped (no prompt off-terminal): the buffer is executed at EOF and its
+        // diagnostic is the whole answer — nothing of the shape is printed.
         let (out, err, code) = run_repl(input);
         assert_eq!(code, 0, "stderr={err}");
+        assert!(out.is_empty(), "{input}: stdout: {out:?}");
         assert!(err.contains(want), "{input}: stderr={err}");
         assert_eq!(
             err.matches(want).count(),
             1,
             "{input}: the diagnostic is reported once: {err}"
         );
-        // One primary prompt per read (the shape, then the read after the
-        // EOF-executed buffer) and exactly one `> ` continuation line.
-        assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-        assert_eq!(
-            out.replace(PROMPT, "").matches("> ").count(),
-            1,
-            "{input}: continuations: {out:?}"
-        );
+        // On a terminal the same shape is buffered until end of input: the
+        // primary prompt, then a continuation prompt, then the `ignoreeof` hint
+        // — the counts past that event are racy, so the shape is pinned with
+        // `contains`.
+        let (tty, code, alive) = run_tty(input, Event::Seen(HINT));
+        assert!(alive, "{input}: pty: {tty:?}");
+        assert_eq!(code, None, "{input}: pty: {tty:?}");
+        assert_buffered_until_eof(&tty);
     }
 }
 
@@ -596,6 +734,8 @@ fn unclosed_midrun_constructs_buffer_until_eof() {
 /// the lines never run apart), and the group twin prints its two lines.
 #[test]
 fn closed_midrun_construct_runs_as_one_statement() {
+    // Piped rows: no prompt off-terminal, so the exact stdout is the buffer's
+    // own output. The prompt tallies are the terminal rows'.
     let (out, err, code) = run_repl("true && while :; do\necho hi\nbreak\ndone\nexit\n");
     assert_eq!(code, 0, "stderr: {err}");
     assert!(
@@ -603,61 +743,63 @@ fn closed_midrun_construct_runs_as_one_statement() {
         "the lines ran apart: {err}"
     );
     assert!(!err.contains("parse error"), "parse error: {err}");
-    // The buffer's own output, prompts stripped: just `hi`.
-    let body = out.replace(PROMPT, "").replace("> ", "");
-    assert_eq!(body, "hi\n", "stdout: {out:?}");
-    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-    assert_eq!(
-        out.replace(PROMPT, "").matches("> ").count(),
-        3,
-        "continuations: {out:?}"
+    assert_eq!(out, "hi\n", "stdout: {out:?}");
+    let (tty, code, _) = run_tty(
+        "true && while :; do\necho hi\nbreak\ndone\nexit\n",
+        Event::Exit,
     );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tally(&tty), (2, 3), "prompts: {tty:?}");
 
     let (out, err, code) = run_repl("true && { echo g\necho h\n}\necho tail\nexit\n");
     assert_eq!(code, 0, "stderr: {err}");
     assert!(!err.contains("parse error"), "parse error: {err}");
-    let body = out.replace(PROMPT, "").replace("> ", "");
-    assert_eq!(body, "g\nh\ntail\n", "stdout: {out:?}");
-    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
-    assert_eq!(
-        out.replace(PROMPT, "").matches("> ").count(),
-        2,
-        "continuations: {out:?}"
+    assert_eq!(out, "g\nh\ntail\n", "stdout: {out:?}");
+    let (tty, code, _) = run_tty(
+        "true && { echo g\necho h\n}\necho tail\nexit\n",
+        Event::Exit,
     );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tally(&tty), (3, 2), "prompts: {tty:?}");
 }
 
 /// A closed **single-line** mid-run construct never prompts: the stamp is the
 /// span's closedness, so a line whose closer is there runs at once — the
-/// continuation prompt is the unclosed shape's alone (task #294). Every loop
+/// continuation prompt is the unclosed shape's alone (task #294); the absence
+/// is pinned on a terminal, where prompts are drawn at all. Every loop
 /// row is bounded by a `break` (a `while :; do :; done` twin would loop
 /// forever in the REPL as it does in bash, and hang the suite).
 #[test]
 fn closed_single_line_midrun_never_prompts() {
-    for (input, want) in [
-        ("true && { echo g; }\nexit\n", "g"),
-        ("true && while :; do echo w; break; done\nexit\n", "w"),
+    // `reads` is the row's read count on a terminal — one primary prompt per
+    // read (the shape, the call the definition row needs, `exit`) — and the
+    // continuation count is the pin: the shape never enters the buffer.
+    for (input, want, reads) in [
+        ("true && { echo g; }\nexit\n", "g", 2),
+        ("true && while :; do echo w; break; done\nexit\n", "w", 2),
         // A definition writes no output of its own, so the call that follows
         // shows the mid-run `f() { … }` did define it.
-        ("true && f() { echo F; }\nf\nexit\n", "F"),
+        ("true && f() { echo F; }\nf\nexit\n", "F", 3),
     ] {
         let (out, err, code) = run_repl(input);
         assert_eq!(code, 0, "stderr: {err}");
         assert!(!err.contains("parse error"), "parse error: {err}");
         assert!(out.contains(want), "{input}: stdout: {out:?}");
-        assert!(
-            !out.replace(PROMPT, "").contains("> "),
-            "{input}: continuation prompt: {out:?}"
-        );
+        let (tty, code, _) = run_tty(input, Event::Exit);
+        assert_eq!(code, Some(0), "{input}: pty: {tty:?}");
+        assert_eq!(tally(&tty), (reads, 0), "{input}: prompts: {tty:?}");
     }
     // The closed **stage** arm: its parse-plus-output oddity is #292's (the rc
     // and the `expected 'done'` family), so only the continuation prompt is
     // pinned here — the shape never enters the buffer, and the stage runs.
     let (out, _, _) = run_repl("echo a | while read l; do echo \"$l\"; done\nexit\n");
     assert!(out.contains('a'), "stdout: {out:?}");
-    assert!(
-        !out.replace(PROMPT, "").contains("> "),
-        "continuation prompt: {out:?}"
+    let (tty, code, _) = run_tty(
+        "echo a | while read l; do echo \"$l\"; done\nexit\n",
+        Event::Exit,
     );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tally(&tty), (2, 0), "prompts: {tty:?}");
 }
 
 /// The documented divergence at EOF (README, "Interactive shell", task #294):
@@ -667,19 +809,21 @@ fn closed_single_line_midrun_never_prompts() {
 /// nothing, and exits 2.
 #[test]
 fn statements_before_an_unclosed_midrun_run_at_eof() {
+    // Piped (no prompt off-terminal): the prefix statement's own output is the
+    // whole stdout, and the report is stderr's.
     let (out, err, code) = run_repl("echo a; true && { echo g\n");
     assert_eq!(code, 0, "stderr={err}");
-    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-    assert_eq!(
-        out.replace(PROMPT, "").matches("> ").count(),
-        1,
-        "continuations: {out:?}"
-    );
-    assert!(out.contains('a'), "the prefix statement ran: {out:?}");
+    assert_eq!(out, "a\n", "the prefix statement ran: {out:?}");
     assert!(
         err.contains("group is missing a closing brace"),
         "stderr={err}"
     );
+    // On a terminal the shape is buffered until end of input: primary prompt,
+    // continuation prompt, `ignoreeof` hint.
+    let (tty, code, alive) = run_tty("echo a; true && { echo g\n", Event::Seen(HINT));
+    assert!(alive, "pty: {tty:?}");
+    assert_eq!(code, None, "pty: {tty:?}");
+    assert_buffered_until_eof(&tty);
 }
 
 /// Task **#401**: a run-start `{ …; }` whose **own** brace closed but whose tail
@@ -694,36 +838,32 @@ fn statements_before_an_unclosed_midrun_run_at_eof() {
 /// (README, task #294), and the reason the buffer still runs what it can.
 #[test]
 fn a_closed_group_with_an_unclosed_tail_group_buffers() {
-    // Closer on the next line: the buffer joins the lines into ONE dispatch —
-    // three prompts (the shape, the joined buffer, `exit`), exactly one `> `.
+    // Closer on the next line: the buffer joins the lines into ONE dispatch.
+    // Piped (no prompts), so the exact stdout is the buffer's own output.
     let (out, err, code) = run_repl("{ echo a; } && { echo b\n}\necho tail\nexit\n");
     assert_eq!(code, 0, "stderr: {err}");
-    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
-    assert_eq!(
-        out.replace(PROMPT, "").matches("> ").count(),
-        1,
-        "continuations: {out:?}"
-    );
-    assert_eq!(
-        out.replace(PROMPT, "").replace("> ", ""),
-        "a\nb\ntail\n",
-        "the joined buffer ran: {out:?}"
-    );
+    assert_eq!(out, "a\nb\ntail\n", "the joined buffer ran: {out:?}");
     assert!(!err.contains("parse error"), "parse error: {err:?}");
-    // EOF mid-buffer: the buffer is executed and reports its missing closer.
+    // Three prompts on a terminal (the shape, the joined buffer, `exit`) plus
+    // exactly one continuation prompt.
+    let (tty, code, _) = run_tty("{ echo a; } && { echo b\n}\necho tail\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tally(&tty), (3, 1), "prompts: {tty:?}");
+
+    // EOF mid-buffer on a pipe: the buffer is executed, so the closed group's
+    // `echo a` prints, and the missing closer is reported.
     let (out, err, code) = run_repl("{ echo a; } && { echo b\n");
     assert_eq!(code, 0, "stderr: {err}");
-    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-    assert_eq!(
-        out.replace(PROMPT, "").matches("> ").count(),
-        1,
-        "the first line was dispatched, not buffered: {out:?}"
-    );
-    assert!(out.contains('a'), "the closed group ran: {out:?}");
+    assert_eq!(out, "a\n", "the closed group ran: {out:?}");
     assert!(
         err.contains("group is missing a closing brace"),
         "the buffer was not executed as an unclosed group: {err:?}"
     );
+    // The same shape on a terminal: buffered, then the `ignoreeof` hint.
+    let (tty, code, alive) = run_tty("{ echo a; } && { echo b\n", Event::Seen(HINT));
+    assert!(alive, "pty: {tty:?}");
+    assert_eq!(code, None, "pty: {tty:?}");
+    assert_buffered_until_eof(&tty);
 }
 
 /// A single-line `case` whose arm ends with the plain `&` and whose `esac` has
@@ -735,42 +875,46 @@ fn a_closed_group_with_an_unclosed_tail_group_buffers() {
 fn ampersand_in_a_case_arm_buffers_until_the_closer_arrives() {
     let (out, err, code) = run_repl("case x in x) echo a & ;;\nesac\nwait\nexit\n");
     assert_eq!(code, 0, "stderr: {err}");
-    assert!(out.contains("> "), "no continuation prompt: {out:?}");
-    // Three prompts: the shape, the joined buffer, `exit` — one per read.
-    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
     assert!(out.contains("a"), "stdout: {out:?}");
     assert!(!err.contains("parse error"), "parse error: {err}");
+    // The prompt shape on a terminal: three prompts — the shape, the joined
+    // buffer, `exit` — one per read, and the one continuation prompt the
+    // buffering earns.
+    let (tty, code, _) = run_tty("case x in x) echo a & ;;\nesac\nwait\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tally(&tty), (3, 1), "prompts: {tty:?}");
+    assert!(!tty.contains("parse error"), "pty: {tty:?}");
 }
 
 /// A here-doc statement **behind** a plain `&` on the same line (task #313):
-/// the prompt keeps reading the four body lines (`> ` ×4 — both bodies), the
-/// buffer runs with both bodies attached, and no body line is ever treated as
-/// a statement (before the fix the suffix's body lines answered as `y` and `B`
-/// "not found"). The background job is reaped by the `wait` line, and the
-/// prompt count is one per read: the shape, `wait`, `exit`.
+/// the read keeps buffering the four body lines (four continuation prompts on a
+/// terminal — both bodies), the buffer runs with both bodies attached, and no
+/// body line is ever treated as a statement (before the fix the suffix's body
+/// lines answered as `y` and `B` "not found"). The background job is reaped by
+/// the `wait` line, and the prompt count is one per read: the shape, `wait`,
+/// `exit`.
 #[test]
 fn heredocs_on_both_sides_of_an_ampersand_span_their_lines() {
     let (out, err, code) = run_repl("cat <<A & cat <<B\nx\nA\ny\nB\nwait\nexit\n");
     assert_eq!(code, 0, "stderr: {err}");
-    assert!(
-        out.starts_with("fdshell> > > > > "),
-        "four continuations expected: {out:?}"
-    );
-    assert_eq!(out.matches(PROMPT).count(), 3, "prompts: {out:?}");
-    // The continuation prompts, counted outside the `fdshell> ` prompts (each
-    // of which ends in `> `).
-    assert_eq!(
-        out.replace(PROMPT, "").matches("> ").count(),
-        4,
-        "continuations: {out:?}"
-    );
-    // The bodies are the output; their order is the job's, so never pinned.
+    // The bodies are the output (piped stdout is body-only); their order is the
+    // job's, so never pinned.
     assert!(out.contains('x') && out.contains('y'), "stdout: {out:?}");
     assert!(
         !err.contains("not found"),
         "body line ran as a statement: {err}"
     );
     assert!(!err.contains("parse error"), "parse error: {err}");
+    // The prompt shape on a terminal: three primary prompts (the shape, `wait`,
+    // `exit`) and the four continuation prompts of the body lines — every body
+    // line is read as data, never as a statement.
+    let (tty, code, _) = run_tty("cat <<A & cat <<B\nx\nA\ny\nB\nwait\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tally(&tty), (3, 4), "prompts: {tty:?}");
+    assert!(
+        !tty.contains("not found"),
+        "body line ran as a statement: {tty:?}"
+    );
 }
 
 /// The REPL keeps its own whitespace-tail rule (task #492, plan §4.4): the
@@ -835,23 +979,20 @@ fn a_dangling_operator_at_the_end_of_the_repl_input_reports() {
 #[test]
 fn a_brace_at_the_end_of_input_buffers_in_command_position() {
     // Closer on the next line: the buffer joins the lines into ONE dispatch.
+    // Piped rows are body-only (no prompt off-terminal); the pty rows pin the
+    // buffering shape (primary prompt, continuation prompts, one hint).
     for input in ["{\necho a\n}\n", "true && {\necho a\n}\n"] {
         let (out, err, code) = run_repl(input);
         assert_eq!(code, 0, "{input}: stderr: {err}");
         assert!(!err.contains("parse error"), "parse error: {err}");
-        assert_eq!(
-            out.replace(PROMPT, "").replace("> ", ""),
-            "a\n",
-            "{input}: the joined buffer ran: {out:?}"
-        );
-        assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-        assert_eq!(
-            out.replace(PROMPT, "").matches("> ").count(),
-            2,
-            "{input}: continuations: {out:?}"
-        );
+        assert_eq!(out, "a\n", "{input}: the joined buffer ran: {out:?}");
+        let (tty, code, alive) = run_tty(input, Event::Seen(HINT));
+        assert!(alive, "{input}: pty: {tty:?}");
+        assert_eq!(code, None, "{input}: pty: {tty:?}");
+        assert_buffered_until_eof(&tty);
     }
-    // EOF mid-buffer: the buffer is executed and reports its missing closer.
+    // EOF mid-buffer on a pipe: the buffer is executed and reports its missing
+    // closer, and stdout carries no prompt bytes.
     for (input, want) in [
         ("{\n", "'{' is missing its closing '}'"),
         ("true && {\n", "group is missing a closing brace"),
@@ -863,18 +1004,17 @@ fn a_brace_at_the_end_of_input_buffers_in_command_position() {
     ] {
         let (out, err, code) = run_repl(input);
         assert_eq!(code, 0, "{input}: bash exits 2: stderr={err}");
+        assert!(out.is_empty(), "{input}: stdout: {out:?}");
         assert!(err.contains(want), "{input}: stderr={err}");
         assert_eq!(
             err.matches(want).count(),
             1,
             "{input}: the diagnostic is reported once: {err}"
         );
-        assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-        assert_eq!(
-            out.replace(PROMPT, "").matches("> ").count(),
-            1,
-            "{input}: continuations: {out:?}"
-        );
+        let (tty, code, alive) = run_tty(input, Event::Seen(HINT));
+        assert!(alive, "{input}: pty: {tty:?}");
+        assert_eq!(code, None, "{input}: pty: {tty:?}");
+        assert_buffered_until_eof(&tty);
     }
     // The arithmetic-`for` with its closer on the next line keeps bash's answer
     // (it buffered on master too, via the `done` frame; now via the group
@@ -882,31 +1022,23 @@ fn a_brace_at_the_end_of_input_buffers_in_command_position() {
     let (out, err, code) = run_repl("for ((i=0;i<2;i++)) {\necho a\n}\n");
     assert_eq!(code, 0, "stderr: {err}");
     assert!(!err.contains("parse error"), "parse error: {err}");
-    assert_eq!(
-        out.replace(PROMPT, "").replace("> ", ""),
-        "a\na\n",
-        "the loop ran its group body: {out:?}"
-    );
-    assert_eq!(out.matches(PROMPT).count(), 2, "prompts: {out:?}");
-    assert_eq!(
-        out.replace(PROMPT, "").matches("> ").count(),
-        2,
-        "continuations: {out:?}"
-    );
+    assert_eq!(out, "a\na\n", "the loop ran its group body: {out:?}");
+    let (tty, code, alive) = run_tty("for ((i=0;i<2;i++)) {\necho a\n}\n", Event::Seen(HINT));
+    assert!(alive, "pty: {tty:?}");
+    assert_eq!(code, None, "pty: {tty:?}");
+    assert_buffered_until_eof(&tty);
     // The guard rows: bash answers an argument-position brace at once (and
     // so does fdshell — the byte rule's `None` arms at the callers), no
-    // continuation prompt.
+    // continuation prompt. The pty rows pin that absence; two prompts is the
+    // shape's read plus the end-of-input read the terminal keeps going after.
     for (input, want) in [("echo {\n", "{\n"), ("{ echo a; } && echo {\n", "a\n{\n")] {
         let (out, err, code) = run_repl(input);
         assert_eq!(code, 0, "{input}: stderr: {err}");
-        assert!(
-            out.replace(PROMPT, "").ends_with(want),
-            "{input}: answered at once: {out:?}"
-        );
-        assert!(
-            !out.replace(PROMPT, "").contains("> "),
-            "{input}: continuation prompt: {out:?}"
-        );
+        assert_eq!(out, want, "{input}: answered at once: {out:?}");
+        let (tty, code, alive) = run_tty(input, Event::Seen(HINT));
+        assert!(alive, "{input}: pty: {tty:?}");
+        assert_eq!(code, None, "{input}: pty: {tty:?}");
+        assert_answered_at_once(&tty);
     }
 }
 
@@ -936,4 +1068,130 @@ fn an_operator_opening_the_second_line_reports_and_the_session_reads_on() {
         code, 0,
         "the REPL's own end-of-input answer; stderr: {err:?}"
     );
+}
+
+// ——— the prompt variables (epic #197), measured against bash 5.3.9 on 2026-11-18 ———
+
+/// The default `PS1` on a terminal: bash 5.3.9's default string, printed
+/// verbatim while the escape decoder (#616) has not landed. One read, one
+/// prompt — the typed line is `exit`, so the single match is the prompt itself.
+/// The `PS2` default is byte-identical to fdshell's and is pinned by every
+/// continuation count above.
+#[test]
+fn default_prompt_is_drawn_on_a_terminal() {
+    let (tty, code, _) = run_tty("exit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches(PROMPT).count(), 1, "pty: {tty:?}");
+}
+
+/// `PS1` assigned as a command changes the **next** prompt: bash re-reads the
+/// variable before every prompt. The `[p1] ` tally is the pty's echo of the
+/// assignment line plus the one prompt drawn after it — a prompt resolved once
+/// at startup would leave only the echo.
+#[test]
+fn an_assignment_changes_the_next_prompt() {
+    let (tty, code, _) = run_tty("PS1='[p1] '\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[p1] ").count(), 2, "pty: {tty:?}");
+    // The assignment line's own read is still prompted with the default.
+    assert_eq!(tty.matches(PROMPT).count(), 1, "pty: {tty:?}");
+}
+
+/// The `PS2` twin: an incomplete construct is prompted with the assigned value.
+/// The `| ` tally is the echo of the assignment line plus the single
+/// continuation prompt; the three default prompts are the two reads that are
+/// prompted with `PS1` before the buffer completes, and `exit`.
+#[test]
+fn an_assignment_changes_the_next_continuation_prompt() {
+    let (tty, code, _) = run_tty("PS2='| '\nif true; then\nfi\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("| ").count(), 2, "pty: {tty:?}");
+    assert_eq!(tty.matches(PROMPT).count(), 3, "pty: {tty:?}");
+}
+
+/// `export` goes through the same shared lookup as an assignment, so the shape
+/// is the one [`an_assignment_changes_the_next_prompt`] pins.
+#[test]
+fn an_export_changes_the_next_prompt() {
+    let (tty, code, _) = run_tty("export PS1='[e1] '\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[e1] ").count(), 2, "pty: {tty:?}");
+    assert_eq!(tty.matches(PROMPT).count(), 1, "pty: {tty:?}");
+}
+
+/// `unset` returns the prompt to the bash default. The `[v]` tally is the echo
+/// plus the one prompt drawn between the assignment and the unset (the word's
+/// unquoted trailing space is not part of the value); the two default prompts
+/// are the assignment's read and the `exit` read after the unset — the unset is
+/// what makes the second one the default.
+#[test]
+fn unset_restores_the_default_prompt() {
+    let (tty, code, _) = run_tty("PS1=[v]\nunset PS1\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[v]").count(), 2, "pty: {tty:?}");
+    assert_eq!(tty.matches(PROMPT).count(), 2, "pty: {tty:?}");
+}
+
+/// A set-empty `PS1` draws **nothing** (measured against bash): the only default
+/// prompt is the assignment line's own read, and the read of `exit` is prompted
+/// with the empty value — i.e. not at all.
+#[test]
+fn a_set_empty_ps1_draws_nothing() {
+    let (tty, code, _) = run_tty("PS1=\"\" \nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches(PROMPT).count(), 1, "pty: {tty:?}");
+}
+
+/// The `PS2` twin, measured the same way: the buffered read's prompt is empty,
+/// so no continuation needle appears at all, and only the three primary prompts
+/// (the two reads prompted with `PS1`, and `exit`) are drawn.
+#[test]
+fn a_set_empty_ps2_draws_nothing() {
+    let (tty, code, _) = run_tty("PS2=\"\"\nif true; then\nfi\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches(CONT).count(), 0, "pty: {tty:?}");
+    assert_eq!(tty.matches(PROMPT).count(), 3, "pty: {tty:?}");
+}
+
+/// A `PS1` inherited through the environment reaches the prompt through the same
+/// shared lookup, and an interactive shell draws it (measured against bash
+/// 5.3.9, which imports `PS1` from the environment for interactive shells). The
+/// variable is set by `env` **inside** the pty command, not on `script`: a
+/// non-interactive shell drops `PS1` from its child's environment (measured),
+/// and `script` may run the command through one.
+#[test]
+fn an_inherited_env_value_reaches_the_prompt() {
+    let mut child = Command::new("script")
+        .args(["-qec", &format!("env PS1='[envp] ' {BIN}"), "/dev/null"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.as_mut().unwrap().write_all(b"exit\n").unwrap();
+    drop(child.stdin.take().unwrap());
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let out = str::from_utf8(&output.stdout).unwrap();
+    assert_eq!(out.matches("[envp] ").count(), 1, "pty: {out:?}");
+    assert!(
+        !out.contains(PROMPT),
+        "the default is not the answer here: {out:?}"
+    );
+}
+
+/// The gate itself over a pipe (bash draws no prompt off-terminal, measured): a
+/// set `PS1`/`PS2` produce no prompt bytes at all, so stdout is the body alone.
+/// The pty rows above are the other half of the gate.
+#[test]
+fn no_prompt_off_a_terminal() {
+    let (out, err, code) = run_repl("PS1='[p1] '\necho x\nexit\n");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "x\n", "no prompt bytes on a pipe: {out:?}");
+    assert!(!out.contains(PROMPT), "stdout: {out:?}");
+
+    let (out, err, code) = run_repl("PS2='[p2] '\nif true; then\nfi\nexit\n");
+    assert_eq!(code, 0, "stderr={err}");
+    assert!(out.is_empty(), "no prompt bytes on a pipe: {out:?}");
+    assert!(!out.contains("[p2] "), "stdout: {out:?}");
 }

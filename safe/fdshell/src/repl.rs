@@ -1,6 +1,9 @@
+// mutants: -C --lib -C --test -C repl -C --test -C set_opts -- -E 'test(/^repl::/) | binary(repl) | binary(set_opts)'
+
 mod complete;
 mod control;
 mod line;
+mod prompt;
 mod run;
 mod trailing;
 

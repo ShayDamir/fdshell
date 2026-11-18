@@ -193,7 +193,8 @@ fn short_i_flag_turns_ignoreeof_on() {
 
 /// A tty delivers EOF as an event and then blocks, so `ignoreeof` (on by
 /// default there, from the tty seed) keeps the shell alive after one hint:
-/// the pinned output is `fdshell> use \`exit' to leave\r\nfdshell> ` and
+/// the pinned output is the `PS1` default (`\s-\v\$ `, printed verbatim since
+/// epic #197) then `use \`exit' to leave\r\n` then that prompt again, and
 /// nothing more.
 #[test]
 fn eof_on_terminal_keeps_shell_alive() {

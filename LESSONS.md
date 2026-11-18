@@ -788,6 +788,19 @@ the branch from *syscall time* into **data** a unit test reaches in-process,
 and stops repeating the syscall — fd 0 can be re-pointed by `exec 0<file`, so
 the answer is not even stable.
 
+Prompt pins split the same way: a pty row's counts are deterministic only for
+what lands **before** its bounded event, so a row whose pin is a prompt count
+ends with `exit` (the exit is the event), while an EOF row — the tty's
+`ignoreeof` keeps the loop reading past the event — pins `contains` plus the
+event and nothing past it (`safe/fdshell/tests/repl.rs::tally`,
+`safe/fdshell/tests/repl.rs::assert_buffered_until_eof`, task #615). A
+non-interactive shell drops `PS1` from its child's environment, so a row that
+pins an **inherited** variable sets it after the shell:
+`safe/fdshell/tests/repl.rs::an_inherited_env_value_reaches_the_prompt` runs
+`script -qec "env PS1=… <bin>"`, because `script` may run the command through a
+shell and the direct-exec form then measures the shell's own startup
+environment.
+
 ## `cargo mutants` runs only the mutated package's own tests unless `--test-workspace true`
 By default cargo-mutants runs only the test targets of the package being
 mutated. This repo's `unsafe/sys` wrappers are exercised mostly through

@@ -11,14 +11,16 @@ use crate::app::AppError;
 use crate::cmd_subst::MAX_CAPTURED;
 use crate::options::IGNOREEOF;
 use crate::repl::line::{self, LineReader};
-use crate::repl::{complete, handle};
+use crate::repl::{complete, handle, prompt};
 use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr};
 
-/// The primary and the continuation prompt (bash's `PS1`/`PS2`; epic #197
-/// owns the prompt variables, so the literals stay here).
-const PRIMARY_PROMPT: &[u8] = b"fdshell> ";
+/// The prompt variables' values are read per read through `repl::prompt`;
+/// these are the fallbacks when `PS1`/`PS2` are **unset** (measured against
+/// bash 5.3.9, 2026-11-18, uid-independent). The `PS1` default is bash's raw
+/// escape string, printed verbatim until the escape decoder lands (#616).
+const PRIMARY_PROMPT: &[u8] = b"\\s-\\v\\$ ";
 const CONTINUATION_PROMPT: &[u8] = b"> ";
 
 /// Prompt, read and execute inputs until the end of input.
@@ -71,7 +73,8 @@ fn read_input(
 ) -> Result<Option<ScriptText>, Report<AppError>> {
     loop {
         let mut buf = Vec::new();
-        if !line::read_line(cell, &mut buf, PRIMARY_PROMPT, MAX_CAPTURED, input)? {
+        let bytes = prompt::resolve(cell, &ShortCStr::from(c"PS1"), PRIMARY_PROMPT)?;
+        if !line::read_line(cell, &mut buf, &bytes, MAX_CAPTURED, input)? {
             return Ok(None);
         }
         read_continuation(cell, &mut buf, input)?;
@@ -98,7 +101,8 @@ fn read_continuation(
 ) -> Result<(), Report<AppError>> {
     while !complete::is_complete(buf) {
         buf.push(b'\n');
-        if !line::read_line(cell, buf, CONTINUATION_PROMPT, MAX_CAPTURED, input)? {
+        let bytes = prompt::resolve(cell, &ShortCStr::from(c"PS2"), CONTINUATION_PROMPT)?;
+        if !line::read_line(cell, buf, &bytes, MAX_CAPTURED, input)? {
             break;
         }
     }
