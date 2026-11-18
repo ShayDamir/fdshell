@@ -148,9 +148,17 @@ keeps the reusable proof. A "registry" below means that allowlist.
     delimiter reads `a b` (a match), one past it the quote swallows the newline
     byte and nothing matches. Same for `scan/heredoc/line_start`'s `map(|n| n +
     1)`: the identity answers with the newline's own index, and
-    `scan/heredoc/opaque`'s region filter compares that anchor with the window's
-    start, so under the mutant the terminator line's own `<<` is counted and the
-    opaque count collapses to the plain count.
+     `scan/heredoc/opaque`'s region filter compares that anchor with the window's
+     start, so under the mutant the terminator line's own `<<` is counted and the
+     opaque count collapses to the plain count. Measured again on task #596:
+     `report_stray_closer`'s `pos + skip + word.len()` had two `+`→`*` records
+     because the scan never marks a word whose run lies inside a quote, so no
+     scan row ever reaches the quote gate's `None`; a unit pin
+     (`error/parse/position/tests.rs::a_quoted_keyword_run_keeps_the_word_data_suggestion`)
+     feeds the helper exactly such a word (`x"fi ;`, `pos 2`) — the honest
+     window end lets the backward walk cross the quote byte and answers the
+     catch-all arm, each mutant moves the window before the keyword, alignment
+     fails, and the `fi` arm's suggestion shows. Both records retired.
 20. **Make a size constant a type.** A size computed by arithmetic
     (`header + payload + pad`) is a `+`→`*` family that over-reserves
     *invisibly* — the kernel is told the *needed* length and writes only what the
@@ -260,8 +268,22 @@ keeps the reusable proof. A "registry" below means that allowlist.
     results, and the byte-level shape shows the equality input can never arrive —
     the mutant is an accepted equivalent and the census **is** the proof. Verify
     it: apply the mutant as source, run the suite, and name the producer rule;
-    keep the comparison (it carries the rule — this is not rule 6's dead arm) and
-    pin the equality input that *does* exist (a zero-width pass-through) at its
-    consumer. This recipe governs the records whose boundary cannot be rewritten
-    with no operator at it; where rule 24's shape (an exact range, a method, a
-    predicate) fits, simplify the source and retire the record with it.
+     keep the comparison (it carries the rule — this is not rule 6's dead arm) and
+     pin the equality input that *does* exist (a zero-width pass-through) at its
+     consumer. This recipe governs the records whose boundary cannot be rewritten
+     with no operator at it; where rule 24's shape (an exact range, a method, a
+     predicate) fits, simplify the source and retire the record with it.
+
+30. **A rule-bearing decision belongs at a site that generates no mutants.**
+     Families live at operators, bool-returning function bodies and **match
+     guards**; `if` conditions and macro calls generate none (measured in this
+     repo: `safe/fdshell/src/bytes.rs` lists nothing inside `matches!`, and rule
+     16's `is_positive()` precedent is the same fact). So when an entry's proof
+     reads "the guard's other answer has no input" — the guard can only ever be
+     answered one way under any test — keep the decision in code (its reachable
+     direction is pinned) and state it as an `if` over an operator-free
+     condition: a `matches!` against a `const`, or a bool predicate call. The
+     family leaves `--list` and the record retires; the existing pins keep both
+     answers green from the outside. Measured on task #596: `poll_unready`'s
+     EINTR guard in `intercept/read/io.rs` and the launch-classifier guard in
+     `run/cmd.rs` became `if`s and both records retired with the suite green.

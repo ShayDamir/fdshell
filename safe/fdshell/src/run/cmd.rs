@@ -78,11 +78,18 @@ pub(crate) fn run_cmd(
     // so the child (not the parent) reports the new value via the capture
     // socket, consumed by `finish_cmd`.
     let outcome = match crate::launch::launch(cell, &cmdline, &env) {
-        Err(report) if failing::classifies_launch(&report) => {
-            failing::fail(&report, cell)?;
-            return Ok(None);
+        // The launch classifier decides inside the error arm (no match guard: a
+        // guard the tests can only ever answer one way is a mutant site whose
+        // family no pin can kill — CATCHING_MUTANTS rule 30). The classification
+        // and both answers stay, pinned by `run/failing/tests.rs` and
+        // `tests/redirect.rs`.
+        Err(report) => {
+            if failing::classifies_launch(&report) {
+                failing::fail(&report, cell)?;
+                return Ok(None);
+            }
+            Err(report.change_context(CmdError::Launch))?
         }
-        Err(report) => Err(report.change_context(CmdError::Launch))?,
         Ok(outcome) => outcome,
     };
     {

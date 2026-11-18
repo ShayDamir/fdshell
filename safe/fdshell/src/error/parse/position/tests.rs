@@ -80,10 +80,9 @@ fn the_stray_brace_suggestion_names_the_group_block() {
 /// report names the keyword *behind* it). Kills the `pos + skip` mutants at
 /// both call sites: both `-` mutants compute `0 - 5` and panic, and the
 /// caret-assignment `+`→`*` lands the caret at column 0. The two `+`→`*`
-/// mutants of the `keyword_kind` argument are accepted equivalents
-/// (`tools/mutants_allowlist.toml`): a shifted word-end can never re-align the
-/// quote gate's backward walk, which only ever answers `false` on a row the
-/// scan recognizes.
+/// mutants of the `keyword_kind` argument die in
+/// [`a_quoted_keyword_run_keeps_the_word_data_suggestion`], which feeds the
+/// helper the quoted run the scan never marks (rule 19).
 #[cfg(debug_assertions)]
 #[test]
 fn the_time_prefix_moves_the_caret_behind_itself() {
@@ -94,5 +93,26 @@ fn the_time_prefix_moves_the_caret_behind_itself() {
           ├╴Suggestion: a stray 'fi' needs an open `if` block: open one, or drop the word\n\
           ├╴time fi\n\
           ╰╴     ^^"
+    );
+}
+
+/// A quoted keyword **run** (the `fi` inside `x"fi ;`) is data, so the helper's
+/// own answer is the catch-all arm. The scan never marks such a word, so no
+/// scan-level row reaches the `_ =>` arm — this pin feeds the helper exactly
+/// that input (rule 19) and pins the answer. It kills the two `+`→`*` mutants
+/// of the `keyword_kind` argument: each moves the window before the keyword,
+/// `span_start` then fails to align (`line[1]` is a quote, `line[0]` is `x`),
+/// the gate answers through `None => false`, and the `fi` row's suggestion
+/// shows instead — a different `Suggestion:` line (rule 5).
+#[cfg(debug_assertions)]
+#[test]
+fn a_quoted_keyword_run_keeps_the_word_data_suggestion() {
+    assert_eq!(
+        render(b"x\"fi ;", 2),
+        "\u{1b}[1mstray 'fi' — it closes no open block\u{1b}[22m\n\
+          ├╴at safe/fdshell/src/error/parse/position.rs:87:5\n\
+          ├╴Suggestion: write a closing keyword only where a block of its own kind is open\n\
+          ├╴x\"fi ;\n\
+          ╰╴  ^^"
     );
 }

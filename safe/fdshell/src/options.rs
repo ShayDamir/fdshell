@@ -42,7 +42,10 @@ pub const OPTIONS: &[(&[u8], u32, u8)] = &[
 
 /// The options on by default (bash: `expand_aliases` is on in interactive shells,
 /// and so is `promptvars` — measured `shopt promptvars` → `promptvars on`).
-pub const DEFAULTS: u32 = EXPAND_ALIASES | PROMPTVARS;
+/// Summed, not `|`: the two operands are disjoint single bits, so a `|` here is
+/// an identity mutant (`|` ≡ `^`), while `+`→`*` moves the value and the pins in
+/// `options/tests.rs` kill it (`+`→`-` is a const-eval overflow, unviable).
+pub const DEFAULTS: u32 = EXPAND_ALIASES + PROMPTVARS;
 
 pub fn lookup(name: &ShortCStr) -> Option<u32> {
     OPTIONS

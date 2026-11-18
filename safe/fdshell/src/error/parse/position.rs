@@ -80,8 +80,8 @@ pub(crate) fn report_stray_closer(line: &[u8], pos: usize) -> Report<ParseError>
             "a stray '}' needs an open '{ …; }` group: open one, or drop the word"
         }
         // The scan marks only a word the recognition table calls a closer, so this
-        // arm answers a line the marker never named; keep it total without a
-        // panic (STYLE §4.10).
+        // arm answers the quote gate's `None` on a quoted run — pinned by the unit
+        // rows, not by the scan (STYLE §4.10 keeps it total, without a panic).
         _ => "write a closing keyword only where a block of its own kind is open",
     };
     Report::new(ParseError::StrayCloser { closer })

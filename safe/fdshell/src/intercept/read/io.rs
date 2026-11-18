@@ -81,8 +81,16 @@ fn poll_unready(fd: i32, ms: i32) -> Result<bool, Report<CmdError>> {
         match sys::poll::poll(&mut fds, wait) {
             Ok(0) => return Ok(true),
             Ok(_) => return Ok(false),
-            Err(err) if err.errno() == sys::errno::EINTR => continue,
-            Err(err) => return Err(Report::new(err).change_context(CmdError::Read)),
+            Err(err) => {
+                // A handled signal answers EINTR: run the trap and re-poll with the time
+                // left. No other errno is reachable from this call, so the report below is
+                // the answer a real failure gets (the operator-free form keeps the rule
+                // without a mutant site — CATCHING_MUTANTS rule 30).
+                if matches!(err.errno(), sys::errno::EINTR) {
+                    continue;
+                }
+                return Err(Report::new(err).change_context(CmdError::Read));
+            }
         }
     }
 }

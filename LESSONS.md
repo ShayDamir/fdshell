@@ -285,7 +285,10 @@ the O_* flags are disjoint single bits (`|` ≡ `^` ≡ `+` on them). Sum the
 flags with `+` instead: same value, but `+`→`-`/`*` mutants change the value
 and are killable by an exact-value test. See `RedirectDirection::open_flags`
 and `memfd::CREATE_FLAGS` (the `MFD_CLOEXEC + MFD_ALLOW_SEALING` sum, pinned
-by `create_flags_yield_a_cloexec_sealable_memfd`).
+by `create_flags_yield_a_cloexec_sealable_memfd`), and `options::DEFAULTS`
+(task #596's third measured application of the same recipe:
+`EXPAND_ALIASES + PROMPTVARS`, the `+`→`*` mutant killed by the existing
+`options/tests.rs` rows, `+`→`-` a const-eval overflow).
 
 The same trap sits on disjoint **value ranges**, not only flag bits, and the
 sum is equally safe there: the hex-float significand `(1u64 << 52) | frac`
