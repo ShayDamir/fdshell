@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use sys::clock::monotonic_us;
+use sys::clock::{monotonic_us, realtime_us};
 
 /// Three reads are `Ok` and never decrease: the monotonic clock has no
 /// backward step.
@@ -59,4 +59,33 @@ fn timespec_fields_convert_to_microseconds() {
         tv_nsec: 999,
     };
     assert_eq!(sys::clock::us(&zero), 0);
+}
+
+/// The realtime clock is the wall clock: microseconds since the epoch, so it
+/// reads far past 1e12 (a stubbed `Ok(0)`/`Ok(1)` fails here), two reads never
+/// decrease, and the wrapper agrees with a direct libc read within a second.
+#[test]
+fn realtime_is_wall_clock() {
+    let a = realtime_us().unwrap();
+    let b = realtime_us().unwrap();
+    assert!(a > 1_000_000_000_000, "{a}");
+    assert!(b >= a, "{b} < {a}");
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `CLOCK_REALTIME` is a legal clock id and `ts` is writable memory
+    // of exactly the size the kernel writes.
+    let rc = unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &mut ts) };
+    assert_eq!(rc, 0, "the direct libc read must succeed");
+    let want = sys::clock::us(&ts);
+    assert!(a.abs_diff(want) < 1_000_000, "{a} vs {want}");
+}
+
+/// The wall clock (µs since 1970) runs ahead of the boot-based monotonic clock
+/// on any machine that booted in the past: the gap between the two is the
+/// uptime, and a stubbed or swapped conversion erases it.
+#[test]
+fn realtime_runs_ahead_of_monotonic() {
+    assert!(realtime_us().unwrap() > monotonic_us().unwrap());
 }

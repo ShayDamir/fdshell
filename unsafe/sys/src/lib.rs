@@ -1,3 +1,5 @@
+// mutants: -C --test -C close -C --test -C rw -- -E 'binary(close) | binary(rw)'
+
 #![no_std]
 
 extern crate alloc;
@@ -71,6 +73,7 @@ pub mod fork_cell;
 pub mod fork_pidfd;
 pub mod fsverity;
 pub mod getdents64;
+pub mod getpwuid;
 pub mod getrusage;
 pub mod importedfd;
 pub mod importedfd_error;
@@ -98,3 +101,4 @@ pub mod syscall_error;
 pub mod syscall_error_from;
 pub mod timerfd;
 pub mod umask;
+pub mod unistd;
