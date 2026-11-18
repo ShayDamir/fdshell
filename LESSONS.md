@@ -11853,3 +11853,23 @@ Pins:
 `safe/fdshell/src/intercept/tests.rs::run_shift_beyond_the_list_keeps_positional_args`,
 `safe/fdshell/tests/positional.rs::shift_beyond_the_list_leaves_the_positionals_alone`
 (function scope included — the same intercept serves it).
+
+## The two escape decoders have different grammars, and the record keeps the boundary (task #616)
+
+The prompt decoder requires **exactly three** octal digits: `\12`, `\7` and
+`\01` stay literal (measured against bash 5.3.9), while printf's decoder
+takes one to three (`child/printf/escapes.rs`). The grammars differ at
+purpose; a "unify the escape decoders" refactor silently changes both.
+
+bash's `\[`…`\]` markers are **state toggles**, and a non-toggling
+occurrence is data: a `\]` that closes nothing emits `\002`, and a `\[`
+inside a region emits `\001` (readline's `RL_PROMPT_{START,END}_IGNORE`
+bytes, measured). So the decoder's record must keep the run boundaries, not
+just the payload — epic #198's width math asks which bytes are visible, and
+only the split record answers it.
+
+Pins:
+`safe/fdshell/src/repl/prompt/decode/tests.rs::octal_needs_exactly_three_digits`,
+`safe/fdshell/src/repl/prompt/decode/tests.rs::three_octal_digits_are_consumed_and_the_rest_stays_literal`,
+`safe/fdshell/src/repl/prompt/decode/tests.rs::a_close_marker_that_closes_nothing_is_data`,
+`safe/fdshell/src/repl/prompt/decode/tests.rs::an_open_marker_inside_a_region_is_data`.

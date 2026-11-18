@@ -70,3 +70,21 @@ fn a_terminal_draws_the_value_not_the_default() {
     set(&cell, c"PS2", c"| ");
     assert_eq!(resolve(&cell, c"PS2", b"> "), b"| ");
 }
+
+#[test]
+fn the_resolver_decodes_a_mechanical_escape() {
+    // The resolver returns the decoded-and-rendered bytes: `\a` lands as BEL.
+    let cell = cell(true);
+    set(&cell, c"PS1", c"a\\ab");
+    assert_eq!(resolve(&cell, c"PS1", DEFAULT), b"a\x07b");
+}
+
+#[test]
+fn a_value_escape_renders_as_its_literal_text() {
+    // The no-values provider answers `None` (decision D2) — what keeps the
+    // default prompt above byte-identical, and what keeps these pins stable
+    // until #617–#619 wire real providers.
+    let cell = cell(true);
+    set(&cell, c"PS1", c"a\\ub");
+    assert_eq!(resolve(&cell, c"PS1", DEFAULT), br"a\ub");
+}

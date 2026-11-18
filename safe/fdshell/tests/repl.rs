@@ -10,8 +10,9 @@ use sys::poll::{POLLIN, PollFd, poll};
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
 /// The prompt the REPL draws on a **terminal**: fdshell's own default, the
-/// bash 5.3.9 default `PS1` string printed verbatim (measured 2026-11-18;
-/// escape decoding is epic #197's #616, so the bytes are the raw string).
+/// bash 5.3.9 default `PS1` string (measured 2026-11-18). It draws as the
+/// raw string because its escapes are value escapes, and the decoder's
+/// no-values provider renders those literally until #617 wires real values.
 /// Pinned byte-for-byte: it is the counter the pty rows below use, so they pin
 /// one prompt per read.
 const PROMPT: &str = "\\s-\\v\\$ ";
@@ -1072,8 +1073,9 @@ fn an_operator_opening_the_second_line_reports_and_the_session_reads_on() {
 
 // ——— the prompt variables (epic #197), measured against bash 5.3.9 on 2026-11-18 ———
 
-/// The default `PS1` on a terminal: bash 5.3.9's default string, printed
-/// verbatim while the escape decoder (#616) has not landed. One read, one
+/// The default `PS1` on a terminal: bash 5.3.9's default string, drawn
+/// byte-identically to the raw string because the escape decoder's no-values
+/// provider renders its value escapes literally (decision D2). One read, one
 /// prompt — the typed line is `exit`, so the single match is the prompt itself.
 /// The `PS2` default is byte-identical to fdshell's and is pinned by every
 /// continuation count above.
@@ -1178,6 +1180,51 @@ fn an_inherited_env_value_reaches_the_prompt() {
         !out.contains(PROMPT),
         "the default is not the answer here: {out:?}"
     );
+}
+
+// ——— the escape decoder (task #616), byte streams measured against bash 5.3.9
+// on 2026-11-18; the inputs are raw strings (LESSONS) and only the decoder can
+// produce the asserted bytes, since the pty echoes the typed line with the raw
+// backslashes. None of these prompts contains a tally needle, so the counts in
+// the rows above stay put. ———
+
+/// A mechanical escape in the prompt: the decoder emits its byte (bash draws
+/// the same, measured).
+#[test]
+fn a_bell_in_the_prompt_is_drawn_as_a_bell() {
+    let (tty, code, _) = run_tty(concat!(r"PS1='a\ab'", "\nexit\n"), Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("a\x07b"), "pty: {tty:?}");
+}
+
+/// The three-digit octal rule, end to end.
+#[test]
+fn an_octal_escape_in_the_prompt_is_drawn_as_its_byte() {
+    let (tty, code, _) = run_tty(concat!(r"PS1='a\101b'", "\nexit\n"), Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("aAb"), "pty: {tty:?}");
+}
+
+/// The `\xHH` extension (decision D1 — bash 5.3.9 measures it literal; the
+/// README deviation is flagged to #623).
+#[test]
+fn a_hex_escape_in_the_prompt_is_drawn_as_its_byte() {
+    let (tty, code, _) = run_tty(concat!(r"PS1='a\x41b'", "\nexit\n"), Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("aAb"), "pty: {tty:?}");
+}
+
+/// The non-printing region: bash draws the region's bytes and consumes the
+/// toggling markers (measured byte stream); the record's split structure is
+/// pinned at unit level, where epic #198's contract lives.
+#[test]
+fn a_non_printing_region_is_drawn_and_recorded() {
+    let (tty, code, _) = run_tty(
+        concat!(r"PS1='a\[\e[31mB\e[0m\]C'", "\nexit\n"),
+        Event::Exit,
+    );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("a\x1b[31mB\x1b[0mC"), "pty: {tty:?}");
 }
 
 /// The gate itself over a pipe (bash draws no prompt off-terminal, measured): a

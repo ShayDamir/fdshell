@@ -16,10 +16,12 @@ use crate::state::ShellState;
 use sys::fork_cell::ForkCell;
 use sys::{ImportedStr, Origin, Position, ScriptText, ShortCStr};
 
-/// The prompt variables' values are read per read through `repl::prompt`;
-/// these are the fallbacks when `PS1`/`PS2` are **unset** (measured against
-/// bash 5.3.9, 2026-11-18, uid-independent). The `PS1` default is bash's raw
-/// escape string, printed verbatim until the escape decoder lands (#616).
+/// The prompt variables' values are read per read through `repl::prompt`,
+/// decoded and rendered; these are the fallbacks when `PS1`/`PS2` are
+/// **unset** (measured against bash 5.3.9, 2026-11-18, uid-independent). The
+/// `PS1` default is bash's raw escape string and renders byte-identically:
+/// its escapes are value escapes, and the decoder's no-values provider
+/// renders those literally until #617 wires real values.
 const PRIMARY_PROMPT: &[u8] = b"\\s-\\v\\$ ";
 const CONTINUATION_PROMPT: &[u8] = b"> ";
 
