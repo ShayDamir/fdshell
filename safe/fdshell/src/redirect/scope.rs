@@ -1,4 +1,4 @@
-// mutants: -C --lib -C --test -C block_redirect -C --test -C group -C --test -C redirect -- -E 'test(/^redirect::scope::/) | binary(block_redirect) | binary(group) | binary(redirect)'
+// mutants: -C --lib -C --test -C block_redirect -C --test -C group -C --test -C redirect -- -E 'test(/^redirect::scope::/) | test(/^for_run::/) | binary(block_redirect) | binary(group) | binary(redirect)'
 //! POSIX #2.4: a redirection belongs to the simple command it is written on,
 //! and a simple command includes a user-function call and an in-process builtin.
 //! `Scope` applies a command's redirections to the shell's own fds and puts the
