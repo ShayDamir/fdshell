@@ -412,10 +412,7 @@ fn the_combined_redirect_family_on_the_group_closer() {
 
     // The shapes that stay reports — the family's pidvar half (bash rejects it
     // behind a `}`; the pidvar is a simple-command position) and the
-    // rc-1-vs-2 pair (no operand, a word behind the operator). The `%var` target is
-    // the documented fd-variable divergence (POSIX_COMPATIBILITY, ">`%var` and
-    // `&>%var` redirect to the descriptor"): the lookup runs, `%v` is unbound, rc 1,
-    // and no file named `%v` is created — bash writes that file.
+    // rc-1-vs-2 pair (no operand, a word behind the operator).
     for (script, want_err) in [
         (
             "{ echo g; } &>&job; echo tail",
@@ -431,12 +428,24 @@ fn the_combined_redirect_family_on_the_group_closer() {
             "{ echo g; } &> f x; echo tail",
             "group: unexpected word after '}'",
         ),
-        ("{ echo g; } &>%v; echo tail", "fd variable 'v' is not set"),
     ] {
         let (out, err, rc) = run(script);
         assert_eq!((out.as_str(), rc), ("", 1), "bash rc 2; {script}: {err}");
         assert!(err.contains(want_err), "{script}: {err}");
     }
+
+    // The `%var` target is the documented fd-variable divergence
+    // (POSIX_COMPATIBILITY, ">`%var` and `&>%var` redirect to the descriptor"):
+    // the lookup runs, `%v` is unbound, the failing open converts to a command
+    // failure (task #179) so `tail` prints at rc 0 like bash, and no file named
+    // `%v` is created — bash writes that file.
+    let (out, err, rc) = run("{ echo g; } &>%v; echo tail");
+    assert_eq!(
+        (out.as_str(), rc),
+        ("tail\n", 0),
+        "bash writes the file named %v: {err}"
+    );
+    assert!(err.contains("fd variable 'v' is not set"), "{err}");
 }
 
 /// bash requires the `;` before `}`, an empty group is a syntax error, and a word

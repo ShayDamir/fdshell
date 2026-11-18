@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C loops -C --test -C trap -C --test -C block_redirect -- -E 'test(/^for_run::/) | binary(loops) | binary(trap) | binary(block_redirect)'
 //! Run the arithmetic `for ((init;cond;step)) ; do … ; done` (bash's
 //! `FOR_ACTION`): init once, then condition, body, step — the shape XCU 2.9.3
 //! states and bash implements. Each clause is evaluated **in-process** by
@@ -7,6 +8,7 @@
 use crate::error::cmd::CmdError;
 use crate::loop_control::{AtLevel, LoopControl, at_level, in_loop};
 use crate::parse::for_block::arith::ArithForBlock;
+use crate::run::failing;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use sys::ScriptText;
@@ -19,9 +21,16 @@ pub(crate) fn run(
     // The redirections written after `done` belong to the whole loop (task
     // #298): the scope opens **before** the init clause runs (bash's order,
     // measured — a `$(touch m)` in a clause is not expanded when the open
-    // fails), and it restores on every exit path (`Scope::run`).
-    crate::redirect::Scope::open(&block.redirects, cell)?
-        .run(|| in_loop(cell, || run_loop(block, cell)))
+    // fails), and it restores on every exit path (`Scope::run`). A failing
+    // open fails the loop and the script continues (task #179).
+    let scope = match crate::redirect::Scope::open(&block.redirects, cell) {
+        Ok(scope) => scope,
+        Err(report) => {
+            failing::convert(report, cell)?;
+            return Ok(None);
+        }
+    };
+    scope.run(|| in_loop(cell, || run_loop(block, cell)))
 }
 
 fn run_loop(

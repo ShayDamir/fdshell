@@ -11,6 +11,7 @@ use crate::error::cmd::CmdError;
 use crate::error::wait::WaitError;
 use crate::loop_control::LoopControl;
 use crate::parse::wait_block::WaitBlock;
+use crate::run::failing;
 use crate::state::ShellState;
 
 use arm::dispatch;
@@ -23,8 +24,17 @@ pub(crate) fn run_wait(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     // The redirections written after the block's `done` apply to the whole poll
-    // round (task #298 — family consistency: bash has no `wait` block twin).
-    crate::redirect::Scope::open(&block.redirects, cell)?.run(|| run_round(block, cell))
+    // round (task #298 — family consistency: bash has no `wait` block twin). A
+    // failing open lands as the round's status 1 and the script continues
+    // (task #179).
+    let scope = match crate::redirect::Scope::open(&block.redirects, cell) {
+        Ok(scope) => scope,
+        Err(report) => {
+            failing::convert(report, cell)?;
+            return Ok(None);
+        }
+    };
+    scope.run(|| run_round(block, cell))
 }
 
 /// The round proper: poll the block's fds, dispatch a forked arm child per ready

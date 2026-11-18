@@ -7,6 +7,7 @@ mod word;
 use crate::error::cmd::CmdError;
 use crate::loop_control::{AtLevel, LoopControl, at_level, in_loop};
 use crate::parse::for_block::ForBlock;
+use crate::run::failing;
 use crate::state::ShellState;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
@@ -22,9 +23,16 @@ pub(crate) fn run_for(
     // The redirections written after `done` belong to the whole loop (task
     // #298): the scope opens **before** the word list is expanded (bash's
     // order, measured), so a failing open leaves a `$(touch m)` word list
-    // unexpanded, and it restores on every exit path (`Scope::run`).
-    crate::redirect::Scope::open(&forblock.redirects, cell)?
-        .run(|| in_loop(cell, || run_for_body(forblock, text, cell)))
+    // unexpanded, and it restores on every exit path (`Scope::run`). A failing
+    // open fails the loop and the script continues (task #179).
+    let scope = match crate::redirect::Scope::open(&forblock.redirects, cell) {
+        Ok(scope) => scope,
+        Err(report) => {
+            failing::convert(report, cell)?;
+            return Ok(None);
+        }
+    };
+    scope.run(|| in_loop(cell, || run_for_body(forblock, text, cell)))
 }
 
 fn run_for_body(

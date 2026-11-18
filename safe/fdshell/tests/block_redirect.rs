@@ -442,10 +442,9 @@ fn an_empty_word_list_creates_the_target_empty() {
 
 /// A failing open aborts the block **before** its own evaluation: the `for`
 /// word list and the `case` word are not expanded, so their side effects
-/// (`touch m`) never happen (bash's order, measured). fdshell stops the `-c`
-/// script at rc 1 where bash reports the command's failure and continues — the
-/// standing rc convention of task **#179**, pinned by name, never fixed in
-/// passing.
+/// (`touch m`) never happen (bash's order, measured). The failing open fails
+/// the block at status 1 and the shell continues — `tail` prints and the
+/// script ends at rc 0 (task **#179**, bash parity).
 #[test]
 fn a_failing_open_precedes_the_blocks_own_word_expansion() {
     for (script, closer) in [
@@ -470,12 +469,16 @@ fn a_failing_open_precedes_the_blocks_own_word_expansion() {
         let o = run(&dir, script);
         assert_eq!(
             rc(&o),
-            Some(1),
+            Some(0),
             "{closer}: stdout={:?} stderr={:?}",
             out(&o),
             err(&o)
         );
-        assert_eq!(out(&o), "", "{closer}: `tail` never prints (task #179)");
+        assert_eq!(
+            out(&o),
+            "tail\n",
+            "{closer}: the shell continues (task #179)"
+        );
         assert!(
             file(&dir, "m").is_none(),
             "{closer}: the word list is not expanded"
@@ -794,16 +797,21 @@ fn a_body_that_closes_the_saved_copy_fails_the_block() {
 }
 
 /// The same floor with the close **in the tail** (`done > f 6>&-`): the scope
-/// cannot restore a saved copy the script closed, so the block fails at rc 1 with
-/// the target created empty and no output — byte-identical to the group twin
-/// `{ echo g; } > f 6>&-` on `master`, which is the rule this task takes from the
-/// group. bash gives rc 0 with the block's output in `f` and `tail` printed; the
-/// owner of the floor (a script-nameable fd 6 is the saved copy) is **#184**.
+/// cannot close a saved copy the script never had, so the block fails at
+/// status 1 and the shell continues now (task #179) — `tail` prints and the
+/// failed open rolls back, leaving the target created empty. bash gives rc 0
+/// with `tail` printed and the block's output in `f`, no message; the owner of
+/// the floor (a script-nameable fd 6 is the saved copy) is **#184**.
 #[test]
 fn a_tail_that_closes_the_saved_copy_fails_the_block() {
     let dir = Scratch::new();
     let o = run(&dir, "while :; do echo a; break; done > f 6>&-; echo tail");
-    assert_eq!((out(&o), rc(&o)), ("", Some(1)), "stderr={}", err(&o));
+    assert_eq!(
+        (out(&o), rc(&o)),
+        ("tail\n", Some(0)),
+        "the shell continues after the failed block: stderr={}",
+        err(&o)
+    );
     assert!(
         err(&o).contains("failed to close redirection target fd 6"),
         "the restore names the fd it could not close: stderr={}",
@@ -812,15 +820,15 @@ fn a_tail_that_closes_the_saved_copy_fails_the_block() {
     assert_eq!(
         file(&dir, "f"),
         Some(b"".to_vec()),
-        "the block's output never reaches the target: the scope opened and failed"
+        "the block's output never reaches the target: the scope rolled back"
     );
 
     let dir = Scratch::new();
     let o = run(&dir, "{ echo g; } > f 6>&-; echo tail");
     assert_eq!(
         (out(&o), rc(&o), file(&dir, "f")),
-        ("", Some(1), Some(b"".to_vec())),
-        "the group twin behaves identically (already `master`'s behavior): stderr={}",
+        ("tail\n", Some(0), Some(b"".to_vec())),
+        "the group twin behaves identically: stderr={}",
         err(&o)
     );
 }
@@ -1147,7 +1155,9 @@ fn the_combined_redirect_family_on_a_closer() {
     // reads the fd-variable source — the family's documented divergence
     // (POSIX_COMPATIBILITY, ">`%var` and `&>%var` redirect to the descriptor"),
     // pinned at the simple-command level in `tests/redirect.rs` and here at the
-    // closer. The lookup runs, `%v` is unbound, rc 1, no file is created.
+    // closer. The lookup runs, `%v` is unbound, the failing open converts to a
+    // command failure (task #179) so `tail` prints at rc 0 like bash, and no
+    // file is created.
     let dir = Scratch::new();
     let o = run(
         &dir,
@@ -1155,7 +1165,7 @@ fn the_combined_redirect_family_on_a_closer() {
     );
     assert_eq!(
         (out(&o), rc(&o)),
-        ("", Some(1)),
+        ("tail\n", Some(0)),
         "bash: stdout tail, file `%v`; stderr={}",
         err(&o)
     );

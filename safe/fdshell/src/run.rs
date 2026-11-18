@@ -11,6 +11,7 @@ use crate::state::ShellState;
 
 mod async_job;
 mod cmd;
+pub(crate) mod failing;
 mod parent;
 mod pipeline;
 
@@ -39,7 +40,16 @@ pub(crate) fn run_one(
     background: bool,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     let text = crate::alias_expand::expand_alias(text, cell)?;
-    let text = crate::brace_expand::expand(&text)?;
+    // The brace guard's `ambiguous redirect` bail is a redirect-layer report
+    // produced pre-parse, and `run_one` is the per-statement boundary: the
+    // failing statement lands here (task #179) and the script continues.
+    let text = match crate::brace_expand::expand(&text) {
+        Ok(text) => text,
+        Err(report) => {
+            failing::convert(report, cell)?;
+            return Ok(None);
+        }
+    };
     let parsed = crate::parse::parse(&text).change_context(CmdError::Parse)?;
     run_parsed(&parsed, &text, cell, background)
 }

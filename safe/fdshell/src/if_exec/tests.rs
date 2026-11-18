@@ -266,13 +266,14 @@ fn the_scope_restores_when_the_control_propagates() {
     assert_eq!(link(1), before, "the restore runs on the propagating path");
 }
 
-/// The scope opens **before** the condition runs, so a failing open aborts the
-/// command: the condition and the body never run (bash's order, measured).
+/// The scope opens **before** the condition runs, so a failing open fails the
+/// command at status 1 and the caller continues (task #179): the condition and
+/// the body never run (bash's order, measured).
 #[test]
 fn a_failing_open_skips_the_condition_and_the_body() {
     let cell = make_cell();
     let block = if_block(b"if :; then x=1; fi > /nope/dir/f");
-    let e = run_if(&block, &cell).unwrap_err();
-    assert!(matches!(e.current_context(), CmdError::Redirect));
+    assert_eq!(run_if(&block, &cell).unwrap(), None);
+    assert_eq!(status(&cell), 1);
     assert!(var(&cell, "x").is_none(), "the then-body never ran");
 }

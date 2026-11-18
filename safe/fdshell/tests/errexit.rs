@@ -5,7 +5,7 @@
 //!
 //! Every row here is measured against bash 5.3.9(1) with stdin `/dev/null`,
 //! stdout only; the expected values are bash's, and the owner-pinned
-//! divergences name their owners (`#179`, and `#556` for the `for`-block-as-
+//! divergences name their owners (`#556` for the `for`-block-as-
 //! loop-condition parse gap pinned in task #491's test) with bash's value
 //! beside them. Task **#490**'s rows — the pipeline-stage exemption — moved to
 //! bash's value with the arm.
@@ -477,28 +477,29 @@ fn existing_errexit_pins_stay_green() {
     ]);
 }
 
-/// A gated compound whose **redirection** cannot open its target: bash prints
-/// `rc=1` at rc 0 (the failing open is the compound's status, the gate exempts
-/// it, the list runs on). fdshell aborts the whole script at rc 1, with its own
-/// `redirection failed` report — the abort is the
-/// `#179` divergence ("a redirect-open failure aborts the remaining commands;
-/// POSIX fails only the command"), not an errexit gate gap: the same shape
-/// **without** `set -e` also aborts here (`tail` printed by bash, nothing by
-/// fdshell), and the ungated row agrees only by coincidence.
+/// A gated compound whose **redirection** cannot open its target: the failing
+/// open is the compound's status (rc 1, task #179), the gate exempts it, and
+/// the list runs on — `rc=1` at rc 0, bash's value. The ungated rows show the
+/// gate deciding: without `set -e` the shell runs on at rc 0, and with it
+/// errexit fires and `echo rc=$?` never runs (bash's rc 1, the row agreeing by
+/// the gate, not by an abort).
 #[test]
-fn a_gated_compound_with_an_unopenable_redirect_keeps_its_owner_179() {
+fn a_gated_compound_with_an_unopenable_redirect_keeps_its_owner() {
     let dir = Scratch::new("redirect");
     for (script, out, rc) in [
-        // bash: `rc=1` rc 0. fdshell (pinned, owner #179): no output, rc 1.
         (
             "set -e; for x in 1; do true; done > nodir/x && echo after; echo rc=$?",
-            "",
-            1,
+            "rc=1\n",
+            0,
         ),
-        // bash: `tail` rc 0 — the errexit-free control row of the same abort.
-        ("for x in 1; do true; done > nodir/x; echo tail", "", 1),
-        // The ungated twin agrees with bash's rc (both exit 1): the abort, not
-        // the gate, decides it. bash: rc 1, no output.
+        // The errexit-free control row: the shell runs on at rc 0.
+        (
+            "for x in 1; do true; done > nodir/x; echo tail",
+            "tail\n",
+            0,
+        ),
+        // The ungated twin: errexit fires on the command's status (bash rc 1,
+        // no output).
         (
             "set -e; for x in 1; do true; done > nodir/x; echo rc=$?",
             "",

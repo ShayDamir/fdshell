@@ -1134,8 +1134,8 @@ naming `{a,b}`, nothing opened, as bash does. Pins:
 matrix), `…::brace_expanded_redirect_operand_parity_rows` (the kept
 divergences — `>{,zz}`, `cat {3,4}>f`, the unopened preceding `out`, the
 `<&word` rows #370 owns),
-`…::ambiguous_redirect_aborts_the_script_and_names_179` (the script abort
-stays #179's). Coverage records the guard's
+`…::ambiguous_redirect_fails_the_command_and_continues` (the guard's report
+now fails only the command — bash parity, task #179). Coverage records the guard's
 `span.get(off..)`/`ShortCStr::from_vec` and `operand_offset`'s in-range
 slicing `?`s as **unreachable by construction** (a raw span is never shorter
 than its quote-stripped text; source bytes are NUL-free).
@@ -2756,13 +2756,13 @@ condition rows included, is `safe/fdshell/tests/errexit.rs`.
 
 Reproduction trick for any new errexit row: run it with `set -e` **removed**.
 If the shell still stops there, the row is not about errexit. That is how
-`set -e; for x in 1; do true; done > nodir/x && echo after` proved to be the
-redirect-open abort of task #179 (fdshell aborts the script with and without
-`-e`, bash runs on) and how `set -e; for x in 1; do false; done | cat` stayed
-a real errexit row: task #490's non-final-stage exemption, whose mechanism is
-the stage's own **fork** — the flag rides the state copy, nothing is gated,
-and the row is pinned at bash's parity. The #179 row stays pinned at fdshell's
-measured value with bash's value beside it and its owner named.
+`set -e; for x in 1; do true; done > nodir/x && echo after` proved to be a
+failing redirect-open (task #179: fdshell aborted the script with and without
+`-e`; the open failure now fails only the command, so the row is a plain
+gate-exempt row pinned at bash's value) and how `set -e; for x in 1; do
+false; done | cat` stayed a real errexit row: task #490's non-final-stage
+exemption, whose mechanism is the stage's own **fork** — the flag rides the
+state copy, nothing is gated, and the row is pinned at bash's parity.
 
 ## Bash's `-c` mode exits 127 on an unbound-variable expansion error; script mode exits 1
 `bash -c 'set -u; echo $x'` exits **127** on bash 5.3 (the `-c` path reports
@@ -3295,10 +3295,14 @@ shape argument substitution already has in the child). The `%fd` cache is
 created per open call, the IFS is cloned out of the `ForkCell` before the glob
 re-borrows it, and every borrow stays block-scoped (see
 "Never hold a ForkCell borrow across a recursive call that re-borrows").
-8. **Pin the rc divergence, never "fix" it in passing.** A failed redirection
-aborts fdshell's script where bash skips only the command (task #179):
-`echo hi > $(true); echo after` prints nothing at rc 1. The pins encode
-fdshell's behaviour and name #179, so a later rc change is a visible edit.
+8. **Pins encode behaviour; an rc change is a visible edit.** Task #179 closed
+   the divergence this rule used to pin: a failed redirection now fails only
+   the command — stderr report, status 1, the shell continues — at bash's
+   parity: `echo hi > $(true); echo after` prints `after` at rc 0. Special
+   builtins and `exec` keep the POSIX abort scope (bash's default mode
+   continues; `set -o posix` agrees with fdshell), and non-redirect failures
+   on this surface (expansion, write failures) stay on the abort channel with
+   their own pins.
 9. **Its one accepted-equivalent mutant is now killed, by narrowing the
    accessor.** The dup arm's gate in `parse/redirect/attached.rs` read the `&`
    bit through the 2-byte window `quoted_bytes(mask, op_pos + 1, op_pos + 2)`,

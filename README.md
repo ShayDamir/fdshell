@@ -352,7 +352,12 @@ sees the descriptors the earlier ones left: `cmd > f 2>&1` puts fd 2 into `f`
 `cmd 2>&1 > f` leaves fd 2 on the terminal. The target opens follow the same
 order and stop at the first failure, so the side effects of the earlier opens
 survive a later failure (`cmd > f 2> missing/dir/x` creates the empty `f`,
-`cmd 2> missing/dir/x > f` creates nothing) — as bash applies them. A pipeline
+`cmd 2> missing/dir/x > f` creates nothing) — as bash applies them. A failing
+open — an errno, a noclobber refusal, an ambiguous operand — fails **only the
+command**: the report goes to stderr, its status is 1, and the shell continues
+with the next statement, as bash does; special builtins and `exec` keep the
+POSIX abort scope (the report ends the run — bash's default mode continues,
+`set -o posix` agrees with fdshell). A pipeline
 stage's own pipe ends are part of that state before the stage's redirections
 run, so `cat missing 2>&1 | cat > g` puts the message into the pipe, and
 `cat missing > f 2>&1 | cat > g` puts it in `f`.
@@ -513,7 +518,8 @@ pattern word's `)` (`case x in a) echo hi;;b)esac>f` files nothing, task #421). 
 scope opens **before** the block's own word list or condition runs, so a target
 that fails to open stops
 the block before its first command expands anything (`for x in $(touch m; echo
-a); do :; done > /nope/x` leaves no `m`; the rc-1 abort is task #179's), and it
+a); do :; done > /nope/x` leaves no `m`; the block fails at status 1 and the
+shell continues, as bash does — task #179), and it
 is undone at the block's end, so an `exec > z` inside the body dies with the
 block. The tail follows the simple-command rules: several redirections apply in
 order and the last one on a descriptor wins (`done > f > g` leaves `f` empty and
@@ -1215,9 +1221,10 @@ io-number **prefix** still produce several redirect words, so `{3,4}>f` runs one
 `cat` with fds 3 and 4 on `f` where bash runs `cat 3` and `cat 4`; a redirect
 that **precedes** the ambiguous one is left unopened, where bash opens it
 (`echo x >out >{a,b}` creates no `out`); the attached one-non-empty-word form
-`>{,zz}` is a parse error where bash opens `zz`; and a failed redirection aborts
-the **script**, where bash skips only the command (the async form
-`echo x >{a,b} &` is rc 1 in fdshell, where bash's own status is 0).
+`>{,zz}` is a parse error where bash opens `zz`; and the async form
+`echo x >{a,b} &` is refused in the parent (rc 1), where bash prints the
+diagnostic in the child and its own status is 0. A failed redirection now fails
+only the command at bash's parity (task #179).
 
 ### Arithmetic
 
@@ -1769,8 +1776,9 @@ there — while the shell sees only the last stage's status and runs on:
 `set -e; for x in 1; do false; done | cat; echo rc=$?` prints `rc=0` at rc 0, and
 a keyword block written *before* the pipe is read as the pipeline's first stage
 (task #490). A redirection whose target cannot be
-opened aborts the whole script here, `set -e` written or not, where bash fails
-only that command (task #179).
+opened fails only the command, and the gate decides from that status — with
+`set -e` written the shell exits, without it it runs on — at bash's parity
+(task #179).
 
 A `&&`/`||` with **no command behind it** reports, at statement level too:
 `echo a &&`, `echo a && #c` and `echo a && ; echo b` print nothing at fdshell's

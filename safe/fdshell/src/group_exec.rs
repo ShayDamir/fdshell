@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C group -C --test -C block_redirect -C --test -C redirect -- -E 'test(/^group_exec::/) | binary(group) | binary(block_redirect) | binary(redirect)'
 //! The `{ …; }` group command (POSIX #1.2): the body runs in the current
 //! shell (no fork), so its assignments, `cd`, and fd state persist past the
 //! group, and the redirections written after `}` apply to the shell for the
@@ -6,6 +7,7 @@
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::parse::group_block::GroupBlock;
+use crate::run::failing;
 use crate::state::ShellState;
 use error_stack::Report;
 use sys::fork_cell::ForkCell;
@@ -16,9 +18,16 @@ pub(crate) fn run_group(
     group: &GroupBlock,
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
-    // The scope opens before the body, so a failing redirection open aborts the
-    // group without running it (the same rule as a function call, `run/parent.rs`).
-    let scope = crate::redirect::Scope::open(&group.redirects, cell)?;
+    // The scope opens before the body, so a failing redirection open fails the
+    // group without running it (the same rule as a function call,
+    // `run/parent.rs`); the task #179 conversion lets the script continue.
+    let scope = match crate::redirect::Scope::open(&group.redirects, cell) {
+        Ok(scope) => scope,
+        Err(report) => {
+            failing::convert(report, cell)?;
+            return Ok(None);
+        }
+    };
     let result = crate::nest::deeper(cell, CmdError::NestingTooDeep, || {
         crate::script::run_script(&group.body, cell)
     });

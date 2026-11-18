@@ -1,9 +1,11 @@
+// mutants: -C --lib -C --test -C redirect -C --test -C heredoc -C --test -C env_assign -- -E 'test(/^run::cmd::/) | binary(redirect) | binary(heredoc) | binary(env_assign)'
 //! The simple-command path: expand word 0, run the parent-side handlers, then
 //! launch the forked child — all of it inside the scoped `NAME=value` prefix.
 
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
 use crate::redirect::Scope;
+use crate::run::failing;
 use crate::run_env::EnvSave;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
@@ -40,7 +42,18 @@ pub(crate) fn run_cmd(
     // execution environment (POSIX 2.9.1), so the exports the apply added are put
     // back afterwards; a name already visible to a child keeps its new value.
     if omits_the_name(&cmdline, cell)? {
-        Scope::open(&cmdline.redirects, cell)?.run(|| {
+        // A failing open lands here as the statement's own failure (task
+        // #179): print, status 1, and the prefix persists exactly as the
+        // arm's own rule says it would have.
+        let scope = match Scope::open(&cmdline.redirects, cell) {
+            Ok(scope) => scope,
+            Err(report) => {
+                failing::convert(report, cell)?;
+                crate::run_env::drop_new_exports(save, cell)?;
+                return Ok(None);
+            }
+        };
+        scope.run(|| {
             let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
             let code = state
                 .last_substitution
@@ -64,7 +77,14 @@ pub(crate) fn run_cmd(
     // Forked commands must expand their args against the previous `$_`,
     // so the child (not the parent) reports the new value via the capture
     // socket, consumed by `finish_cmd`.
-    let outcome = crate::launch::launch(cell, &cmdline, &env).change_context(CmdError::Launch)?;
+    let outcome = match crate::launch::launch(cell, &cmdline, &env) {
+        Err(report) if failing::classifies_launch(&report) => {
+            failing::fail(&report, cell)?;
+            return Ok(None);
+        }
+        Err(report) => Err(report.change_context(CmdError::Launch))?,
+        Ok(outcome) => outcome,
+    };
     {
         let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
         state.last_status =

@@ -447,20 +447,17 @@ fn a_block_stage_writes_into_a_capture() {
 }
 
 /// A redirect naming a fd var that is **not set** fails inside the block stage,
-/// and the failure carries its own context (`StageFailed`) on top of the
-/// redirect's report: the chain names the compound command, the launch and the
-/// unset fd var, rc 1.
+/// and the failure converts at the launch boundary now (task #179): the
+/// pipeline ends at rc 0 like bash, and stderr carries the launch frame with
+/// the unset fd var (bash itself is silent — it writes a file named `%nope`,
+/// the documented fd-variable divergence of POSIX_COMPATIBILITY).
 #[test]
 fn a_block_stage_failure_reports_its_own_context() {
     let dir = Scratch::new();
     let out = run(&dir, "echo a | while :; do echo b >&%nope; break; done");
     let err = str::from_utf8(&out.stderr).unwrap().to_string();
-    assert_eq!(out.status.code(), Some(1), "{err}");
-    assert!(
-        err.contains("compound command in a pipeline stage failed")
-            && err.contains("fd variable 'nope' is not set"),
-        "{err}"
-    );
+    assert_eq!(out.status.code(), Some(0), "{err}");
+    assert!(err.contains("fd variable 'nope' is not set"), "{err}");
 }
 
 /// `time` behind the `|` is the stage's **word 0**, not a transparent prefix of

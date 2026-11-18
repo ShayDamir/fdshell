@@ -1,6 +1,7 @@
 // mutants: -C --lib -C --test -C umask -C --test -C last_arg -C --test -C arrays -C --test -C unset -C --test -C loops -C --test -C function_keyword -C --test -C cmd_subst -- -E 'test(/^tests::run::/) | binary(umask) | binary(last_arg) | binary(arrays) | binary(unset) | binary(loops) | binary(function_keyword) | binary(cmd_subst)'
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
+use crate::run::failing;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use sys::ScriptText;
@@ -35,20 +36,28 @@ pub(crate) fn run_simple(
     }
     match parsed {
         crate::parse::ParsedLine::AssignFd { var, value } => {
-            state::assign_fd(var, value, text, cell)?;
+            let Some(()) = failing::pass(state::assign_fd(var, value, text, cell), cell)? else {
+                return Ok(None);
+            };
         }
         crate::parse::ParsedLine::AssignStr(assign) => {
-            assign_str::set(assign, text, cell)?;
+            let Some(()) = failing::pass(assign_str::set(assign, text, cell), cell)? else {
+                return Ok(None);
+            };
             finish_assignment(cell)?;
         }
         crate::parse::ParsedLine::AssignStrs(assigns) => {
             for assign in assigns {
-                assign_str::set(assign, text, cell)?;
+                let Some(()) = failing::pass(assign_str::set(assign, text, cell), cell)? else {
+                    return Ok(None);
+                };
             }
             finish_assignment(cell)?;
         }
         crate::parse::ParsedLine::AssignArray(assigns) => {
-            assign_array::run(assigns, text, cell)?;
+            let Some(()) = failing::pass(assign_array::run(assigns, text, cell), cell)? else {
+                return Ok(None);
+            };
         }
         crate::parse::ParsedLine::Unset(targets) => unset::run(targets, cell)?,
         crate::parse::ParsedLine::Umask {

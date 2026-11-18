@@ -321,13 +321,14 @@ fn the_scope_restores_on_the_report_path() {
 }
 
 /// The scope opens **before** the first condition test, so a failing open
-/// aborts the loop: the condition and the body never run (bash's order).
+/// fails the loop at status 1 and the caller continues (task #179): the
+/// condition and the body never run (bash's order, measured).
 #[test]
 fn a_failing_open_aborts_the_loop_before_its_first_condition() {
     let cell = make_cell();
     let block = loop_block(b"while :; do x=1; break; done > /nope/dir/f");
-    let e = run_loop(&block, true, &cell).unwrap_err();
-    assert!(matches!(e.current_context(), CmdError::Redirect));
+    assert_eq!(run_loop(&block, true, &cell).unwrap(), None);
+    assert_eq!(status(&cell), 1);
     assert!(var(&cell, "x").is_none(), "the body never ran");
 }
 

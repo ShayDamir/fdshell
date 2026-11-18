@@ -1,9 +1,13 @@
+// mutants: -C --lib -C --test -C redirect -C --test -C redirect_scope -C --test -C cd_expand -- -E 'test(/^run::parent::/) | binary(redirect) | binary(redirect_scope) | binary(cd_expand)'
 //! The parent-side handlers of a command: a user-function call, or an
 //! intercepted in-process builtin. POSIX #2.4: the command's redirections apply
-//! to it, and the shell's fds are put back when it finishes.
+//! to it, and the shell's fds are put back when it finishes. A redirect-layer
+//! failure converts here for a user-function call and a non-special intercept
+//! (task #179); the POSIX gate keeps its abort scope.
 
 use crate::error::cmd::CmdError;
 use crate::loop_control::LoopControl;
+use crate::run::failing;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
 use sys::ScriptText;
@@ -26,7 +30,14 @@ pub(crate) fn run_parent(
     // command without running it (bash `cd /nope/x >f` → rc 1, no `cd`).
     // `exec`/`become` replace the process image, so they opt out of the restore.
     let scope = if body.is_some() || crate::intercept::commands::is_in_process(name) {
-        Some(crate::redirect::Scope::open(&cmdline.redirects, cell)?)
+        match crate::redirect::Scope::open(&cmdline.redirects, cell) {
+            Ok(scope) => Some(scope),
+            Err(report) if failing::converts(name, body.is_some(), &report) => {
+                failing::fail(&report, cell)?;
+                return Ok(Some(None));
+            }
+            Err(report) => return Err(report),
+        }
     } else {
         None
     };
@@ -43,9 +54,15 @@ pub(crate) fn run_parent(
         }
         // The handler's report is the actionable error; the restore is
         // best-effort, the same rule as `run_env::restore` on the error path.
+        // A classifying report from a function frame or a non-special
+        // intercept converts after the restore (task #179).
         Err(report) => {
             if let Some(scope) = scope {
                 let _ = scope.restore();
+            }
+            if failing::converts(name, body.is_some(), &report) {
+                failing::fail(&report, cell)?;
+                return Ok(Some(None));
             }
             Err(report)
         }

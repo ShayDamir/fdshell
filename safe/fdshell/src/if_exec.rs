@@ -7,6 +7,7 @@ use error_stack::{Report, ResultExt};
 use crate::cond::errexit;
 use crate::error::cmd::CmdError;
 use crate::parse::if_block::IfBlock;
+use crate::run::failing;
 use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -24,9 +25,17 @@ pub(crate) fn run_if(
     cell: &ForkCell<ShellState>,
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     // The redirections written after `fi` belong to the whole `if` (task #298):
-    // the scope opens before the condition runs, so a failing open aborts the
-    // command, and it restores on every exit path (`Scope::run`).
-    crate::redirect::Scope::open(&ifblock.redirects, cell)?.run(|| run_if_body(ifblock, cell))
+    // the scope opens before the condition runs, so a failing open fails the
+    // command, and it restores on every exit path (`Scope::run`). A failing
+    // open lands as the `if`'s status 1 and the script continues (task #179).
+    let scope = match crate::redirect::Scope::open(&ifblock.redirects, cell) {
+        Ok(scope) => scope,
+        Err(report) => {
+            failing::convert(report, cell)?;
+            return Ok(None);
+        }
+    };
+    scope.run(|| run_if_body(ifblock, cell))
 }
 
 /// The `if` proper: the condition, the taken arm's body, the `elif` chain, and

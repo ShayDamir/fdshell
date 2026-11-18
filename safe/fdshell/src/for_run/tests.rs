@@ -195,7 +195,6 @@ fn step_arith_error_surfaces_after_the_body() {
 // --- the redirection written after the block's `done` (task #298) ----------
 
 use super::run_for;
-use crate::error::cmd::CmdError;
 use crate::parse::for_block::ForBlock;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -280,7 +279,8 @@ fn an_empty_word_list_still_creates_the_file() {
 
 /// The scope opens **before** the word list is expanded, so a failing open
 /// leaves a side-effecting word list unexpanded (bash's order, measured: no
-/// `m` file).
+/// `m` file) and fails the loop at status 1 while the caller continues
+/// (task #179).
 #[test]
 fn a_failing_open_leaves_the_word_list_unexpanded() {
     let (_dir, scratch) = temp_path("words");
@@ -289,8 +289,12 @@ fn a_failing_open_leaves_the_word_list_unexpanded() {
     seed(&cell, format!("cd {}", scratch.display()).as_bytes());
     let text = stext(b"for x in $(touch m; echo a); do :; done > /nope/dir/f");
     let block = for_block(text.as_bytes().unwrap());
-    let e = run_for(&block, &text, &cell).unwrap_err();
-    assert!(matches!(e.current_context(), CmdError::Redirect));
+    assert_eq!(
+        run_for(&block, &text, &cell).unwrap(),
+        None,
+        "the failing open fails the loop at status 1, not the script (task #179)"
+    );
+    assert_eq!(status(&cell), 1);
     assert!(
         !scratch.join("m").exists(),
         "the word list is not expanded when the open fails"
@@ -311,7 +315,8 @@ fn a_redirect_after_done_applies_to_the_arithmetic_for() {
     assert_eq!(body(&a), "0\n1\n");
 }
 
-/// A failing open on the arithmetic `for` leaves the clauses unrun: no `m`.
+/// A failing open on the arithmetic `for` leaves the clauses unrun: no `m`;
+/// the loop fails at status 1 and the caller continues (task #179).
 #[test]
 fn a_failing_open_leaves_the_arithmetic_clauses_unrun() {
     let (_dir, scratch) = temp_path("arith_words");
@@ -319,8 +324,12 @@ fn a_failing_open_leaves_the_arithmetic_clauses_unrun() {
     seed(&cell, format!("cd {}", scratch.display()).as_bytes());
     let text = stext(b"for ((i=$(touch m; echo 1);i<2;i++)); do :; done > /nope/dir/f");
     let block = arith_block(text.as_bytes().unwrap());
-    let e = run(&block, &cell).unwrap_err();
-    assert!(matches!(e.current_context(), CmdError::Redirect));
+    assert_eq!(
+        run(&block, &cell).unwrap(),
+        None,
+        "the failing open fails the loop at status 1, not the script (task #179)"
+    );
+    assert_eq!(status(&cell), 1);
     assert!(
         !scratch.join("m").exists(),
         "no clause is evaluated when the open fails"

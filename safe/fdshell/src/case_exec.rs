@@ -11,6 +11,7 @@ use hashbrown::HashMap;
 
 use crate::error::cmd::CmdError;
 use crate::parse::case_block::CaseBlock;
+use crate::run::failing;
 use crate::state::ShellState;
 use sys::ExportedFd;
 use sys::ShortCStr;
@@ -23,8 +24,16 @@ pub(crate) fn run_case(
     // The redirections written after `esac` belong to the whole `case` (task
     // #298). The scope opens **before** the `case` word is expanded: bash opens
     // the redirection first, so a failing open leaves the word's and the
-    // patterns' side effects unrun (measured).
-    crate::redirect::Scope::open(&caseblock.redirects, cell)?.run(|| run_case_body(caseblock, cell))
+    // patterns' side effects unrun (measured). A failing open lands as the
+    // `case`'s status 1 and the script continues (task #179).
+    let scope = match crate::redirect::Scope::open(&caseblock.redirects, cell) {
+        Ok(scope) => scope,
+        Err(report) => {
+            failing::convert(report, cell)?;
+            return Ok(None);
+        }
+    };
+    scope.run(|| run_case_body(caseblock, cell))
 }
 
 /// The `case` proper: the word, then the clause walk, in the caller's shell.

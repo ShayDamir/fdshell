@@ -172,17 +172,17 @@ fn nesting_depth_is_restored() {
     assert_eq!(var(&state, c"x"), None);
 }
 
-/// A failing redirection open aborts the group before the body runs; a failing
-/// command inside the body is reported by the body and the fds are still
-/// restored when the group ends.
+/// A failing redirection open fails the group at status 1 before the body runs,
+/// and the caller continues (task #179); a failing command inside the body is
+/// reported by the body and the fds are still restored when the group ends.
 #[test]
 fn failing_open_skips_the_body_and_errors_are_restored() {
     let cell = make_cell();
-    let e = run_group(&group_of(b"{ x=1; } > /nope/dir/f"), &cell).unwrap_err();
-    assert!(matches!(
-        e.current_context(),
-        crate::error::cmd::CmdError::Redirect
-    ));
+    assert_eq!(
+        run_group(&group_of(b"{ x=1; } > /nope/dir/f"), &cell).unwrap(),
+        None
+    );
+    assert_eq!(cell.borrow().unwrap().last_status.exit_code(), 1);
     assert_eq!(var(&cell.borrow().unwrap(), c"x"), None);
 
     let before = link(1);

@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::str;
@@ -336,9 +337,11 @@ fn duplicate_write_in_pipeline_stage() {
 
 #[test]
 fn noclobber_duplicate_write_first_target_blocks() {
-    // A failing earlier redirection aborts the command before the later one
+    // A failing earlier redirection fails the command before the later one
     // opens: `y` is absent. Reversing the order creates `y` empty and the
-    // command still fails on `x`.
+    // command still fails on `x`, but the shell runs the next command now
+    // (task #179, bash parity): the `cat` prints the empty file and the
+    // script ends at rc 0.
     let (x, y, _sp) = two_paths("noclobber");
     std::fs::write(&x, b"old").unwrap();
     let _ = std::fs::remove_file(&y);
@@ -351,7 +354,10 @@ fn noclobber_duplicate_write_first_target_blocks() {
     );
 
     let (out2, _err2, code2) = run(&format!("set -o noclobber; echo hi >{y} >{x}; cat {y}"));
-    assert_eq!(code2, 1);
+    assert_eq!(
+        code2, 0,
+        "the failing open fails the command, not the script"
+    );
     assert_eq!(out2, "");
     let created = std::fs::read_to_string(&y).unwrap();
     assert!(
@@ -1058,15 +1064,12 @@ fn stderr_dup_before_a_write_redirect_keeps_the_shell_fd() {
 fn dup_from_a_fd_the_command_closed_fails() {
     // `echo x 1>&- 2>&1`: the `Close` entry for fd 1 wins, so the `Dup` has
     // nothing to copy and the command fails rc 1 (bash: `1: Bad file
-    // descriptor`, rc 1, and bash continues with `echo rc=$?`). fdshell's
-    // redirect failure is **fatal** to the shell — the pre-existing divergence
-    // the `&>` rows above record — so the trailing `echo rc=$?` never runs.
+    // descriptor`, rc 1, and bash continues with `echo rc=$?`). fdshell now
+    // reports the failure and fails only the command, at bash's parity
+    // (task #179): the trailing `echo rc=$?` prints `rc=1` and the script ends
+    // at rc 0.
     let (out, err, code) = run("echo x 1>&- 2>&1; echo rc=$?");
-    assert_eq!(code, 1, "stderr={err:?}");
-    assert!(
-        out.is_empty(),
-        "the failed command aborts the shell, stdout={out:?}"
-    );
+    assert_eq!((out.as_str(), code), ("rc=1\n", 0), "stderr={err:?}");
     assert!(
         err.contains("fd 1 is not open") && err.contains("has nothing to duplicate"),
         "stderr={err:?}"
@@ -1427,12 +1430,12 @@ fn dev_fd_target_is_canonical_digits_only() {
 fn dev_fd_target_after_a_closed_fd_fails() {
     // `echo x 1>&- 2> /dev/fd/1`: the `Close` entry leaves no fd, and the kernel
     // has no entry for a closed descriptor, so the open fails (bash: `No such
-    // file or directory`, rc 1, and bash runs the next command). fdshell's
-    // redirect failure is fatal, so the trailing `echo rc=$?` never runs — the
-    // pre-existing policy divergence the `&>` rows record.
+    // file or directory`, rc 1, and bash runs the next command). fdshell now
+    // reports the failure and fails only the command, at bash's parity
+    // (task #179): the trailing `echo rc=$?` prints `rc=1` and the script ends
+    // at rc 0.
     let (out, err, code) = run("echo x 1>&- 2> /dev/fd/1; echo rc=$?");
-    assert_eq!(code, 1, "stderr={err:?}");
-    assert!(out.is_empty(), "stdout={out:?}");
+    assert_eq!((out.as_str(), code), ("rc=1\n", 0), "stderr={err:?}");
     assert!(err.contains("redirect"), "stderr={err:?}");
 }
 
@@ -1606,7 +1609,8 @@ fn dev_fd_target_names_an_fd_a_here_string_def_opened() {
 /// `set -C; echo e 3> z 2> /dev/fd/3` refuses with `cannot overwrite existing
 /// file` (its stat at apply time lands on `z`, a regular file) and leaves `z`
 /// empty. fdshell's side, pinned: the pass opens the later defs first, and its
-/// failing def is fatal (the standing policy) — except the `set -C` row, whose
+/// failing def fails the command (status 1) while the shell continues (task
+/// #179, at bash's rc) — except the `set -C` row, whose
 /// stat gate on the **expanded** word decides through the pre-command fd 3
 /// (the pinned `%CWD` directory — non-regular, so the plain arm defers the open
 /// to the resolver, whose table answer makes it succeed), so the command runs
@@ -1619,7 +1623,7 @@ fn a_failing_magic_open_no_longer_stops_a_later_target() {
     let (out, err, code) = run_fd3_closed(&format!(
         "cd {dir}; echo e > z 2> /dev/fd/3 > w; echo rc=$?"
     ));
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert_eq!((out.as_str(), code), ("rc=1\n", 0), "stderr={err:?}");
     assert!(err.contains("redirect"), "stderr={err:?}");
     assert_eq!(
         std::fs::read(std::path::Path::new(dir).join("z")).unwrap(),
@@ -1636,7 +1640,7 @@ fn a_failing_magic_open_no_longer_stops_a_later_target() {
     let (out, err, code) = run_fd3_closed(&format!(
         "cd {dir}; echo e 1>&- 2> /dev/fd/1 > w; echo rc=$?"
     ));
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert_eq!((out.as_str(), code), ("rc=1\n", 0), "stderr={err:?}");
     assert!(err.contains("redirect"), "stderr={err:?}");
     assert_eq!(
         std::fs::read(std::path::Path::new(dir).join("w")).unwrap(),
@@ -2611,30 +2615,23 @@ fn brace_expanded_redirect_operand_parity_rows() {
     assert!(created(&files).is_empty(), "bash: rc 2 syntax error");
 }
 
-/// The rc of a failed redirection stays fdshell's, not bash's: the script
-/// aborts (`echo after` never runs), where bash skips only the command. Task
-/// #179 owns the difference, so this is the pin that keeps it visible.
+/// The failed redirection fails only the command (task #179, bash parity): the
+/// shell prints `after` and ends at rc 0, and no target of the ambiguous
+/// operand is created.
 #[test]
-fn ambiguous_redirect_aborts_the_script_and_names_179() {
+fn ambiguous_redirect_fails_the_command_and_continues() {
     let dir = seeded("sub_abort");
     let dir = dir.to_str().unwrap();
     let (out, err, code, files) = run_ls(dir, "echo hi > $(true); echo after");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
-    assert!(
-        !out.contains("after"),
-        "bash prints `after` and skips only the command (#179)"
-    );
+    assert_eq!((out.as_str(), code), ("after\n", 0), "stderr={err:?}");
+    assert!(err.contains("ambiguous redirect"), "stderr={err:?}");
     assert!(created(&files).is_empty());
     // The brace form is the same frame (task #324): the guard fires on the
-    // pre-parse text, so the script aborts and no target of the operand is
-    // created either.
+    // pre-parse text, so the command fails before the body and no target of
+    // the operand is created either.
     let (out, err, code, files) = run_ls(dir, "echo hi >{a,b}; echo after");
-    assert_eq!((out.as_str(), code), ("", 1), "stderr={err:?}");
+    assert_eq!((out.as_str(), code), ("after\n", 0), "stderr={err:?}");
     assert!(err.contains("ambiguous redirect: {a,b}"), "stderr={err:?}");
-    assert!(
-        !out.contains("after"),
-        "bash prints `after` and skips only the command (#179)"
-    );
     assert!(created(&files).is_empty());
 }
 
@@ -4055,4 +4052,172 @@ fn a_line_ending_on_a_cond_operator_skips_the_redirected_command() {
         let (out, err, code) = run(script);
         assert_eq!((out.as_str(), code), (want, rc), "{script}: {err}");
     }
+}
+
+/// A failing open on a regular command fails **only the command**: the report
+/// goes to stderr, the command's status is 1, and the shell continues with the
+/// next statement (task #179 — every value below is bash 5.3.9's own, measured
+/// on this build). The EACCES rows are gated on the `noperm` read probe (the
+/// nix sandbox runs as root, LESSONS, `openat2_path.rs::can_read`; the mutants
+/// gate runs as a normal uid, where the rows assert). The `&&`-position row is
+/// the gate-exempt shape: `echo yes` short-circuits and only `after` prints.
+/// The assignment row pins bash's kept assignment (`[1] rc=1`) — its order must
+/// not be "fixed".
+#[test]
+fn failing_open_fails_the_command_and_continues() {
+    let dir = seeded("failing_open");
+    std::fs::create_dir_all(dir.join("adir")).unwrap();
+    std::fs::write(dir.join("existing"), b"old").unwrap();
+    std::fs::write(dir.join("noperm"), b"").unwrap();
+    std::fs::set_permissions(dir.join("noperm"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    let dir = dir.to_str().unwrap();
+    let gated = std::fs::File::open(std::path::Path::new(dir).join("noperm")).is_ok();
+    if gated {
+        eprintln!("the test process can read the 000 file; skipping the EACCES rows");
+    }
+    // (script, want stdout, want rc, want stderr substring, gated-on-the-000-file)
+    for (script, want, rc, errsub, skip) in [
+        (
+            "echo hi >adir; echo after",
+            "after\n",
+            0,
+            "Is a directory",
+            false,
+        ),
+        (
+            "set -o noclobber; echo hi >existing; echo after",
+            "after\n",
+            0,
+            "noclobber",
+            false,
+        ),
+        ("echo hi >missing; echo after", "after\n", 0, "", false),
+        (
+            "echo hi >noperm; echo after",
+            "after\n",
+            0,
+            "Permission denied",
+            true,
+        ),
+        (
+            "echo hi >noperm; echo rc=$?",
+            "rc=1\n",
+            0,
+            "Permission denied",
+            true,
+        ),
+        (
+            "if true; then echo hi >noperm; fi; echo after",
+            "after\n",
+            0,
+            "Permission denied",
+            true,
+        ),
+        (
+            "{ echo hi >noperm; echo A; }; echo after",
+            "A\nafter\n",
+            0,
+            "Permission denied",
+            true,
+        ),
+        (
+            "f() { echo hi >noperm; echo infn; }; f; echo after",
+            "infn\nafter\n",
+            0,
+            "Permission denied",
+            true,
+        ),
+        (
+            "echo hi >noperm | cat; echo after",
+            "after\n",
+            0,
+            "Permission denied",
+            true,
+        ),
+        (
+            "true >noperm && echo yes; echo after",
+            "after\n",
+            0,
+            "Permission denied",
+            true,
+        ),
+        (
+            "X=1 >noperm; echo [$X] rc=$?",
+            "[1] rc=1\n",
+            0,
+            "Permission denied",
+            true,
+        ),
+        (
+            "set -e; echo hi >noperm; echo after",
+            "",
+            1,
+            "Permission denied",
+            true,
+        ),
+        (
+            "trap 'echo caught' EXIT; echo hi >noperm; echo after",
+            "after\ncaught\n",
+            0,
+            "Permission denied",
+            true,
+        ),
+        (
+            "command true >noperm; echo after",
+            "after\n",
+            0,
+            "Permission denied",
+            true,
+        ),
+        // POSIX specials: the report ends the run (bash's default mode prints
+        // `after` at rc 0; bash's `set -o posix` aborts as fdshell does).
+        (": >noperm; echo after", "", 1, "Permission denied", true),
+        (
+            "export X=1 >noperm; echo after",
+            "",
+            1,
+            "Permission denied",
+            true,
+        ),
+        ("exec >noperm; echo after", "", 1, "Permission denied", true),
+    ] {
+        if skip && gated {
+            continue;
+        }
+        let (out, err, code) = run(&format!("cd {dir}; {script}"));
+        assert_eq!((out.as_str(), code), (want, rc), "{script}: stderr={err:?}");
+        if errsub.is_empty() {
+            assert!(err.is_empty(), "{script}: stderr={err:?}");
+        } else {
+            assert!(err.contains(errsub), "{script}: stderr={err:?}");
+        }
+    }
+}
+
+/// The partial-scope row of task #179: the def list opens `ok1` **before** the
+/// failing open, and the scope restores the fds before the shell continues —
+/// bash prints `after` and the unchanged cwd at rc 0, `ok1` is created empty,
+/// and nothing lands in it. Gated on the `noperm` read probe like
+/// `failing_open_fails_the_command_and_continues`.
+#[test]
+fn the_partial_scope_restores_before_the_shell_continues() {
+    let dir = seeded("partial_scope");
+    std::fs::write(dir.join("noperm"), b"").unwrap();
+    std::fs::set_permissions(dir.join("noperm"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(dir.join("noperm")).is_ok() {
+        eprintln!("the test process can read the 000 file; skipping the EACCES row");
+        return;
+    }
+    let dir_str = dir.to_str().unwrap();
+    let (out, err, code) = run(&format!(
+        "cd {dir_str}; cd /nonexistent > ok1 > noperm; echo after; pwd"
+    ));
+    let want = format!("after\n{dir_str}\n");
+    assert_eq!((out.as_str(), code), (want.as_str(), 0), "stderr={err:?}");
+    assert!(err.contains("Permission denied"), "stderr={err:?}");
+    assert_eq!(
+        std::fs::read(dir.join("ok1")).unwrap(),
+        b"",
+        "bash creates the empty ok1 too; nothing lands in it"
+    );
 }

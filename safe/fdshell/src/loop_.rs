@@ -7,6 +7,7 @@ use error_stack::{Report, ResultExt};
 use crate::cond::errexit;
 use crate::error::cmd::CmdError;
 use crate::parse::while_block::LoopBlock;
+use crate::run::failing;
 use crate::state::ShellState;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
@@ -26,10 +27,18 @@ pub(crate) fn run_loop(
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     // The redirections written after `done` belong to the whole loop (task
     // #298): the scope opens **before** the first condition test, so a failing
-    // open aborts the loop without running it (bash's order, measured), and it
+    // open fails the loop without running it (bash's order, measured), and it
     // restores on every exit path (`Scope::run`, the shape of `run_group`).
-    crate::redirect::Scope::open(&block.redirects, cell)?
-        .run(|| in_loop(cell, || run_loop_body(block, invert, cell)))
+    // A failing open lands as the loop's status 1 and the script continues
+    // (task #179).
+    let scope = match crate::redirect::Scope::open(&block.redirects, cell) {
+        Ok(scope) => scope,
+        Err(report) => {
+            failing::convert(report, cell)?;
+            return Ok(None);
+        }
+    };
+    scope.run(|| in_loop(cell, || run_loop_body(block, invert, cell)))
 }
 
 fn run_loop_body(

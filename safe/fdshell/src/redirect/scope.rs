@@ -51,7 +51,15 @@ impl Scope {
         for r in &resolved {
             let target = r.target();
             saved.push((target, save(target, min_fd)));
-            r.export().change_context(CmdError::Redirect)?;
+            if let Err(report) = r.export().change_context(CmdError::Redirect) {
+                // A failed open must leave the shell's fds as they were: the
+                // exports applied before this def are rolled back like the
+                // report path in `run` does (the un-applied def's own pair is
+                // a no-op — its copy is the target's state, its close already
+                // failed), so a caller that continues does so on clean fds.
+                let _ = Self { saved }.restore();
+                return Err(report);
+            }
         }
         Ok(Self { saved })
     }

@@ -298,22 +298,32 @@ fn body_that_closes_the_saved_copy_fails_the_call() {
 }
 
 /// A failing redirection open fails the command before its handler runs: the
-/// `cd` does not happen. Bash reports rc 1 for the command and continues;
-/// fdshell stops the `-c` script at rc 1, so `pwd` never prints.
+/// `cd` does not happen. Bash reports the failure, the command lands at rc 1,
+/// and `pwd` prints the unchanged cwd (task #179, bash parity).
 #[test]
 fn failing_redirect_open_fails_the_command_before_the_handler() {
     let (out, err, code) = run("cd /tmp > /nope-dir-x/f; pwd");
-    assert_eq!(code, 1, "stderr={err:?}");
-    assert_eq!(out, "");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert!(err.contains("redirection failed"), "stderr={err:?}");
+    assert_ne!(
+        out.as_str(),
+        "/tmp\n",
+        "the cd did not happen: stdout={out:?}"
+    );
+    assert!(
+        !out.is_empty(),
+        "pwd printed the unchanged cwd: stdout={out:?}"
+    );
 }
 
-/// The same for a function call: the open failure fails the call, so the body
-/// never runs and the script stops.
+/// The same for a function call: the open failure fails the call, the body
+/// never runs, and the shell continues (task #179, bash parity).
 #[test]
 fn failing_redirect_open_skips_the_function_body() {
     let (out, err, code) = run("f(){ echo x; }; f > /nope-dir-x/f; echo after");
-    assert_eq!(code, 1, "stderr={err:?}");
-    assert_eq!(out, "");
+    assert_eq!(code, 0, "stderr={err:?}");
+    assert_eq!(out, "after\n", "the body was skipped: stdout={out:?}");
+    assert!(err.contains("redirection failed"), "stderr={err:?}");
 }
 
 /// A handler that returns a non-zero status is a success path, so the scope
