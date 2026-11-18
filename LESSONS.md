@@ -11936,3 +11936,71 @@ Pins: `safe/fdshell/src/repl/prompt/value/clock/tests.rs` (the injected-instant
 table, UTC + C spelled), `safe/fdshell/src/repl/prompt/value/clock/civil/tests.rs`
 (the weekday anchor, the era and leap boundaries, 2038), and the pty row
 `safe/fdshell/tests/repl.rs::the_clock_escapes_draw_their_shapes_on_a_terminal`.
+
+## The prompt's directory display is provenance; the printed one is `getcwd` (task #619)
+
+The prompt's working-directory display reads the `%CWD` fd's stored
+`Trace::origin` — what `cd.rs::move_cwd` recorded — and never re-resolves a
+filesystem path (epic #197's rule; epic #200's TOCTOU argument is why a
+re-resolution is refused). This is the mirror of LESSONS: "The cwd's printable
+path is `getcwd`, not its `Origin`": that rule covers the **printed** path
+(`pwd`, the `cd -` echo); the prompt is a decorator input, and the `Origin`
+**is** its source.
+
+The consequence of D-619-2 is the visible half: an origin that names no path —
+the startup `open(".")` (`Origin::Shell`, `state/setters.rs::insert_cwd`),
+`Captured`, `Read`, `Stdin`, `CommandOutput`, `CliArgument`, and `EnvVar` for
+any name but `HOME` — is not a printable path either, so the provider answers
+`None` and decision D2 draws the escape's own text (`\w` draws `\w` on the
+first prompt of a session). bash draws its logical `$PWD` there; a `getcwd`
+fallback for those cases would buy parity at one syscall per prompt and is
+what the rule refuses. The divergence is recorded for #623.
+
+The display rules measured off bash 5.3.9 (2026-11-18) and pinned as fdshell's
+own answer: the `~` abbreviation applies when the path **is** `$HOME` or starts
+with `$HOME/`, through the shell's own `var_value` lookup (the same one `$HOME`
+and `~` use, LESSONS #282 — so after `unset HOME`, fdshell still abbreviates
+and bash does not: pinned divergence); a relative origin displays as typed
+(D-619-3); separators collapse before anything is counted or drawn
+(D-619-7); and no dirstack means the `+`/`-` prefix never appears (D-619-8).
+The provider makes **no** syscall — every source is a `ShellState` read
+(`fd_var`, `var_value`) — so the invariant of LESSONS: "The value provider
+answers per escape, and a pty pin computes its expectation" holds trivially
+for its three state reads; say so in the module doc, do not re-litigate them.
+
+Pins: `safe/fdshell/src/repl/prompt/value/cwd/tests.rs`
+(`a_path_origin_draws_the_origin_itself`,
+`a_relative_origin_draws_what_was_typed`,
+`the_home_prefix_becomes_a_tilde`, `an_env_var_origin_answers_only_home`,
+`an_origin_without_a_path_answers_no_value`,
+`no_dirstack_means_no_plus_or_minus_prefix`) and the pty rows
+`safe/fdshell/tests/repl.rs::the_working_directory_escape_draws_the_provenance`,
+`safe/fdshell/tests/repl.rs::an_origin_without_a_path_draws_the_escape_text`,
+`safe/fdshell/tests/repl.rs::the_home_hop_draws_a_tilde`, plus the D2-through-
+`resolve` row `safe/fdshell/src/repl/prompt/tests.rs`.
+
+## `PROMPT_DIRTRIM`'s ellipsis has two thresholds (task #619)
+
+Measured against bash 5.3.9 (2026-11-18): the **plain** branch replaces the
+leading components when `components > n` and keeps the last `n` (11-component
+path: `n=1 → .../8`, `n=10 → .../opencode/pdt/1/…`, `n=11` and `n=0` draw the
+full path; the one-component-drop boundary **does** trim — 2 components at
+`n=1 → .../opencode`). The **`~` branch** shows the ellipsis only when the
+components after `~` exceed `n + 1` — at least two components must be droppable
+(rest 5: trims at `n=1..3`, not at `n=4`; rest 3: does not trim at `n=2`, does
+at `n=1`). Those two boundary rows are the proof that one unified rule cannot
+reproduce bash, so both branches are pinned; a "simplify to one rule"
+refactor changes behaviour. `$HOME` itself and `/` are never trimmed.
+
+The value's parse is strict ASCII decimal with an optional `+`, the whole value
+(`0`/`abc`/`1e3`/`-1`/overflow → no trim; `+2` and `010` trim — bash's `010` is
+decimal, so fdshell agrees *by construction*, and `parse_base0_int` with its
+base detection is not the right helper here). bash tolerates surrounding
+whitespace and fdshell does not: pinned divergence, fdshell answers no trim.
+
+Pins: `safe/fdshell/src/repl/prompt/value/cwd/tests.rs`
+(`dirtrim_keeps_the_last_n_components`,
+`dirtrim_after_a_tilde_needs_two_components_to_drop`,
+`the_dirtrim_value_is_strictly_decimal`,
+`separators_are_collapsed_before_the_ellipsis_is_counted`) and the pty row
+`safe/fdshell/tests/repl.rs::dirtrim_ellipsis_replaces_the_leading_components`.

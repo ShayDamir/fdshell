@@ -9,12 +9,14 @@ use crate::repl::prompt::segment::ValueEscape;
 
 pub(crate) mod clock;
 pub(crate) mod composite;
+pub(crate) mod cwd;
 pub(crate) mod shell;
 
 /// What a provider answers for one value escape; `None` means "no value" and
 /// the renderer falls back to the placeholder's literal escape text
-/// (decision D2). The REPL renders through [`composite`], which asks [`shell`]
-/// and [`clock`] in turn; #619 adds its provider over the same seam.
+/// (decision D2). The REPL renders through [`composite`], which asks [`shell`],
+/// [`clock`] and [`cwd`] in turn — one provider per escape family (task #619's
+/// `cwd.rs` completed the set).
 pub(crate) trait Values {
     fn value(&self, esc: ValueEscape) -> Option<Vec<u8>>;
 }

@@ -15,6 +15,7 @@ use decode::decode;
 use render::render;
 use value::clock::ClockValues;
 use value::composite::Providers;
+use value::cwd::CwdValues;
 use value::shell::ShellValues;
 
 use alloc::vec::Vec;
@@ -31,9 +32,10 @@ use sys::fork_cell::ForkCell;
 /// `strings` row: seeding would erase the unset-vs-empty distinction), and
 /// nothing when it is not. The bytes are then decoded into the record
 /// (`decode.rs`) and rendered through the composite of the value providers
-/// (`value.rs`'s seam): `\u \h \H \l \$ \s \v \V \j \! \#` answer real values
-/// (task #617) and so do `\d \t \T \@ \A` through `clock.rs` (task #618), while
-/// the escapes #619 owns still render as their literal text. bash
+/// (`value.rs`'s seam): every family now answers real values — `\u \h \H \l
+/// \$ \s \v \V \j \! \#` (task #617), `\d \t \T \@ \A` (task #618) and `\w \W`
+/// from the `%CWD` fd's provenance (task #619) — and an escape whose provider
+/// has no value for it renders as its literal text (decision D2). bash
 /// re-reads the variable for every prompt, so an assignment run as a command
 /// changes the *next* prompt. The bytes are owned and the borrow ends inside
 /// the block, before the caller's `write_all` syscall (LESSONS: never hold a
@@ -55,7 +57,11 @@ pub(crate) fn resolve(
     };
     let shell = ShellValues::new(cell);
     let clock = ClockValues::new();
-    Ok(render(&decode(&drawn), &Providers::new(&shell, &clock)))
+    let cwd = CwdValues::new(cell);
+    Ok(render(
+        &decode(&drawn),
+        &Providers::new(&shell, &clock, &cwd),
+    ))
 }
 
 #[cfg(test)]

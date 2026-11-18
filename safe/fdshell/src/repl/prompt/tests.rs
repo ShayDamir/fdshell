@@ -91,10 +91,12 @@ fn the_resolver_decodes_a_mechanical_escape() {
 
 #[test]
 fn a_value_escape_renders_as_its_literal_text() {
-    // Decision D2 through the composite: an escape whose owner has no value yet
-    // answers `None` and draws its own text — here #619's `\w`, the only escape
-    // left without an owner, so this row moves again when #619 lands. The
-    // permanent D2 pin is `render/tests.rs`'s `NoValues` row.
+    // Decision D2 through the composite: #619's provider answers `None` here
+    // because a fresh `ShellState` has no `%CWD` fd, so the escape draws its
+    // own text (bash would draw its `$PWD` — D-619-2's documented divergence).
+    // The permanent D2 pin is `render/tests.rs`'s `NoValues` row; the pty row
+    // `an_origin_without_a_path_draws_the_escape_text` is the end-to-end half,
+    // where the startup `open(".")` fd's `Origin::Shell` names no path either.
     let cell = cell(true);
     set(&cell, c"PS1", c"a\\wb");
     assert_eq!(resolve(&cell, c"PS1", DEFAULT), br"a\wb");

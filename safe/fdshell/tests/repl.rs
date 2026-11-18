@@ -1416,6 +1416,58 @@ fn the_clock_escapes_draw_their_shapes_on_a_terminal() {
     assert!(the_hhmm(groups.get(4).unwrap()), "\\A: {tty:?}");
 }
 
+// ——— the working-directory escapes (task #619): the display is the `%CWD`
+// fd's provenance, never a re-resolution; expectations measured against bash
+// 5.3.9 on 2026-11-18. Only the prompts are bracketed — the echoed commands
+// and the bare `exit` carry no brackets — so each needle is the drawn prompt
+// alone (the trick `the_tty_escape_draws_the_last_component_of_its_path`
+// uses). ———
+
+/// `\w` draws the origin `cd` recorded (D-619-1): `cd /tmp` stores
+/// `Origin::File("/tmp")` and both answers are bash's bytes (`/tmp` is not
+/// `$HOME`, so no abbreviation).
+#[test]
+fn the_working_directory_escape_draws_the_provenance() {
+    let (tty, code) = run_tty_ps1(r"[\w][\W]", "cd /tmp\nexit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("[/tmp][tmp]"), "pty: {tty:?}");
+}
+
+/// An origin that names no path answers D2's no-value and draws the escape
+/// text: the startup `open(".")` fd carries `Origin::Shell`, so the one
+/// prompt of a session without a `cd` is the literal `[\w][\W]` (bash draws
+/// its logical `$PWD` there — D-619-2's divergence for #623). The echoed
+/// `exit` carries no backslash, so the group stays unique.
+#[test]
+fn an_origin_without_a_path_draws_the_escape_text() {
+    let (tty, code) = run_tty_ps1(r"[\w][\W]", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches(r"[\w][\W]").count(), 1, "pty: {tty:?}");
+}
+
+/// A bare `cd` records `Origin::EnvVar(HOME)`, which answers `~` — the row is
+/// byte-identical to bash's measured `[~][~]` (D-619-2's parity route). `HOME`
+/// is assigned in-session (the nix sandbox has none, and a store `HOME` is the
+/// same lookup `cd` uses — LESSONS #282), and `.` is the test's own directory,
+/// which exists on both sides.
+#[test]
+fn the_home_hop_draws_a_tilde() {
+    let (tty, code) = run_tty_ps1(r"[\w][\W]", "HOME=.\ncd\nexit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("[~][~]"), "pty: {tty:?}");
+}
+
+/// `PROMPT_DIRTRIM` on `/proc/1` (two components): the plain rule trims at
+/// `components > n`, so n=1 **does** trim — the measured row is `[.../1][1]`,
+/// bash-identical (a one-component `/tmp` here cannot trim: count == n,
+/// measured no-trim both shells).
+#[test]
+fn dirtrim_ellipsis_replaces_the_leading_components() {
+    let (tty, code) = run_tty_ps1(r"[\w][\W]", "cd /proc/1\nPROMPT_DIRTRIM=1\nexit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("[.../1][1]"), "pty: {tty:?}");
+}
+
 /// The gate itself over a pipe (bash draws no prompt off-terminal, measured): a
 /// set `PS1`/`PS2` produce no prompt bytes at all, so stdout is the body alone.
 /// The pty rows above are the other half of the gate.

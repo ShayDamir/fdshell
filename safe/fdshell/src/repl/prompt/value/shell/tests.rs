@@ -201,9 +201,9 @@ fn the_counters_draw_the_number_the_command_gets() {
 
 #[test]
 fn the_sibling_owners_escapes_answer_no_value() {
-    // One provider, one family: this provider answers `None` for all seven.
-    // #618's clock escapes are answered now — by `clock.rs`'s own provider
-    // through the composition — and only #619's remain to render literally.
+    // One provider, one family: this provider answers `None` for all seven —
+    // #618's clock escapes are answered by `clock.rs`'s own provider, and
+    // #619's working-directory escapes by `cwd.rs`'s, through the composition.
     let cell = cell(true);
     for esc in [
         ValueEscape::Date,
