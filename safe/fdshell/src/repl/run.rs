@@ -39,6 +39,13 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
             }
             return Ok(());
         };
+        // The prompt for this input has already been drawn, and it showed
+        // `command_number + 1` (bash's rule, measured): the input about to run is
+        // the command the counter counts. Blank inputs never get here — bash
+        // counts them in neither `\!` nor `\#`.
+        cell.borrow_mut()
+            .change_context(AppError::Borrow)?
+            .command_number += 1;
         if let Err(err) = handle(&text, cell) {
             let _ = writeln!(crate::io::Stderr, "{err:?}");
         }

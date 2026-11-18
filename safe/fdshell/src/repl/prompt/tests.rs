@@ -33,7 +33,17 @@ fn resolve(cell: &ForkCell<ShellState>, name: &'static CStr, default: &[u8]) -> 
 
 #[test]
 fn unset_falls_back_to_the_default() {
-    assert_eq!(resolve(&cell(true), c"PS1", DEFAULT), DEFAULT);
+    // The bash default is all value escapes, and they now answer real values
+    // (task #617): the program name the REPL seeds, the crate's own version, and
+    // the uid's character. The runner is non-root — as bash's measured default
+    // already is — and bash draws its own identity there (`bash-5.3$ `,
+    // 2026-11-18), the divergence #623 documents.
+    assert_eq!(
+        resolve(&cell(true), c"PS1", DEFAULT),
+        concat!("fdshell-", env!("CARGO_PKG_VERSION"), "$ ")
+            .as_bytes()
+            .to_vec()
+    );
     assert_eq!(resolve(&cell(true), c"PS2", b"> "), b"> ");
 }
 
@@ -81,10 +91,11 @@ fn the_resolver_decodes_a_mechanical_escape() {
 
 #[test]
 fn a_value_escape_renders_as_its_literal_text() {
-    // The no-values provider answers `None` (decision D2) — what keeps the
-    // default prompt above byte-identical, and what keeps these pins stable
-    // until #617–#619 wire real providers.
+    // Decision D2 through the shell's provider: an escape whose owner has no
+    // value yet answers `None` and draws its own text — here #618's `\t`. What
+    // keeps the D2 contract pinned now that #617's escapes answer real values
+    // (their own pins are in `value/shell/tests.rs`).
     let cell = cell(true);
-    set(&cell, c"PS1", c"a\\ub");
-    assert_eq!(resolve(&cell, c"PS1", DEFAULT), br"a\ub");
+    set(&cell, c"PS1", c"a\\tb");
+    assert_eq!(resolve(&cell, c"PS1", DEFAULT), br"a\tb");
 }

@@ -11873,3 +11873,38 @@ Pins:
 `safe/fdshell/src/repl/prompt/decode/tests.rs::three_octal_digits_are_consumed_and_the_rest_stays_literal`,
 `safe/fdshell/src/repl/prompt/decode/tests.rs::a_close_marker_that_closes_nothing_is_data`,
 `safe/fdshell/src/repl/prompt/decode/tests.rs::an_open_marker_inside_a_region_is_data`.
+
+## The value provider answers per escape, and a pty pin computes its expectation (task #617)
+
+The provider seam (decision D3) stays lazy on purpose: `value()` is asked one
+placeholder at a time, so a prompt naming no value escape pays no syscall, and
+each escape has exactly **one** data source — a `sys` wrapper or a `ShellState`
+read, never both. That is what keeps
+LESSONS: "Never hold a ForkCell borrow across a recursive call that re-borrows"
+true inside the provider: the syscall arms never borrow, the borrow arms never
+syscall. Nothing is cached where bash caches (the username, the hostname,
+`ttyname` per fd): the prompt path is interactive-only, so a wrapper call per
+prompt is cheap and a hostname change shows on the next prompt.
+
+A source that fails answers `None` — decision D2's "no value", drawn as the
+placeholder's own text. bash answers differently in the two places where that
+choice shows (measured 2026-11-18): off a terminal, where it prints `tty` for
+`\l`, and in `\s \v \V`, where it prints its own identity (`bash-5.3$ `). Both are
+#623's wording; the pins record fdshell's answer, never bash's.
+
+A pty pin for a **machine-dependent** value computes its expectation from the
+same wrappers the provider calls — the test process and the child share the uid,
+the hostname and the password database — and hardcodes only the rules. Where even
+the wrappers cannot answer (the pts number differs per run), pin the **shape**: a
+non-empty run of ASCII digits inside the prompt's brackets, which the echoed
+input cannot produce. Blank lines are counted by neither `\!` nor `\#` (measured),
+so the counter moves once per non-blank input the REPL executes and the prompt
+draws the number the **next** command will get — `1` for the first one.
+
+Pins: `safe/fdshell/src/repl/prompt/value/shell/tests.rs` (the wrapper-computed
+answers — `\u`, `\h`/`\H`, `\$`, the off-terminal `None`, `\s` through its setter,
+`\v`/`\V`, `\j`, the two counters), and the pty rows
+`safe/fdshell/tests/repl.rs::the_identity_escapes_answer_their_wrappers`,
+`safe/fdshell/tests/repl.rs::the_tty_escape_draws_the_last_component_of_its_path`,
+`safe/fdshell/tests/repl.rs::the_command_counter_counts_commands_and_no_blank_line`,
+`safe/fdshell/tests/repl.rs::the_job_escape_counts_the_task_map`.

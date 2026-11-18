@@ -5,17 +5,20 @@ use std::os::unix::io::AsRawFd;
 use std::process::{Child, Command, Stdio};
 use std::str;
 use std::time::{Duration, Instant};
+use sys::getpwuid::getpwuid;
 use sys::poll::{POLLIN, PollFd, poll};
+use sys::unistd::{geteuid, gethostname};
 
 const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 
-/// The prompt the REPL draws on a **terminal**: fdshell's own default, the
-/// bash 5.3.9 default `PS1` string (measured 2026-11-18). It draws as the
-/// raw string because its escapes are value escapes, and the decoder's
-/// no-values provider renders those literally until #617 wires real values.
-/// Pinned byte-for-byte: it is the counter the pty rows below use, so they pin
-/// one prompt per read.
-const PROMPT: &str = "\\s-\\v\\$ ";
+/// The prompt the REPL draws on a **terminal**: fdshell's own default, the bash
+/// 5.3.9 default `PS1` string (measured 2026-11-18) **rendered** through the
+/// shell's value provider (task #617) — the program name the REPL seeds, the
+/// crate's own version, and the uid's character for a non-root runner (bash draws
+/// its own identity there, `bash-5.3$ `; the divergence is #623's). Pinned
+/// byte-for-byte as the counter the pty rows below use, so they pin one prompt per
+/// read and their counts stayed put when the escapes started answering values.
+const PROMPT: &str = concat!("fdshell-", env!("CARGO_PKG_VERSION"), "$ ");
 
 /// The continuation prompt on a terminal: bash's `PS2` default, the string the
 /// pty rows count. It is fdshell's own since before epic #197, byte-identical.
@@ -160,10 +163,40 @@ fn run_tty(input: &str, event: Event) -> (String, Option<i32>, bool) {
     )
 }
 
+/// The pty shape of a row whose `PS1` has to be in place **before** its first
+/// prompt: `script -qec "env PS1=<ps1> <bin>" /dev/null`, since an interactive
+/// shell imports an inherited `PS1` (the row that pins the import itself is
+/// [`an_inherited_env_value_reaches_the_prompt`], and the `env` form is why the
+/// variable is set after the shell). `input` is written and the pty's stdin
+/// closed; the row ends with `exit`, so the child's exit is the event — no sleep,
+/// no kill (LESSONS). The stream is the same one `run_tty` returns: the pty's echo
+/// of the input and its `\r\n` are part of it, so assert `contains` and counts.
+fn run_tty_ps1(ps1: &str, input: &str) -> (String, Option<i32>) {
+    let mut child = Command::new("script")
+        .args(["-qec", &format!("env PS1='{ps1}' {BIN}"), "/dev/null"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    drop(child.stdin.take().unwrap());
+    let output = child.wait_with_output().unwrap();
+    (
+        str::from_utf8(&output.stdout).unwrap().to_string(),
+        output.status.code(),
+    )
+}
+
 /// Spawn the REPL (no `-c`), pipe `input` to stdin, close it, and capture
 /// stdout/stderr/exit code. stdin is **not** a terminal, so no prompt is drawn
-/// (bash draws none off-terminal either) and stdout is the body alone — the
-/// pty rows are where the prompts are pinned, and these exact-stdout assertions
+/// (bash draws none off-terminal either) and stdout is the body alone — the pty
+/// rows are where the prompts are pinned, and these exact-stdout assertions
 /// double as the non-tty-silence pin.
 fn run_repl(input: &str) -> (String, String, i32) {
     let mut child = Command::new(BIN)
@@ -1073,12 +1106,13 @@ fn an_operator_opening_the_second_line_reports_and_the_session_reads_on() {
 
 // ——— the prompt variables (epic #197), measured against bash 5.3.9 on 2026-11-18 ———
 
-/// The default `PS1` on a terminal: bash 5.3.9's default string, drawn
-/// byte-identically to the raw string because the escape decoder's no-values
-/// provider renders its value escapes literally (decision D2). One read, one
-/// prompt — the typed line is `exit`, so the single match is the prompt itself.
-/// The `PS2` default is byte-identical to fdshell's and is pinned by every
-/// continuation count above.
+/// The default `PS1` on a terminal: bash 5.3.9's default string, **rendered**
+/// through the shell's value provider — `fdshell-<version>$ ` for a non-root runner
+/// (task #617). bash 5.3.9 draws its own identity on the same string, `bash-5.3$ `
+/// (measured 2026-11-18); the divergence's wording is #623's. One read, one prompt
+/// — the typed line is `exit`, so the single match is the prompt itself. The `PS2`
+/// default is byte-identical to fdshell's and is pinned by every continuation count
+/// above.
 #[test]
 fn default_prompt_is_drawn_on_a_terminal() {
     let (tty, code, _) = run_tty("exit\n", Event::Exit);
@@ -1225,6 +1259,79 @@ fn a_non_printing_region_is_drawn_and_recorded() {
     );
     assert_eq!(code, Some(0), "pty: {tty:?}");
     assert!(tty.contains("a\x1b[31mB\x1b[0mC"), "pty: {tty:?}");
+}
+
+// ——— the value escapes (task #617), measured against bash 5.3.9 on
+// 2026-11-18. The machine-dependent part of every expectation is computed here
+// from the same wrappers the provider calls, and only the rules are hardcoded
+// (LESSONS). ———
+
+/// The identity escapes: `\u` from the password database, `\h` and `\H` from
+/// `gethostname`, `\$` from the effective uid. bash 5.3.9 draws
+/// `[damir|nixos|nixos|$] ` here (measured) — the same bytes, because this box's
+/// hostname has no dot (so `\h` and `\H` agree; the split at the first dot is
+/// pinned in the unit pins) and the runner is non-root.
+#[test]
+fn the_identity_escapes_answer_their_wrappers() {
+    let user = String::from_utf8(getpwuid(geteuid()).unwrap()).unwrap();
+    let host = String::from_utf8(gethostname().unwrap()).unwrap();
+    let dollars = if geteuid() == 0 { "#" } else { "$" };
+    let needle = format!("[{user}|{host}|{host}|{dollars}] ");
+    let (tty, code, _) = run_tty(concat!(r"PS1='[\u|\h|\H|\$] '", "\nexit\n"), Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    // The typed line carries its raw backslashes, so only the prompt can match.
+    assert!(tty.contains(&needle), "{needle:?} missing: {tty:?}");
+}
+
+/// `\l`: the **last component** of the tty's path — the pts number on this box,
+/// which is exactly what bash draws (`[3] `, measured 2026-11-18). The number
+/// differs per run, so the row pins its shape: each bracketed group is a non-empty
+/// run of ASCII digits. Only the prompt is bracketed — the typed line is `exit` —
+/// and the row ends with `exit`, so the group is deterministic.
+#[test]
+fn the_tty_escape_draws_the_last_component_of_its_path() {
+    let (tty, code) = run_tty_ps1(r"[\l]", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    let drawn: Vec<&str> = tty.split(['[', ']']).skip(1).step_by(2).collect();
+    assert_eq!(
+        drawn.len(),
+        1,
+        "one drawn prompt, no bracketed echo: {tty:?}"
+    );
+    for group in &drawn {
+        assert!(
+            !group.is_empty() && group.bytes().all(|byte| byte.is_ascii_digit()),
+            "the pts number's shape: {tty:?}"
+        );
+    }
+}
+
+/// The command counter: `\!` and `\#` both draw the number the command **about to
+/// be typed** gets — `1` for the first input, `2` after one input ran, and the
+/// blank line consumes neither (bash 5.3.9 measured 2026-11-18: `[263|1]`,
+/// `[264|2]`, `[264|2]` — its `\!` counts the history file it loaded at startup,
+/// which fdshell has no list for yet, story #21; the `\#` numbers 1, 2, 2 are the
+/// rule both escapes share).
+#[test]
+fn the_command_counter_counts_commands_and_no_blank_line() {
+    let (tty, code) = run_tty_ps1(r"[\!|\#]", "true\n\nexit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[1|1]").count(), 1, "pty: {tty:?}");
+    assert_eq!(tty.matches("[2|2]").count(), 2, "pty: {tty:?}");
+}
+
+/// `\j`: the count of the shell's task map. `[0]` before the background line and
+/// `[1]` for the two reads after it — the job stays in the map until `wait` reaps
+/// it and nothing reaps spontaneously, so both prompts say `[1]` (bash 5.3.9
+/// measured 2026-11-18 agrees on a running job: `[0]`, `[1]`, `[1]` — plus its own
+/// `[1] <pid>` job line, which fdshell has none of yet). The sleep is one second,
+/// so no orphan outlives the row's event.
+#[test]
+fn the_job_escape_counts_the_task_map() {
+    let (tty, code) = run_tty_ps1(r"[\j]", "sleep 1 &\ntrue\nexit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("[0]").count(), 1, "pty: {tty:?}");
+    assert_eq!(tty.matches("[1]").count(), 2, "pty: {tty:?}");
 }
 
 /// The gate itself over a pipe (bash draws no prompt off-terminal, measured): a

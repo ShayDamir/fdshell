@@ -85,6 +85,15 @@ pub struct ShellState {
     /// an `OPTIND` assignment or `unset OPTIND` resets it (the setter arms of
     /// task #589); no save/restore frame carries it (bash does not).
     pub(crate) optchar: usize,
+    /// The REPL's command counter: the number the command **about to be typed**
+    /// gets, which is what `\!` and `\#` draw (task #617; bash 5.3.9 measured:
+    /// an empty history gives `1` at the first prompt). bash counts the same
+    /// thing twice — `\!` through the history list, `\#` through the session's
+    /// command number — and fdshell has no history list yet (story #21), so both
+    /// escapes are this one counter. Blank lines are counted by neither, so it
+    /// moves once per non-blank input the REPL executes. The name stays neutral
+    /// for the half the history list will own.
+    pub(crate) command_number: u64,
     pub(crate) options: u32,
     /// The REPL's interactive flag: true when its stdin is a terminal (bash's
     /// "interactive shell"). Seeds the default `ignoreeof` and gates the EOF
