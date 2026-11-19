@@ -250,11 +250,20 @@ fn test_parse_flags_t_overflow_saturates_infinite() {
 
 #[test]
 fn test_parse_flags_t_saturation_boundary() {
-    // The largest `-t` whose millisecond value fits in `i32` (one past it
-    // saturates to `-1`); task #600 moved the field to whole milliseconds.
+    // A `-t` value below the millisecond cap passes through the saturation
+    // rule; task #600 moved the field to whole milliseconds.
     let args = vec![c"-t".into(), c"2147483".into()];
     let flags = parse_flags(&args).unwrap();
     assert_eq!(flags.timeout_ms(), Some(2147483000));
+}
+
+#[test]
+fn test_parse_flags_t_saturation_exact_boundary() {
+    // Exactly `i32::MAX` milliseconds — a measured grammar shape (the
+    // fraction attaches) — must pass the saturation rule unmoved.
+    let args = vec![c"-t".into(), c"2147483.647".into()];
+    let flags = parse_flags(&args).unwrap();
+    assert_eq!(flags.timeout_ms(), Some(i32::MAX));
 }
 
 #[test]

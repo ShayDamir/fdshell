@@ -11,6 +11,7 @@ fn legal_number_accepts_its_grammar() {
     assert_eq!(decimal(b"+1", &LEGAL_NUMBER), Some(1));
     assert_eq!(decimal(b"010", &LEGAL_NUMBER), Some(10));
     assert_eq!(decimal(b"-0", &LEGAL_NUMBER), Some(0));
+    assert_eq!(decimal(b"9", &LEGAL_NUMBER), Some(9));
 }
 
 #[test]
@@ -61,6 +62,8 @@ fn seconds_accepts_its_fractional_grammar() {
     assert_eq!(seconds_ms(b"1."), Some(1000));
     assert_eq!(seconds_ms(b"+.5"), Some(500));
     assert_eq!(seconds_ms(b"0"), Some(0));
+    assert_eq!(seconds_ms(b"9"), Some(9000));
+    assert_eq!(seconds_ms(b"0.9"), Some(900));
 }
 
 #[test]
