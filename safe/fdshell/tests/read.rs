@@ -317,6 +317,82 @@ fn timeout_past_u32_blocks_for_a_late_writer() {
     }
 }
 
+// ---- task #604: the trim at the line's edges, and the tail kept verbatim ----
+
+/// Task #604 (bash 5.3.9 measured, `cat -A`-checked): with two targets the
+/// last variable gets the tail of the line with its separator text intact —
+/// `a··b⇥c` answers `a` / `b⇥c`, not a rejoin with single spaces.
+#[test]
+fn last_variable_keeps_the_separator_text() {
+    let dir = Scratch::new();
+    let script =
+        r#"printf 'a  b\tc\n' > in; exec < in; read x y; printf "[%s][%s] rc=%s\n" "$x" "$y" "$?""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "[a][b\tc] rc=0\n", "script={script}");
+}
+
+/// Task #604 (bash 5.3.9 measured): IFS whitespace is stripped at the line's
+/// edges, internal separators stay — `··a··b··` into one variable answers
+/// `a··b`, and the all-whitespace line `···` answers the empty value.
+#[test]
+fn edges_are_trimmed_internal_separators_stay() {
+    for (word, want) in [("'  a  b  \n'", "[a  b] rc=0\n"), ("'   \n'", "[] rc=0\n")] {
+        let dir = Scratch::new();
+        let script = format!(
+            "printf {word} > in; exec < in; read x; printf \"[%s] rc=%s\\n\" \"$x\" \"$?\""
+        );
+        let out = run(&dir, &script);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "script={script} stderr={}",
+            stderr(&out)
+        );
+        assert_eq!(stdout(&out), want, "script={script}");
+    }
+}
+
+/// Task #604 (bash 5.3.9 measured): the trim applies to the text `-n` capped,
+/// so `··a··` with `-n 5` answers `a`.
+#[test]
+fn trim_applies_to_the_capped_text() {
+    let dir = Scratch::new();
+    let script =
+        r#"printf '  a  \n' > in; exec < in; read -n 5 x; printf "[%s] rc=%s\n" "$x" "$?""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "[a] rc=0\n", "script={script}");
+}
+
+/// Task #604 (bash 5.3.9 measured): newline is in the default-IFS trim set, so
+/// an EOF read (`-d ''`) of `\na·b·` answers `a·b` at rc 1 — the newline is
+/// trimmed at the edges, and the EOF status rule (pinned above) still holds.
+#[test]
+fn newline_edges_trimmed_on_an_eof_read() {
+    let dir = Scratch::new();
+    let script =
+        r#"printf '\na b \n' > in; exec < in; read -d "" x; printf "[%s] rc=%s\n" "$x" "$?""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "[a b] rc=1\n", "script={script}");
+}
+
 /// Task #600 (the verified-unknown sibling): `read -n` parses its count
 /// through bash's `legal_number` grammar, so `" 3"`, `+3` and `03` each take
 /// 3 characters of a 6-character line at rc 0 (bash 5.3.9 measured).
