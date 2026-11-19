@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C read -C --test -C trap -- -E 'test(/^intercept::read::tests::/) | binary(read) | binary(trap)'
+
 use alloc::vec::Vec;
 use builtins::error::Suggestion;
 use error_stack::{Report, ResultExt};
@@ -30,13 +32,7 @@ pub(crate) fn collect_targets(args: &[ShortCStr]) -> Result<Vec<ShortCStr>, Repo
         }
     }
 
-    if targets.is_empty() {
-        return Err(Report::new(ReadError::NoTarget)
-            .attach_opaque(Suggestion(
-                "usage: read [-r] [-u fd] [-n count] [-p prompt] [-d delim] [-t secs] var ...",
-            ))
-            .change_context(CmdError::Read));
-    }
-
+    // An empty list is a valid answer: bash's no-name `read` fills REPLY,
+    // and `run_read` keeps the "no names" signal this return provides.
     Ok(targets)
 }

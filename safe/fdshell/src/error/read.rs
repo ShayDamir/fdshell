@@ -3,8 +3,6 @@
 /// [ReadError] read builtin errors
 #[derive(displaydoc::Display, Debug)]
 pub(crate) enum ReadError {
-    /// expected variable name
-    NoTarget,
     /// missing argument for -{0} flag
     MissingArgument(char),
     /// invalid argument for -{0} flag

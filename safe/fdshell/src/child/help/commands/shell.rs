@@ -17,7 +17,7 @@ pub(crate) const SHELL_CMDS: &[(&[u8], &[u8])] = &[
     (b"hash", b"Show or cache path lookups"),
     (b"let", b"Evaluate arithmetic expressions"),
     (b"local", b"Declare function-scoped variables"),
-    (b"read", b"Read a line into a variable"),
+    (b"read", b"Read a line into a variable or REPLY"),
     (
         b"recvmsg",
         b"Receive a payload and fd vars from an AF_UNIX socket",

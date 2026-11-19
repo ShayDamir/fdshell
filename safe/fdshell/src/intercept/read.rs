@@ -19,10 +19,10 @@ use crate::error::cmd::CmdError;
 use crate::error::read::ReadError;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
-use sys::ShortCStr;
+use sys::ScriptText;
 use sys::fork_cell::ForkCell;
-use sys::{ImportedStr, ScriptText, Trace};
 
+use assign::assign_line;
 use collect::collect_targets;
 use flags::SourceFd;
 use flags::parse_flags;
@@ -30,7 +30,6 @@ use flags::source_is_tty;
 use io::read_line;
 use line::LineEnd;
 use putback::{put_back, take_pending};
-use words::split_fields;
 
 pub(crate) fn run_read(
     line: &[u8],
@@ -77,25 +76,21 @@ pub(crate) fn run_read(
     put_back(cell, &flags.source, resolved_fd.as_ref(), pending)?;
 
     let failed = matches!(end, LineEnd::Eof | LineEnd::Timeout);
-    if data.is_empty() && failed {
+    let nothing_read = data.is_empty();
+    // The empty-line bail is per kind: a timeout leaves every target alone
+    // (bash), and so does EOF for a *named* target (pinned); bash does assign
+    // its REPLY target at EOF, so the no-name path falls through.
+    let leaves_untouched = matches!(end, LineEnd::Timeout) || !targets.is_empty();
+    if failed && nothing_read && leaves_untouched {
         let mut state = cell.borrow_mut().change_context(CmdError::Read)?;
         state.set_last_exit(1);
         return Ok(true);
     }
 
-    let fields = split_fields(&data, targets.len());
     let origin = flags.source.origin();
+    assign_line(&targets, &data, text, &origin, cell)?;
 
     let mut state = cell.borrow_mut().change_context(CmdError::Read)?;
-    for (i, name) in targets.iter().enumerate() {
-        let field = fields.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
-        let var_name = name.strip_prefix(b"$").unwrap_or_else(|| name.clone());
-        let s = ShortCStr::from_vec(field.to_vec()).change_context(CmdError::Read)?;
-        state.set_var(
-            var_name,
-            ImportedStr::new(s, Trace::at(text.start, origin.clone())),
-        );
-    }
     state.set_last_exit(if failed { 1 } else { 0 });
     Ok(true)
 }
@@ -104,6 +99,7 @@ pub(crate) fn run_read(
 #[allow(clippy::unwrap_used)]
 mod tests;
 
+mod assign;
 mod collect;
 mod flags;
 mod io;

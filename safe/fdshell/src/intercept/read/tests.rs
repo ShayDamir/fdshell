@@ -1,6 +1,7 @@
 use super::flags::ReadFlags;
 use super::line::{Line, LineEnd};
 use super::read_from_fd::read_line_from_fd;
+use super::words::split_fields;
 use super::*;
 use crate::capture::Capture;
 use crate::parse::{BuiltinPrefix, CommandLine};
@@ -100,10 +101,11 @@ fn test_split_fields_leading_spaces() {
 }
 
 #[test]
-fn test_no_targets_error() {
+fn test_collect_targets_empty_is_ok() {
     let args: Vec<ShortCStr> = vec![];
+    let empty: Vec<ShortCStr> = vec![];
     let result = collect_targets(&args);
-    assert!(result.is_err());
+    assert_eq!(result.unwrap(), empty);
 }
 
 #[test]
@@ -2260,4 +2262,361 @@ fn stdin_two_reads_share_the_buffer_and_the_third_reports_eof() {
     assert_eq!(answers.next().unwrap(), &(b"a".to_vec(), LineEnd::Delim));
     assert_eq!(answers.next().unwrap(), &(b"b".to_vec(), LineEnd::Delim));
     assert_eq!(answers.next().unwrap(), &(Vec::new(), LineEnd::Eof));
+}
+
+// ---- task #610: a nameless `read` fills REPLY with the raw line ----
+
+// bash's extension over POSIX's ≥1-name rule, verified against bash 5.3.9 on
+// this machine (the task's table). The value is the line as the reader produced
+// it — after backslash processing, delimiter removal and the `-n`/`-d` stop —
+// with no edge trim and no field splitting; an explicit `read REPLY` is an
+// ordinary target and *is* trimmed, the row that keeps the two apart.
+
+/// The args of a nameless `read` (only the flags, no targets).
+fn no_target_args(flags: &[&'static core::ffi::CStr]) -> Vec<ShortCStr> {
+    flags.iter().map(|flag| (*flag).into()).collect()
+}
+
+#[test]
+fn run_read_no_targets_assigns_the_raw_line_to_reply() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"  a  b  \n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let args = no_target_args(&[]);
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    // The whole stored row — value *and* trace — pinned to the trace a named
+    // target gets from the same source.
+    let origin = sys::Origin::Read(ShortCStr::from_vec(fd.to_string().into_bytes()).unwrap());
+    let expected = sys::ImportedStr::new(
+        ShortCStr::from_vec(b"  a  b  ".to_vec()).unwrap(),
+        sys::Trace::at(sys::Position::new(1, 1), origin),
+    );
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state.strings.get::<ShortCStr>(&c"REPLY".into()),
+        Some(&expected)
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+#[test]
+fn run_read_no_targets_at_eof_assigns_empty_reply() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let args = no_target_args(&[]);
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    // The counterpart of `run_read_empty_data_eof` (named: absent): bash
+    // *assigns* its REPLY target at EOF — present, empty, status 1. The pair
+    // is what kills the kind-branch mutants.
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get::<ShortCStr>(&c"REPLY".into())
+            .map(|v| &v.value),
+        Some(&ShortCStr::new())
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(1)));
+}
+
+#[test]
+fn run_read_no_targets_timeout_leaves_reply_untouched() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    // Keep the write end open: no data, no EOF.
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let args = no_target_args(&[c"-t", c"0"]);
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    // bash 5.3.9 measured (the task's table): a timeout assigns nothing, for
+    // either kind — the row that keeps the EOF rule from collapsing into it.
+    let state = cell.borrow().unwrap();
+    assert!(matches!(state.last_status, WaitStatus::Exited(1)));
+    assert!(
+        !state
+            .strings
+            .contains_key::<sys::ShortCStr>(&c"REPLY".into())
+    );
+    drop(write_end);
+}
+
+#[test]
+fn run_read_no_targets_newline_only_assigns_empty_reply() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"\n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let args = no_target_args(&[]);
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get::<ShortCStr>(&c"REPLY".into())
+            .map(|v| &v.value),
+        Some(&ShortCStr::new())
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+#[test]
+fn run_read_no_targets_n_cap_stops_at_two_bytes() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"abcdef\n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let args = no_target_args(&[c"-n", c"2"]);
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get::<ShortCStr>(&c"REPLY".into())
+            .map(|v| &v.value),
+        Some(&c"ab".into())
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+#[test]
+fn run_read_no_targets_colon_delimiter() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"ab:cd\n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let args = no_target_args(&[c"-d", c":"]);
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get::<ShortCStr>(&c"REPLY".into())
+            .map(|v| &v.value),
+        Some(&c"ab".into())
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+#[test]
+fn run_read_no_targets_r_keeps_backslash_literal() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"a\\nb\n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let args = no_target_args(&[c"-r"]);
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get::<ShortCStr>(&c"REPLY".into())
+            .map(|v| &v.value),
+        Some(&c"a\\nb".into())
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+#[test]
+fn run_read_no_targets_n_zero_empty_reply_status_0() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"hello\n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let args = no_target_args(&[c"-n", c"0"]);
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get::<ShortCStr>(&c"REPLY".into())
+            .map(|v| &v.value),
+        Some(&ShortCStr::new())
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+#[test]
+fn run_read_no_targets_with_u_fdvar() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"  x  \n").unwrap();
+    drop(write_end);
+
+    let cell = make_read_cell();
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.fds.insert(
+            c"MYFD".into(),
+            crate::state::FdVar {
+                fd: read_end,
+                trace: sys::Trace::boundary(sys::Origin::Shell),
+            },
+        );
+    }
+
+    let args = no_target_args(&[c"-u", c"%MYFD"]);
+    let line = make_read_line(&["read", "-u", "%MYFD"]);
+    let cmdline = make_read_cmdline(&args);
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get::<ShortCStr>(&c"REPLY".into())
+            .map(|v| &v.value),
+        Some(&ShortCStr::from_vec(b"  x  ".to_vec()).unwrap())
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+#[test]
+fn run_read_explicit_name_reply_is_trimmed() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"  a  b  \n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let args = vec![c"REPLY".into()];
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    // bash 5.3.9 measured: an explicit `REPLY` is an ordinary target — the
+    // named rule trims it to `a  b`, raw edges and all.
+    let state = cell.borrow().unwrap();
+    assert_eq!(
+        state
+            .strings
+            .get::<ShortCStr>(&c"REPLY".into())
+            .map(|v| &v.value),
+        Some(&c"a  b".into())
+    );
+    assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+#[test]
+fn run_read_no_targets_with_prompt_on_a_pipe_stays_silent() {
+    let (data_r, data_w) = sys::pipe::pipe2(0).unwrap();
+    data_w.write(b"answer\n").unwrap();
+    drop(data_w);
+
+    let exported = data_r.export().unwrap();
+    let fd = exported.as_raw();
+    let args = no_target_args(&[c"-p", c"Enter: "]);
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    let expected = c"answer".into();
+    let captured = run_in_a_child_with_a_pipe_on_stderr(|| {
+        run_read(&line, &cmdline, &text(&line), &cell).is_ok_and(|ok| {
+            ok && cell.borrow().is_ok_and(|state| {
+                state
+                    .strings
+                    .get::<ShortCStr>(&c"REPLY".into())
+                    .map(|v| &v.value)
+                    == Some(&expected)
+            })
+        })
+    });
+    assert!(captured.is_empty(), "a non-tty source draws no prompt");
+}
+
+#[test]
+fn run_read_no_targets_nul_byte_error() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"a\0b\n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let args = no_target_args(&[]);
+    let line = make_read_u_line(&args, fd);
+    let cmdline = make_read_u_cmdline(&args, fd);
+    let cell = make_read_cell();
+
+    // The `ShortCStr::from_vec` failure path is shared with the named case
+    // (`run_read_nul_byte_error`).
+    let result = run_read(&line, &cmdline, &text(&line), &cell);
+    assert!(result.is_err());
+    let report = result.unwrap_err();
+    assert!(matches!(report.current_context(), CmdError::Read));
 }
