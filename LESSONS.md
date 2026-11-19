@@ -12186,3 +12186,58 @@ Pins: `safe/fdshell/src/intercept/read/tests.rs`
 harness of LESSONS: "Test tty-gated behavior from safe-crate integration tests via `script`";
 an fd var's tty is reached in-process with `sys::pty::openpty()` instead, which
 that entry allows for the fd-var case.
+
+## A chunked reader that can stop mid-chunk needs a putback buffer, keyed by source identity (task #609)
+
+`read` reads its source in `CHUNK`-sized `read(2)` calls and feeds every byte to the line
+accumulator; when the line finishes — a newline, a `-d` delimiter byte, or the `-n` cap — the shared
+loop stops, and every byte of that chunk the line did not consume is gone. A pipe has no pushback,
+so those bytes cannot be recovered: a second `read`, a `-n` cap, a `-d` split, a `-u` fd, or a
+multi-line `while read` loses everything after the first line. bash keeps them; the shell has to own
+the buffer too.
+
+The mechanism: **drain the buffer before any syscall**, and **put back what the line did not
+consume**. Drain-first carries both statuses — a line completed by buffered bytes needs no syscall
+at all (bash answers buffered bytes from its own buffer), while a line that is not complete still
+reaches a syscall, so EOF is still learned from a `read` returning 0. The byte that finished the
+line is the line's; the tail starts after it. Two constraints shape the code: the shared loop takes
+two `&mut dyn FnMut` arguments, so the pending buffer can be captured by only one closure (give it
+to the reader, let the sink collect the tail into its own local, written back after the loop), and a
+`-t` poll must not gate buffered bytes — they are already in hand and bash answers them.
+
+**Cross-invocation state needs an identity check, because descriptors get reassigned under a
+stable name**: `exec <`, `exec 3<`, a heredoc `dup2`, a scope restore, `unset %f` followed by
+number reuse, a close/reopen of a raw fd. Record the descriptor identity (`fstat`'s `dev` + `ino`)
+when the bytes are stored and validate it on the next read of that source — only when an entry
+exists, so the unbuffered path pays no syscall — and drop the buffer on a mismatch (a failed
+`fstat` counts as one: the descriptor was closed under us). Memory stays bounded by one chunk's tail
+per source, so the accumulating side needs no cap. Key the buffer by the source's identity, in two
+namespaces: the fd number **as the script spelled it** (stdin is `"0"`, so `read x` and
+`read -u 0 x` share one buffer the way they share bash's single fd-0 stream) and the fd var's
+**name**, whose descriptor is cloned per call and can land on a different number each time. The map
+rides the `ShellState` copy a forked child inherits, matching bash. Residual, measured first:
+reopening the *same path* keeps the same `dev` + `ino`, so fdshell keeps the tail where bash
+discards it — not pinned.
+
+Pins: `safe/fdshell/src/state/read_pending/tests.rs` (store/take round trip, an empty tail stores
+nothing, the namespaces stay separate, validate-discard on a mismatch and on an unanswerable
+identity), `safe/fdshell/src/intercept/read/tests.rs`
+(`two_reads_on_one_pipe_answer_the_buffered_tail`,
+`a_capped_read_leaves_the_rest_of_the_chunk_for_the_next_one`,
+`a_delimited_read_leaves_the_rest_of_the_chunk_for_the_next_one`,
+`two_reads_through_an_fd_var_answer_the_buffered_tail`,
+`buffered_data_answers_before_the_timeout_poll`,
+`a_reassigned_source_loses_a_stale_buffer`,
+`stdin_two_reads_share_the_buffer_and_the_third_reports_eof`) and `safe/fdshell/tests/read.rs`
+(`three_reads_from_one_file_get_the_three_lines`,
+`a_capped_read_leaves_the_rest_of_the_line_for_the_next_one`,
+`a_delimited_read_leaves_the_rest_of_the_line_for_the_next_one`,
+`two_reads_on_one_u_fd_get_the_two_lines`,
+`while_read_iterates_every_line_of_the_source`,
+`a_reassigned_stdin_loses_the_stale_buffer`).
+
+Cross-reference (do not merge): LESSONS: "Two near-duplicate read loops diverge silently: one lost
+its `eof` flag" (the shared loop this buffer plugs into — the read-to-EOF users stay untouched, only
+the line path buffers) and LESSONS: "Capping the shared line buffer caps the whole multi-line
+accumulation — and a capped reader must read in chunks" (the same chunked-reader insight one level
+up: a chunk can end mid-line and the bytes after a separator belong to the next line).
