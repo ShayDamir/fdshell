@@ -1717,6 +1717,31 @@ fn exit_rejects_overflow_code() {
     });
 }
 
+/// Task #600: `exit` parses its code through bash's `legal_number` grammar,
+/// so `" 1"`, `"1 "`, `+1` and `-0` exit with the parsed code silently (each
+/// shape measured against bash 5.3.9); Rust's `FromStr` — the old path —
+/// rejected the padded spellings.
+#[test]
+fn exit_accepts_legal_number_shapes() {
+    for (word, code) in [("\" 1\"", 1), ("\"1 \"", 1), ("+1", 1), ("-0", 0)] {
+        let script = format!("exit {word}");
+        let (_, pidfd_opt) = sys::fork_pidfd::fork_pidfd().unwrap();
+        match pidfd_opt {
+            None => {
+                let cell = make_cell();
+                // A successful parse exits with the parsed code and never
+                // returns; a regression in the grammar panics here.
+                run_one(script.as_bytes(), &cell).unwrap();
+                sys::exit(42);
+            }
+            Some(pidfd) => {
+                let status = pidfd.wait_pidfd().unwrap();
+                assert_eq!(status.exit_code(), code, "word {word:?}");
+            }
+        }
+    }
+}
+
 #[test]
 fn for_break_exits_loop() {
     child_test(|| {

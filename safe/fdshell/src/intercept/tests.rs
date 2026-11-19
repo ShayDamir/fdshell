@@ -130,6 +130,49 @@ fn run_shift_beyond_the_list_keeps_positional_args() {
     assert_eq!(state.positional.front().unwrap().as_bytes().unwrap(), b"a");
 }
 
+/// Task #600: `shift` parses its count through bash's `legal_number` grammar
+/// (surrounding whitespace, sign and leading zeros belong to it); the shapes
+/// are pinned at the scanner in `numarg/tests.rs`, this pin is the call site.
+#[test]
+fn run_shift_accepts_legal_number_shapes() {
+    for arg in [" 1", "1 ", "+1", "007", "-0"] {
+        let cell = make_cell();
+        {
+            let mut state = cell.borrow_mut().unwrap();
+            state
+                .positional
+                .push_back(sys::ImportedStr::shell(c"one".into()));
+            state
+                .positional
+                .push_back(sys::ImportedStr::shell(c"two".into()));
+        }
+        let cmdline = make_cmdline(b"shift", &[arg]);
+        assert!(
+            shift::run_shift(b"shift", &cmdline, &cell).unwrap(),
+            "{arg:?}"
+        );
+        let state = cell.borrow().unwrap();
+        // `007` and `-0` do not move the two-item list (bash measures too:
+        // `007` is seven, `-0` is zero); the rest take one item.
+        let kept = if arg == "007" || arg == "-0" { 2 } else { 1 };
+        assert_eq!(state.positional.len(), kept, "{arg:?}");
+    }
+}
+
+/// Task #600: the grammar's rejections keep the existing error path.
+#[test]
+fn run_shift_rejects_outside_legal_number() {
+    for arg in ["1x", "-1", "0x2", "99999999999999999999"] {
+        let cell = make_cell();
+        let cmdline = make_cmdline(b"shift", &[arg]);
+        let e = shift::run_shift(b"shift", &cmdline, &cell).unwrap_err();
+        assert!(
+            matches!(e.current_context(), CmdError::InvalidArgument { .. }),
+            "{arg:?} must be rejected"
+        );
+    }
+}
+
 #[test]
 fn run_set_replaces_positional_args() {
     let cell = make_cell();

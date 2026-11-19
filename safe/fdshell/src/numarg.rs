@@ -7,7 +7,7 @@
 //! that belongs to no builtin — serves none of them. Each call site names the
 //! grammar bash uses for it; range rules stay at the call site.
 
-pub(crate) use scan::{Grammar, LEGAL_NUMBER, ULIMIT_VALUE, decimal};
+pub(crate) use scan::{LEGAL_NUMBER, ULIMIT_VALUE, decimal};
 pub(crate) use seconds::seconds_ms;
 
 mod scan;

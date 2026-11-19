@@ -72,6 +72,17 @@ fn positional_concatenation_is_in_order() {
     assert_eq!(out, "[abc]\n");
 }
 
+/// Task #600: bash parses `shift`'s count with its `legal_number` grammar —
+/// surrounding whitespace is skipped and a sign is allowed (bash 5.3.9
+/// measured: each shape below shifts exactly one; `-0` is zero).
+#[test]
+fn shift_accepts_legal_number_shapes() {
+    let (out, err, code) =
+        run(r#"set -- a b c; shift " 1"; shift "+1"; shift -0; echo "[$#][$1]""#);
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "[1][c]\n");
+}
+
 /// `shift` moves `$1..` and never `$0` (bash: `[bash][2][b][c]`).
 #[test]
 fn shift_keeps_program_name_and_rebases_positionals() {
