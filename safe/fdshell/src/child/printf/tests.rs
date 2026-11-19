@@ -182,6 +182,84 @@ fn octal_escape_zero_is_nul() {
 }
 
 #[test]
+fn hex_escape_in_format() {
+    // One or two hex digits name the byte, the digits are case-insensitive,
+    // and the run stops at the first byte that is not one (bash 5.3.9 measured).
+    assert_eq!(rendered(r"\x41", &[]), "A");
+    assert_eq!(rendered(r"\x2d", &[]), "-");
+    assert_eq!(rendered(r"\x0f", &[]), "\u{f}");
+    assert_eq!(rendered_bytes(r"\xff", &[]), vec![0xFF]);
+    assert_eq!(rendered(r"\x4", &[]), "\u{4}");
+    assert_eq!(rendered(r"\xd", &[]), "\r");
+    assert_eq!(rendered(r"\x4G", &[]), "\u{4}G");
+}
+
+#[test]
+fn hex_escape_stops_at_two_digits() {
+    // bash's two-digit cap, not ISO C's open-ended `\xhh`: what follows is
+    // literal data.
+    assert_eq!(rendered(r"\x414", &[]), "A4");
+    assert_eq!(rendered(r"\x4141", &[]), "A41");
+}
+
+#[test]
+fn hex_escape_in_argument() {
+    // `%b` shares the scanner with the format string.
+    assert_eq!(rendered("%b", &[r"A\x42B"]), "ABB");
+    assert_eq!(rendered_bytes("%b", &[r"\x1FF"]), vec![0x1F, b'F']);
+    assert_eq!(rendered("%b %b", &[r"\x41", r"\x42"]), "A B");
+}
+
+#[test]
+fn uppercase_hex_escape_is_literal() {
+    // Lowercase `\x` is the escape; `\X` is not (measured).
+    assert_eq!(rendered(r"\X41", &[]), "\\X41");
+}
+
+#[test]
+fn percent_s_does_not_expand_hex() {
+    // Only the format string and `%b` run the escape scanner.
+    assert_eq!(rendered("%s", &[r"\x41"]), "\\x41");
+}
+
+#[test]
+fn hex_escape_counts_into_precision() {
+    // The precision truncates the decoded bytes (`%b`'s rule, unchanged).
+    assert_eq!(rendered("%.2b", &[r"A\x41B"]), "AA");
+}
+
+#[test]
+fn hex_escape_without_digit_reports() {
+    // bash's diagnostic, one line per occurrence, and rc stays 0 — so the
+    // report must not raise the sink's failure flag.
+    let missing = String::from("printf: missing hex digit for \\x\n");
+    assert_eq!(
+        rendered_pair(r"\xZZ", &[]),
+        (String::from("\\xZZ"), missing.clone(), false)
+    );
+    assert_eq!(
+        rendered_pair(r"\x", &[]),
+        (String::from("\\x"), missing.clone(), false)
+    );
+    assert_eq!(
+        rendered_pair(r"\xZ %s\n", &["a", "b"]),
+        (
+            String::from("\\xZ a\n\\xZ b\n"),
+            [missing.as_str(), missing.as_str()].concat(),
+            false
+        )
+    );
+    assert_eq!(
+        rendered_pair("%b %b", &[r"\xZ", r"\xZ"]),
+        (
+            String::from("\\xZ \\xZ"),
+            [missing.as_str(), missing.as_str()].concat(),
+            false
+        )
+    );
+}
+
+#[test]
 fn unknown_escape_printed_as_is() {
     assert_eq!(rendered(r"\q", &[]), "\\q");
 }

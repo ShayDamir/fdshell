@@ -19,6 +19,21 @@ fn run(script: &str) -> (String, String, i32) {
     )
 }
 
+/// `run` for outputs that are not valid UTF-8, as raw bytes.
+fn run_bytes(script: &str) -> (Vec<u8>, Vec<u8>, i32) {
+    let output = Command::new(BIN)
+        .args(["-c", script])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    (
+        output.stdout,
+        output.stderr,
+        output.status.code().unwrap_or(-1),
+    )
+}
+
 #[test]
 fn printf_basic_format() {
     let (out, _err, code) = run(r#"printf "%s=%d" hi 42"#);
@@ -138,6 +153,81 @@ fn printf_b_padding_survives_the_stop() {
     let (out, _err, code) = run(r"printf '[%10b]' 'a\cb'");
     assert_eq!(code, 0);
     assert_eq!(out, "[         a");
+}
+
+// --- The `\x` hex escape, on both surfaces (values measured against bash 5.3.9) ---
+//
+// Format words are single-quoted throughout: outside quotes `\x` is the shell's
+// escape pair `x` (POSIX #4.1), which would take the decoder out of the frame.
+
+#[test]
+fn printf_hex_escape_in_format() {
+    let (out, err, code) = run(r"printf '\x41\n'");
+    assert_eq!((out.as_str(), err.as_str(), code), ("A\n", "", 0));
+    let (out, err, code) = run(r"printf '\x4\n'");
+    assert_eq!((out.as_str(), err.as_str(), code), ("\u{4}\n", "", 0));
+    let (out, err, code) = run(r"printf '\xA\n'");
+    assert_eq!((out.as_str(), err.as_str(), code), ("\n\n", "", 0));
+    let (out, err, code) = run_bytes(r"printf '\xff\n'");
+    assert_eq!(
+        (out.as_slice(), err.as_slice(), code),
+        (&b"\xff\n"[..], &b""[..], 0)
+    );
+}
+
+#[test]
+fn printf_hex_escape_takes_two_digits_at_most() {
+    // The cap is bash's, not ISO C's open-ended `\xhh`.
+    let (out, err, code) = run(r"printf '\x414\n'");
+    assert_eq!((out.as_str(), err.as_str(), code), ("A4\n", "", 0));
+}
+
+#[test]
+fn printf_b_expands_hex_escapes() {
+    // The argument path shares the scanner, so the same rule applies there —
+    // and the precision counts the decoded bytes.
+    let (out, _err, code) = run(r"printf '%b\n' 'A\x42B'");
+    assert_eq!((out.as_str(), code), ("ABB\n", 0));
+    let (out, _err, code) = run(r"printf '%b %b\n' '\x41' '\x42'");
+    assert_eq!((out.as_str(), code), ("A B\n", 0));
+    let (out, _err, code) = run(r"printf '%.2b\n' 'A\x41B'");
+    assert_eq!((out.as_str(), code), ("AA\n", 0));
+}
+
+#[test]
+fn printf_uppercase_hex_escape_stays_literal() {
+    // Lowercase `\x` is the escape; `\X` is not.
+    let (out, err, code) = run(r"printf '\X41\n'");
+    assert_eq!((out.as_str(), err.as_str(), code), ("\\X41\n", "", 0));
+}
+
+#[test]
+fn printf_percent_s_leaves_the_hex_escape_literal() {
+    // Only the format string and `%b` run the escape scanner.
+    let (out, err, code) = run(r"printf '%s\n' '\x41'");
+    assert_eq!((out.as_str(), err.as_str(), code), ("\\x41\n", "", 0));
+}
+
+#[test]
+fn printf_hex_escape_without_a_digit_reports_and_continues() {
+    // bash's diagnostic, printed once per occurrence, and rc stays 0.
+    let (out, err, code) = run(r"printf '\xZZ\n'");
+    assert_eq!((out.as_str(), code), ("\\xZZ\n", 0));
+    assert!(err.contains("missing hex digit for \\x"), "stderr={err:?}");
+    let (out, err, code) = run(r"printf '\xZ %s\n' a b");
+    assert_eq!((out.as_str(), code), ("\\xZ a\n\\xZ b\n", 0));
+    assert_eq!(
+        err.matches("missing hex digit for \\x").count(),
+        2,
+        "stderr={err:?}"
+    );
+    let (out, err, code) = run(r"printf '%b %b\n' '\xZ' '\xZ'");
+    assert_eq!((out.as_str(), code), ("\\xZ \\xZ\n", 0));
+    assert_eq!(
+        err.matches("missing hex digit for \\x").count(),
+        2,
+        "stderr={err:?}"
+    );
 }
 
 #[test]

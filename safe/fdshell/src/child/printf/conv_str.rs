@@ -46,11 +46,17 @@ pub(super) fn char_conv(rest: &mut &[&CStr], fmt: &Fmt, out: &mut Vec<u8>) {
 /// `%b`: the argument with backslash escapes expanded — the precision
 /// truncates the *expanded* bytes, per POSIX — then padded; `stopped` reports
 /// a `\c` that halted output (the padding due for the converted prefix is
-/// emitted first).
-pub(super) fn byte_conv(rest: &mut &[&CStr], fmt: &Fmt, out: &mut Vec<u8>, stopped: &mut bool) {
+/// emitted first); `err` takes the escape scanner's diagnostics.
+pub(super) fn byte_conv(
+    rest: &mut &[&CStr],
+    fmt: &Fmt,
+    out: &mut Vec<u8>,
+    err: &mut Vec<u8>,
+    stopped: &mut bool,
+) {
     let (b, _) = arg_bytes(rest);
     let mut core = Vec::new();
-    *stopped = emit_arg(&b, &mut core);
+    *stopped = emit_arg(&b, &mut core, err);
     if let Some(p) = fmt.precision {
         core.truncate(p);
     }

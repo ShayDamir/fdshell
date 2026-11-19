@@ -54,7 +54,7 @@ pub(super) fn apply_spec(
         b'a' | b'A' => fmt_hexfloat::render(num::next_float(rest, sink), &fmt, &mut sink.out),
         b's' => string_conv(rest, &fmt, &mut sink.out),
         b'c' => char_conv(rest, &fmt, &mut sink.out),
-        b'b' => byte_conv(rest, &fmt, &mut sink.out, stopped),
+        b'b' => byte_conv(rest, &fmt, &mut sink.out, &mut sink.err, stopped),
         b'q' => quote_conv(rest, &fmt, &mut sink.out),
         // `spec::is_conv` guarantees a known conversion character.
         _ => {}

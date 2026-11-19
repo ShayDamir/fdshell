@@ -12056,3 +12056,31 @@ Pins: `safe/fdshell/src/repl/prompt/render/expand/tests.rs`
 `safe/fdshell/src/repl/prompt/tests.rs::the_dollars_escape_answer_is_not_a_trigger`,
 and the pty rows `safe/fdshell/tests/repl.rs::a_hex_decoded_dollar_expands_in_a_prompt`,
 `safe/fdshell/tests/repl.rs::the_prompt_positional_join_is_the_measured_one`.
+
+## printf's `\x` digit cap and its rc-0 diagnostic are bash's, not ISO C's (task #602)
+
+ISO C's `printf(3)` leaves `\xhh` open-ended; bash 5.3.9 stops at **two** digits
+(measured `\x414` → `A4`, `\x1FF` → `0x1F F`) and takes **one** when only one is
+there (measured `\x4` → `0x04`, `\xd` → `0x0D`). The cap is a decision, so it
+lives in a named constant and a pin — a "follow the C standard" change moves it
+silently. Lowercase `\x` is the escape and uppercase `\X` is not (measured), so
+the dispatch arm is lowercase-only and pinned as a control.
+
+A `\x` with no hex digit is no error either: bash writes
+`printf: missing hex digit for \x` **once per occurrence** — a reused format
+reports once per round, two `%b` arguments report twice — leaves the escape bytes
+literal and stays at **rc 0**. So the report must not travel the numeric-report
+path, which raises the sink's failure flag and with it the exit status. The
+scanner is shared by the format string and `%b`, so both surfaces move together
+(that is the point); `%s` never expands escapes, and that control is what pins
+which arm answers.
+
+Pins: `safe/fdshell/src/child/printf/tests.rs` (`hex_escape_in_format`,
+`hex_escape_stops_at_two_digits`, `hex_escape_in_argument`,
+`uppercase_hex_escape_is_literal`, `percent_s_does_not_expand_hex`,
+`hex_escape_counts_into_precision`, `hex_escape_without_digit_reports`) and
+`safe/fdshell/tests/printf.rs` (`printf_hex_escape_in_format`,
+`printf_hex_escape_takes_two_digits_at_most`, `printf_b_expands_hex_escapes`,
+`printf_uppercase_hex_escape_stays_literal`,
+`printf_percent_s_leaves_the_hex_escape_literal`,
+`printf_hex_escape_without_a_digit_reports_and_continues`).

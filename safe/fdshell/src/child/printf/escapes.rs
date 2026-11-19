@@ -2,19 +2,32 @@
 
 // mutants: -C --lib -C --test -C printf -- -E 'test(/^child::printf::/) | binary(printf)'
 
+mod hex;
+
 use alloc::vec::Vec;
 
 /// Emit the backslash escape starting at `i`; returns the index of the byte
 /// after the sequence. Unknown escapes keep the backslash and let the next
 /// byte be processed as a literal.
-pub(super) fn emit_escape(fmt: &[u8], i: usize, out: &mut Vec<u8>) -> usize {
-    emit_escape_max(fmt, i, out, 3)
+pub(super) fn emit_escape(fmt: &[u8], i: usize, out: &mut Vec<u8>, err: &mut Vec<u8>) -> usize {
+    emit_escape_max(fmt, i, out, err, 3)
 }
 
 /// The scanner behind both entry points; `max_digits` bounds the octal run
 /// (three digits total on both paths, four when a `%b` run has the `\0`
 /// prefix).
-fn emit_escape_max(fmt: &[u8], i: usize, out: &mut Vec<u8>, max_digits: usize) -> usize {
+fn emit_escape_max(
+    fmt: &[u8],
+    i: usize,
+    out: &mut Vec<u8>,
+    err: &mut Vec<u8>,
+    max_digits: usize,
+) -> usize {
+    if fmt.get(i + 1) == Some(&b'x')
+        && let Some(j) = hex::emit(fmt, i, out, err)
+    {
+        return j;
+    }
     match fmt.get(i + 1).copied().and_then(escaped) {
         None if fmt.get(i + 1).is_some_and(|&c| octal_digit(c).is_some()) => {
             emit_octal(fmt, i, out, max_digits)
@@ -79,7 +92,7 @@ fn octal_digit(c: u8) -> Option<u32> {
 /// further octal digits, and `\c` stops output — then `emit_arg` returns
 /// `true` and the caller drops the rest of the conversions, format and
 /// arguments (the padding due for the converted prefix is still emitted).
-pub(super) fn emit_arg(bytes: &[u8], out: &mut Vec<u8>) -> bool {
+pub(super) fn emit_arg(bytes: &[u8], out: &mut Vec<u8>, err: &mut Vec<u8>) -> bool {
     let mut i = 0;
     while let Some(&b) = bytes.get(i) {
         if b != b'\\' {
@@ -95,7 +108,7 @@ pub(super) fn emit_arg(bytes: &[u8], out: &mut Vec<u8>) -> bool {
         } else {
             3
         };
-        i = emit_escape_max(bytes, i, out, max_digits);
+        i = emit_escape_max(bytes, i, out, err, max_digits);
     }
     false
 }

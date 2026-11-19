@@ -39,7 +39,7 @@ fn round(
     while let Some(&b) = fmt.get(i) {
         if b != b'%' {
             if b == b'\\' {
-                i = escapes::emit_escape(fmt, i, &mut sink.out);
+                i = escapes::emit_escape(fmt, i, &mut sink.out, &mut sink.err);
                 continue;
             }
             sink.out.push(b);
