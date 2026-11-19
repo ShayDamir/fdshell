@@ -246,3 +246,94 @@ fn timeout_zero_no_data_fifo() {
     // the word collapses to `1:`.
     assert_eq!(stdout(&out), "1:\n", "script={script}");
 }
+
+// ---- task #600: bash's numeric-argument grammars for `-n` and `-t` ----
+
+/// Task #600 (#608): bash's `-t` grammar accepts fractions (`0.5`, `.5`,
+/// `1.0`, measured) and `read` waits their fraction. On the open, empty fifo
+/// each row times out after the waited fraction at status 1 (fdshell's own
+/// status rule, pinned by the `-t 0` rows above) and parses silently: the
+/// acceptance, not an error report, is what is pinned. The run takes ~2 s.
+#[test]
+fn timeout_fractions_wait_and_time_out() {
+    let dir = Scratch::new();
+    let script = "builtin mkfifoat --mode 0600 ch %>%ch; \
+                  builtin openat2 --flags O_RDWR ch %>%p; \
+                  read -t 0.5 L -u %p; echo $?:$L; \
+                  read -t .5 L -u %p; echo $?:$L; \
+                  read -t 1.0 L -u %p; echo $?:$L";
+    let start = std::time::Instant::now();
+    let out = run(&dir, script);
+    let elapsed = start.elapsed();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "1:\n1:\n1:\n", "script={script}");
+    assert_eq!(
+        stderr(&out),
+        "",
+        "accepted shapes parse silently: script={script}"
+    );
+    assert!(
+        elapsed >= std::time::Duration::from_millis(1700),
+        "each row waited its fraction: {elapsed:?}"
+    );
+}
+
+/// Task #600: past `u32::MAX` the widened grammar reaches the saturate-to-
+/// infinite rule, so `-t 999999999999` blocks for a late writer — bash's
+/// measured parity — and so does `4294967296`, where bash returns immediately
+/// (non-monotonic overflow, not the contract; recorded in the README). Both
+/// rows pin fdshell's measured behaviour: the late line is read, status 0.
+#[test]
+fn timeout_past_u32_blocks_for_a_late_writer() {
+    for word in ["999999999999", "4294967296"] {
+        let dir = Scratch::new();
+        let setup = run(&dir, "builtin mkfifoat --mode 0600 fifo");
+        assert_eq!(setup.status.code(), Some(0), "mkfifoat: {}", stderr(&setup));
+        let writer_fifo = dir.join("fifo");
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            use std::io::Write as _;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&writer_fifo)
+                .unwrap();
+            f.write_all(b"late\n").unwrap();
+        });
+        let script = format!("exec < fifo; read -t {word} L; echo $?:$L");
+        let out = run(&dir, &script);
+        writer.join().unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "script={script} stderr={}",
+            stderr(&out)
+        );
+        assert_eq!(stdout(&out), "0:late\n", "script={script}");
+    }
+}
+
+/// Task #600 (the verified-unknown sibling): `read -n` parses its count
+/// through bash's `legal_number` grammar, so `" 3"`, `+3` and `03` each take
+/// 3 characters of a 6-character line at rc 0 (bash 5.3.9 measured).
+#[test]
+fn n_accepts_legal_number_shapes() {
+    for word in ["\" 3\"", "+3", "03"] {
+        let dir = Scratch::new();
+        let script = format!(
+            "printf 'abcdef\\n' > in; exec < in; read -n {word} v; printf '[%s] rc=%s\\n' \"$v\" \"$?\""
+        );
+        let out = run(&dir, &script);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "script={script} stderr={}",
+            stderr(&out)
+        );
+        assert_eq!(stdout(&out), "[abc] rc=0\n", "script={script}");
+    }
+}

@@ -16,7 +16,7 @@ fn make_flags(
     delim: Option<&'static [u8]>,
     raw: bool,
     max: Option<usize>,
-    timeout: Option<u32>,
+    timeout: Option<u64>,
 ) -> ReadFlags<'static> {
     ReadFlags {
         source: SourceFd::Stdin,
@@ -169,6 +169,27 @@ fn test_parse_flags_n_zero() {
     assert_eq!(flags.max_bytes, Some(0));
 }
 
+/// Task #600 (the verified-unknown sibling): `-n` parses its count through
+/// bash's `legal_number` grammar; the grammar itself lives in `numarg`.
+#[test]
+fn test_parse_flags_n_accepts_legal_number_shapes() {
+    for arg in [" 3", "+3", "03"] {
+        let arg_word = ShortCStr::from_vec(arg.as_bytes().to_vec()).unwrap();
+        let args = vec![c"-n".into(), arg_word];
+        let flags = parse_flags(&args).unwrap();
+        assert_eq!(flags.max_bytes, Some(3), "{arg:?}");
+    }
+}
+
+#[test]
+fn test_parse_flags_n_rejects_outside_grammar() {
+    for arg in ["abc", "1x", "-1", "0x3", "1.5"] {
+        let arg_word = ShortCStr::from_vec(arg.as_bytes().to_vec()).unwrap();
+        let args = vec![c"-n".into(), arg_word];
+        assert!(parse_flags(&args).is_err(), "{arg:?} must be rejected");
+    }
+}
+
 #[test]
 fn test_parse_flags_n_invalid() {
     let args = vec![c"-n".into(), c"abc".into()];
@@ -208,7 +229,7 @@ fn test_parse_flags_d_empty_delim() {
 fn test_parse_flags_t_seconds() {
     let args = vec![c"-t".into(), c"5".into()];
     let flags = parse_flags(&args).unwrap();
-    assert_eq!(flags.timeout, Some(5));
+    assert_eq!(flags.timeout, Some(5000));
     assert_eq!(flags.timeout_ms(), Some(5000));
 }
 
@@ -229,8 +250,8 @@ fn test_parse_flags_t_overflow_saturates_infinite() {
 
 #[test]
 fn test_parse_flags_t_saturation_boundary() {
-    // `i32::MAX as u32 / 1000`: the largest `-t` whose millisecond product
-    // fits in `i32` (one past it saturates to `-1`).
+    // The largest `-t` whose millisecond value fits in `i32` (one past it
+    // saturates to `-1`); task #600 moved the field to whole milliseconds.
     let args = vec![c"-t".into(), c"2147483".into()];
     let flags = parse_flags(&args).unwrap();
     assert_eq!(flags.timeout_ms(), Some(2147483000));
@@ -258,10 +279,13 @@ fn test_parse_flags_t_negative() {
 }
 
 #[test]
-fn test_parse_flags_t_fraction_rejected() {
+fn test_parse_flags_t_fraction_accepted() {
+    // Task #600 (#608): bash's `read -t` grammar accepts fractions; the old
+    // `FromStr` path rejected them.
     let args = vec![c"-t".into(), c"0.5".into()];
-    let result = parse_flags(&args);
-    assert!(result.is_err());
+    let flags = parse_flags(&args).unwrap();
+    assert_eq!(flags.timeout, Some(500));
+    assert_eq!(flags.timeout_ms(), Some(500));
 }
 
 #[test]
@@ -285,7 +309,7 @@ fn test_parse_flags_combined() {
     assert_eq!(flags.prompt, Some(b"hi" as &[u8]));
     assert!(flags.raw);
     assert_eq!(flags.delim, Some(b":" as &[u8]));
-    assert_eq!(flags.timeout, Some(2));
+    assert_eq!(flags.timeout, Some(2000));
 }
 
 #[test]
@@ -299,7 +323,7 @@ fn test_parse_flags_d_last_wins() {
 fn test_parse_flags_t_last_wins() {
     let args = vec![c"-t".into(), c"5".into(), c"-t".into(), c"2".into()];
     let flags = parse_flags(&args).unwrap();
-    assert_eq!(flags.timeout, Some(2));
+    assert_eq!(flags.timeout, Some(2000));
 }
 
 #[test]
