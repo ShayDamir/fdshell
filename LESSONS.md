@@ -12241,3 +12241,27 @@ its `eof` flag" (the shared loop this buffer plugs into — the read-to-EOF user
 the line path buffers) and LESSONS: "Capping the shared line buffer caps the whole multi-line
 accumulation — and a capped reader must read in chunks" (the same chunked-reader insight one level
 up: a chunk can end mid-line and the bytes after a separator belong to the next line).
+
+## A nameless `read` fills REPLY with the raw line (task #610)
+
+No-name `read` is bash's extension over POSIX's ≥1-name rule. The value is the
+line as the reader produced it — after backslash processing, delimiter removal
+and the `-n`/`-d` stop — with **no** edge trim and **no** field splitting, so
+`  a  b  ` arrives whole where one named target would be trimmed to `a  b`. An
+explicit `read REPLY` is an ordinary target and *is* trimmed, so "no names"
+must stay a distinct signal, not a synthetic `REPLY` target.
+
+The empty-line rule is per kind: bash assigns at EOF (name or REPLY) and
+assigns nothing on a timeout; fdshell's named half is pinned the other way
+(`run_read_empty_data_eof`), so the kind split lives in `run_read`, not in
+`split_fields` (whose `num_targets >= 1` invariant the caller now guarantees).
+REPLY is an ordinary variable — same trace origin as named targets, not
+exported.
+
+Pins: `safe/fdshell/src/intercept/read/tests.rs`
+(`run_read_no_targets_assigns_the_raw_line_to_reply`,
+`run_read_no_targets_at_eof_assigns_empty_reply`,
+`run_read_no_targets_timeout_leaves_reply_untouched`) and
+`safe/fdshell/tests/read.rs` (`no_names_assign_reply_the_raw_line`,
+`no_names_at_eof_clears_reply`, `an_explicit_reply_name_is_trimmed_like_any_target`,
+`reply_stays_out_of_the_child_environment`).

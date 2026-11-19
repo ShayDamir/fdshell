@@ -843,6 +843,16 @@ An unset variable expands to the empty string; `set -u` makes that an error
 instead. `local name=value` (inside a function) scopes a variable to the
 current call. `read name` reads a line from stdin into a variable.
 
+A `read` with **no variable name** fills `REPLY` with the line (a bash
+extension; POSIX requires at least one name). The value is the line as the
+reader produced it, raw — the edge trim and field splitting are named-target
+rules, so `  a  b  ` arrives whole where one named target would answer `a  b`,
+and an explicit `read REPLY` is an ordinary name that *is* trimmed. REPLY is an
+ordinary shell variable — same trace origin as named targets — not exported by
+default. Pinned in `tests/read.rs` (`no_names_assign_reply_the_raw_line`,
+`a_flags_only_read_fills_reply`, `an_explicit_reply_name_is_trimmed_like_any_target`,
+`reply_stays_out_of_the_child_environment`).
+
 `unset name…` removes each named shell variable — its value, its export
 attribute and the inherited environment row it came from, all three, so the
 name leaves `$name`, `${name:-word}` and the child environment together (after
