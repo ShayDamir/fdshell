@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C read -C --test -C trap -- -E 'test(/^intercept::read::tests::/) | binary(read) | binary(trap)'
+
 //! `read` builtin: reads one line from stdin, `-u fd`, or an fd var.
 //!
 //! `-t` is a one-shot `poll` gate (see `io::read_line`): bash re-polls per
@@ -6,6 +8,10 @@
 //!
 //! Unlike bash, a ready `-t 0` reads the line; bash's `-t 0` is a readiness
 //! probe that never reads.
+//!
+//! The `-p` prompt is drawn only when the resolved source fd is a terminal —
+//! bash tests the fd it reads from (stdin, `-u <rawfd>`, or `-u %FDVAR`), not
+//! stdin, and the fd is resolved before the prompt is written.
 
 use error_stack::{Report, ResultExt};
 
@@ -20,6 +26,7 @@ use sys::{ImportedStr, ScriptText, Trace};
 use collect::collect_targets;
 use flags::SourceFd;
 use flags::parse_flags;
+use flags::source_is_tty;
 use io::read_line;
 use line::LineEnd;
 use words::split_fields;
@@ -36,12 +43,6 @@ pub(crate) fn run_read(
     let targets = collect_targets(&cmdline.args)?;
 
     let prompt_text = flags.prompt.unwrap_or(b"");
-    if !prompt_text.is_empty() {
-        sys::ERR
-            .write_all(prompt_text)
-            .change_context(CmdError::Read)?;
-    }
-
     let resolved_fd: Option<sys::LocalFd> = match &flags.source {
         SourceFd::FdVar(var) => {
             let state = cell.borrow().change_context(CmdError::Read)?;
@@ -58,6 +59,14 @@ pub(crate) fn run_read(
         }
         _ => None,
     };
+
+    // bash draws the prompt only when the fd it is about to read from is a
+    // terminal, so a resolved-fd failure (a missing var) precedes the write.
+    if !prompt_text.is_empty() && source_is_tty(&flags.source, resolved_fd.as_ref())? {
+        sys::ERR
+            .write_all(prompt_text)
+            .change_context(CmdError::Read)?;
+    }
 
     let (data, end) = read_line(&flags.source, resolved_fd.as_ref(), &flags)?;
     let failed = matches!(end, LineEnd::Eof | LineEnd::Timeout);

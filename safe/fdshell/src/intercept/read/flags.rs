@@ -1,5 +1,9 @@
 // mutants: -C --lib -C --test -C read -C --test -C trap -- -E 'test(/^intercept::read::tests::/) | binary(read) | binary(trap)'
 
+use crate::error::cmd::CmdError;
+use error_stack::{Report, ResultExt};
+use sys::ImportedFd;
+
 /// Parsed `read` flags.
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct ReadFlags<'a> {
@@ -27,6 +31,28 @@ impl<'a> ReadFlags<'a> {
 
 pub(crate) use parse::parse_flags;
 pub(crate) use source::SourceFd;
+
+/// True when the fd `read` reads from — stdin, `-u <rawfd>`, or a resolved fd
+/// var — is a terminal: bash writes the `-p` prompt only when it is, and the fd
+/// it tests is the resolved source, not necessarily stdin.
+///
+/// A clone-less fd var has no fd to test, so it answers *not a terminal*: bash's
+/// rule is that the tested fd is the fd read from, and with no fd nothing passes
+/// the test — the same visible answer as the non-tty branch, and consistent with
+/// `io::read_line`, which reads nothing from a clone-less fd var.
+pub(crate) fn source_is_tty(
+    source: &SourceFd,
+    fd_clone: Option<&sys::LocalFd>,
+) -> Result<bool, Report<CmdError>> {
+    match source {
+        SourceFd::Stdin => sys::IN.is_tty().change_context(CmdError::Read),
+        SourceFd::RawFd(num) => {
+            let fd = ImportedFd::try_from(num).change_context(CmdError::Read)?;
+            fd.is_tty().change_context(CmdError::Read)
+        }
+        SourceFd::FdVar(_) => Ok(fd_clone.is_some_and(|fd| fd.is_tty())),
+    }
+}
 
 mod parse;
 mod source;
