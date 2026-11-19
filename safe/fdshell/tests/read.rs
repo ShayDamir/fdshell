@@ -577,3 +577,107 @@ fn prompt_is_drawn_on_a_tty_when_the_u_fd_is_the_tty() {
         "the fed line is read: {stream}"
     );
 }
+
+// ---- task #609: the tail of a chunk feeds the next read on the same source ----
+
+// bash keeps the bytes a `read(2)` chunk carried past the end of the line and
+// answers them to the next read on that source. Every row below was measured
+// against bash 5.3.9 on this machine, 6/6, before being pinned.
+
+/// Three reads from one file: the first takes the chunk and the other two answer
+/// what it left behind (bash `x=a y=b z=c`).
+#[test]
+fn three_reads_from_one_file_get_the_three_lines() {
+    let dir = Scratch::new();
+    let script = r#"printf "a\nb\nc\n" > in; exec < in; read x; read y; read z; printf "x=%s y=%s z=%s\n" "$x" "$y" "$z""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "x=a y=b z=c\n", "script={script}");
+}
+
+/// The `-n` cap is a stop reason: the line takes two characters and the next read
+/// gets the rest of the line (bash `x=ab y=cdef`).
+#[test]
+fn a_capped_read_leaves_the_rest_of_the_line_for_the_next_one() {
+    let dir = Scratch::new();
+    let script = r#"read -n 2 x; read y; printf "x=%s y=%s\n" "$x" "$y""#;
+    let out = run_with_piped_stdin(&dir, script, "abcdef\n");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "x=ab y=cdef\n", "script={script}");
+}
+
+/// A `-d` delimiter is the third stop reason (bash `x=a y=b`).
+#[test]
+fn a_delimited_read_leaves_the_rest_of_the_line_for_the_next_one() {
+    let dir = Scratch::new();
+    let script = r#"read -d : x; read -d : y; printf "x=%s y=%s\n" "$x" "$y""#;
+    let out = run_with_piped_stdin(&dir, script, "a:b:c\n");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "x=a y=b\n", "script={script}");
+}
+
+/// The buffer follows the fd the script named, so two `-u 3` reads on one file
+/// answer its first two lines (bash `x=a y=b`).
+#[test]
+fn two_reads_on_one_u_fd_get_the_two_lines() {
+    let dir = Scratch::new();
+    let script = r#"printf "a\nb\n" > in; exec 3< in; read -u 3 x; read -u 3 y; printf "x=%s y=%s\n" "$x" "$y""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "x=a y=b\n", "script={script}");
+}
+
+/// The multi-line `while read` the bug was about: bash iterates three times, and a
+/// reader that drops its chunk iterates once.
+#[test]
+fn while_read_iterates_every_line_of_the_source() {
+    let dir = Scratch::new();
+    let script =
+        r#"printf "a\nb\nc\n" > in; exec < in; while read l; do printf "got=%s\n" "$l"; done"#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "got=a\ngot=b\ngot=c\n", "script={script}");
+}
+
+/// The pin that protects the buffer's lifetime rule: a read from piped stdin
+/// buffers a tail, `exec <` then reassigns stdin to another file, and the next
+/// read must answer the **second** file — the buffer belongs to the descriptor it
+/// was taken from, not to the name (bash 5.3.9 measured `a=FIRST-1 b=SECOND-1`).
+#[test]
+fn a_reassigned_stdin_loses_the_stale_buffer() {
+    let dir = Scratch::new();
+    let script = r#"printf "SECOND-1\nSECOND-2\n" > second; read a; exec < second; read b; printf "a=%s b=%s\n" "$a" "$b""#;
+    let out = run_with_piped_stdin(&dir, script, "FIRST-1\nFIRST-2\n");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "a=FIRST-1 b=SECOND-1\n", "script={script}");
+}
