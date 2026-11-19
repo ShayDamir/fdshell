@@ -8,3 +8,28 @@
 # Task #596 resolved the last five (the two position.rs quote-gate pins, the
 # options::DEFAULTS sum, the io.rs and cmd.rs guard folds — CATCHING_MUTANTS
 # rules 19, 8 and 30), so the registry is empty again.
+
+# Task #604: the two `<=` arms of the splitter's comparisons, proven equivalent
+# on every input.
+[[allow]]
+file = "safe/fdshell/src/intercept/read/words.rs"
+line = 19
+column = 21
+mutant = "replace < with <= in split_fields"
+reason = """\
+The branches can only disagree when ranges.len() == num_targets, and there they \
+cannot: after the trim every range is a real field and the last range ends at \
+the line's end, so pad()'s per-field assign and head_and_tail()'s \
+take(n-1)-plus-tail-slice produce the same list. Equivalent on all inputs."""
+
+[[allow]]
+file = "safe/fdshell/src/intercept/read/words.rs"
+line = 52
+column = 14
+mutant = "replace < with <= in field_ranges"
+reason = """\
+The branches can only disagree when start == line.len(), i.e. the line ends on \
+a CUT byte — but trim_edges strips those, and the only remaining case is the \
+empty line (start == len == 0), where the extra empty range lands in the pad as \
+an empty value or becomes the tail slice line.get(0..), which is also empty. \
+Equivalent on all inputs."""

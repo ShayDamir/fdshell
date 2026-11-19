@@ -983,6 +983,97 @@ fn test_split_fields_mixed_separators() {
     assert_eq!(fields, vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
 }
 
+// Task #604: bash trims IFS whitespace at the line's edges, and the last
+// variable gets the trimmed line's tail verbatim — separator text included,
+// never rejoined with a fixed byte. Every expectation is bash 5.3.9-measured.
+
+#[test]
+fn test_split_fields_last_keeps_separator_tabs() {
+    // `a··b⇥c`, x y → a / `b⇥c`.
+    let fields = split_fields(b"a  b\tc", 2);
+    assert_eq!(fields, vec![b"a".to_vec(), b"b\tc".to_vec()]);
+}
+
+#[test]
+fn test_split_fields_last_keeps_double_spaces() {
+    // `a··b··c`, x y → a / `b··c`.
+    let fields = split_fields(b"a  b  c", 2);
+    assert_eq!(fields, vec![b"a".to_vec(), b"b  c".to_vec()]);
+}
+
+#[test]
+fn test_split_fields_single_target_trims_edges() {
+    // `··a··b··`, x → `a··b`: edges go, internal separators stay.
+    let fields = split_fields(b"  a  b  ", 1);
+    assert_eq!(fields, vec![b"a  b".to_vec()]);
+}
+
+#[test]
+fn test_split_fields_trimmed_edges_exact_count() {
+    // `··a··b··`, x y → a / b.
+    let fields = split_fields(b"  a  b  ", 2);
+    assert_eq!(fields, vec![b"a".to_vec(), b"b".to_vec()]);
+}
+
+#[test]
+fn test_split_fields_whitespace_only_line_yields_empty() {
+    // `···`, x → empty: nothing survives the trim, so the single target pads.
+    let fields = split_fields(b"   ", 1);
+    assert_eq!(fields, vec![Vec::new()]);
+}
+
+#[test]
+fn test_split_fields_tab_edges_trimmed() {
+    // `⇥a⇥b⇥`, x → `a⇥b`.
+    let fields = split_fields(b"\ta\tb\t", 1);
+    assert_eq!(fields, vec![b"a\tb".to_vec()]);
+}
+
+#[test]
+fn test_split_fields_tab_edges_and_separator() {
+    // `⇥a⇥b⇥c⇥`, x y → a / `b⇥c`.
+    let fields = split_fields(b"\ta\tb\tc\t", 2);
+    assert_eq!(fields, vec![b"a".to_vec(), b"b\tc".to_vec()]);
+}
+
+#[test]
+fn test_split_fields_newline_edges_trimmed() {
+    // The newline arm of the trim (reached through `-d ''` EOF reads):
+    // `\na·b·`, x → `a·b`.
+    let fields = split_fields(b"\na b\n", 1);
+    assert_eq!(fields, vec![b"a b".to_vec()]);
+}
+
+#[test]
+fn test_split_fields_newline_inside_tail_kept() {
+    // `a·b\n·c··d`, x → `a b\nc  d`: newline trims at the edges but is content
+    // inside (the cut set is space and tab until task #158).
+    let fields = split_fields(b"a b\nc  d\n", 1);
+    assert_eq!(fields, vec![b"a b\nc  d".to_vec()]);
+}
+
+#[test]
+fn test_split_fields_cr_is_content_not_ifs() {
+    // `\ra·`, x → `\ra`: CR is not IFS whitespace and bash does not strip it.
+    let fields = split_fields(b"\ra ", 1);
+    assert_eq!(fields, vec![b"\ra".to_vec()]);
+}
+
+#[test]
+fn test_split_fields_cr_field_with_double_space_separator() {
+    // `\ra··b·`, x y → `\ra` / `b`.
+    let fields = split_fields(b"\ra  b ", 2);
+    assert_eq!(fields, vec![b"\ra".to_vec(), b"b".to_vec()]);
+}
+
+#[test]
+fn test_split_fields_run_before_last_field_is_consumed() {
+    // `a···b`, x y → a / b: a separator run before the tail's first field is
+    // one boundary, so the run belongs to no field.
+    let fields = split_fields(b"a   b", 2);
+    assert_eq!(fields, vec![b"a".to_vec(), b"b".to_vec()]);
+}
+
 // collect.rs edge cases
 
 #[test]
