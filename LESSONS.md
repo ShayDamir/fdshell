@@ -12158,3 +12158,31 @@ Pins: `safe/fdshell/src/intercept/read/tests.rs`
 `safe/fdshell/tests/read.rs` (`last_variable_keeps_the_separator_text`,
 `edges_are_trimmed_internal_separators_stay`,
 `trim_applies_to_the_capped_text`, `newline_edges_trimmed_on_an_eof_read`).
+
+## `read -p` gates on `isatty` of the fd it reads from, not on stdin (task #607)
+
+bash writes the `-p` prompt only when the fd the `read` actually reads from is a
+terminal — stdin, `-u <rawfd>`, or a resolved fd var — so a piped or file-fed
+stdin, and a `-u 3` whose fd 3 is a file or a here-string, draw nothing, while a
+`-u 3` opened on `/dev/tty` draws it. The gate sits on the **resolved** source,
+so the fd var is resolved before the prompt is written and its failure (a missing
+var) is the answer the user gets, with no prompt emitted first. A fd var with no
+clone has no fd to test: nothing passes the test, so the prompt stays unsaid —
+the same visible answer as the non-tty branch, and consistent with
+`io::read_line`, which reads nothing from a clone-less fd var.
+
+Pins: `safe/fdshell/src/intercept/read/tests.rs`
+(`run_read_prompt_stays_silent_on_a_pipe`,
+`run_read_prompt_is_drawn_on_a_tty_fd_var`,
+`run_read_reports_a_missing_fd_var_before_writing_the_prompt`,
+`source_is_tty_a_clone_less_fd_var_is_not_a_terminal`,
+`source_is_tty_a_fd_var_clone_on_a_pty_is_a_terminal`) and
+`safe/fdshell/tests/read.rs` (`prompt_stays_silent_when_stdin_is_a_pipe`,
+`prompt_stays_silent_when_stdin_is_a_regular_file`,
+`prompt_is_drawn_when_stdin_is_a_tty`,
+`prompt_stays_silent_on_a_tty_when_the_u_fd_is_a_regular_file`,
+`prompt_stays_silent_on_a_tty_when_the_u_fd_is_a_here_string`,
+`prompt_is_drawn_on_a_tty_when_the_u_fd_is_the_tty`). The tty rows use the
+harness of LESSONS: "Test tty-gated behavior from safe-crate integration tests via `script`";
+an fd var's tty is reached in-process with `sys::pty::openpty()` instead, which
+that entry allows for the fd-var case.
