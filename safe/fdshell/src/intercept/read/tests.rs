@@ -1267,8 +1267,44 @@ fn run_read_data_without_newline_sets_vars() {
     assert!(matches!(state.last_status, WaitStatus::Exited(1)));
 }
 
+/// Runs `body` in a forked child whose stderr is a pipe and returns the bytes the
+/// child wrote there. `body` reports whether the outcome it saw is the one the test
+/// expects (the child exits 0 only then); the child must `sys::exit` and must not
+/// panic (LESSONS), so every assertion lives in the parent.
+fn run_in_a_child_with_a_pipe_on_stderr(body: impl FnOnce() -> bool) -> Vec<u8> {
+    let (err_r, err_w) = sys::pipe::pipe2(0).unwrap();
+    match sys::fork_pidfd::fork_pidfd().unwrap().1 {
+        None => {
+            err_w.export_to(2).unwrap();
+            drop(err_w);
+            sys::exit(if body() { 0 } else { 1 });
+        }
+        Some(pidfd) => {
+            drop(err_w);
+            let mut captured = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let n = err_r.read(&mut chunk).unwrap();
+                if n == 0 {
+                    break;
+                }
+                if let Some(part) = chunk.get(..n) {
+                    captured.extend_from_slice(part);
+                }
+            }
+            match pidfd.wait_pidfd().unwrap() {
+                WaitStatus::Exited(0) => {}
+                other => panic!("child failed: {}", other.exit_code()),
+            }
+            captured
+        }
+    }
+}
+
+/// Task #607 (bash 5.3.9 measured): the prompt is drawn only when the fd `read`
+/// reads from is a terminal — a pipe is not, so stderr stays empty.
 #[test]
-fn run_read_writes_prompt_to_stderr() {
+fn run_read_prompt_stays_silent_on_a_pipe() {
     let (data_r, data_w) = sys::pipe::pipe2(0).unwrap();
     data_w.write(b"answer\n").unwrap();
     drop(data_w);
@@ -1279,34 +1315,86 @@ fn run_read_writes_prompt_to_stderr() {
     let cmdline = make_read_u_cmdline(&[c"-p".into(), c"Enter: ".into(), c"var1".into()], fd);
     let cell = make_read_cell();
 
-    let (err_r, err_w) = sys::pipe::pipe2(0).unwrap();
-    match sys::fork_pidfd::fork_pidfd().unwrap().1 {
-        None => {
-            err_w.export_to(2).unwrap();
-            drop(err_w);
-            let result = run_read(&line, &cmdline, &text(&line), &cell);
-            sys::exit(if result.is_ok() { 0 } else { 1 });
-        }
-        Some(pidfd) => {
-            drop(err_w);
-            let mut err = Vec::new();
-            let mut chunk = [0u8; 4096];
-            loop {
-                let n = err_r.read(&mut chunk).unwrap();
-                if n == 0 {
-                    break;
-                }
-                if let Some(part) = chunk.get(..n) {
-                    err.extend_from_slice(part);
-                }
-            }
-            match pidfd.wait_pidfd().unwrap() {
-                WaitStatus::Exited(0) => {}
-                other => panic!("child failed: {}", other.exit_code()),
-            }
-            assert_eq!(err, b"Enter: ");
-        }
+    let captured = run_in_a_child_with_a_pipe_on_stderr(|| {
+        run_read(&line, &cmdline, &text(&line), &cell).is_ok()
+    });
+    assert!(captured.is_empty(), "a non-tty source draws no prompt");
+}
+
+/// Task #607: the same read on a *tty* source fd does draw the prompt — the
+/// pty here is an fd var's clone, pre-fed from its master so the child's read
+/// returns at once.
+#[test]
+fn run_read_prompt_is_drawn_on_a_tty_fd_var() {
+    let (_master, slave) = sys::pty::openpty().unwrap();
+    let cell = make_read_cell();
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.fds.insert(
+            c"MYFD".into(),
+            crate::state::FdVar {
+                fd: slave,
+                trace: sys::Trace::boundary(sys::Origin::Shell),
+            },
+        );
     }
+    _master.write(b"answer\n").unwrap();
+
+    let args = vec![
+        c"-u".into(),
+        c"%MYFD".into(),
+        c"-p".into(),
+        c"Enter: ".into(),
+        c"var1".into(),
+    ];
+    let line = make_read_line(&["read", "-u", "%MYFD", "-p", "Enter: ", "var1"]);
+    let cmdline = make_read_cmdline(&args);
+
+    let captured = run_in_a_child_with_a_pipe_on_stderr(|| {
+        run_read(&line, &cmdline, &text(&line), &cell).is_ok()
+    });
+    assert_eq!(captured, b"Enter: ");
+}
+
+/// Task #607: resolving the source fd comes before the prompt write, so a
+/// missing fd var answers with its error and no prompt. The report itself never
+/// reaches this level (the caller prints it), so an empty stderr is the pin.
+#[test]
+fn run_read_reports_a_missing_fd_var_before_writing_the_prompt() {
+    let cell = make_read_cell();
+    let args = vec![
+        c"-u".into(),
+        c"%MISSING".into(),
+        c"-p".into(),
+        c"Enter: ".into(),
+        c"var1".into(),
+    ];
+    let line = make_read_line(&["read", "-u", "%MISSING", "-p", "Enter: ", "var1"]);
+    let cmdline = make_read_cmdline(&args);
+
+    let captured = run_in_a_child_with_a_pipe_on_stderr(|| {
+        run_read(&line, &cmdline, &text(&line), &cell).is_err()
+    });
+    assert!(captured.is_empty(), "the error precedes the prompt");
+}
+
+/// Task #607 (the decision pinned): a fd var with no clone has no fd to test,
+/// so it is not a terminal — the same visible answer as the non-tty branch.
+#[test]
+fn source_is_tty_a_clone_less_fd_var_is_not_a_terminal() {
+    let args = vec![c"-u".into(), c"%MYFD".into()];
+    let flags = parse_flags(&args).unwrap();
+    assert!(!source_is_tty(&flags.source, None).unwrap());
+}
+
+/// Task #607: the pair to the pin above — a fd var whose clone is a pty is a
+/// terminal, so the prompt is drawn.
+#[test]
+fn source_is_tty_a_fd_var_clone_on_a_pty_is_a_terminal() {
+    let (_master, slave) = sys::pty::openpty().unwrap();
+    let args = vec![c"-u".into(), c"%MYFD".into()];
+    let flags = parse_flags(&args).unwrap();
+    assert!(source_is_tty(&flags.source, Some(&slave)).unwrap());
 }
 
 #[test]

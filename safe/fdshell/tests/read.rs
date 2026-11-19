@@ -1,6 +1,7 @@
 //! E2E bash-parity tests for the `read` builtin's flag families: default
 //! backslash processing, `-r`, `-d delim` (including `-d ''`), `-t` timeout,
-//! and the EOF status rule (EOF before the delimiter → 1, even with data).
+//! the EOF status rule (EOF before the delimiter → 1, even with data), and the
+//! `-p` prompt's terminal gate on the fd `read` actually reads from.
 //!
 //! `read` rejects direct redirects, so stdin is fed through `exec < file`;
 //! a fifo (O_RDWR, no peer) is the deterministic "open, empty, no EOF"
@@ -9,7 +10,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::str;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -412,4 +413,167 @@ fn n_accepts_legal_number_shapes() {
         );
         assert_eq!(stdout(&out), "[abc] rc=0\n", "script={script}");
     }
+}
+
+// ---- task #607: `-p` is gated on the fd `read` reads from being a terminal ----
+
+/// Runs the script with `input` piped into the child's stdin (a pipe is not a
+/// terminal) so the streams stay separable: the pin is on captured stderr.
+fn run_with_piped_stdin(dir: &std::path::Path, script: &str, input: &str) -> Output {
+    use std::io::Write as _;
+    let mut child = Command::new(BIN)
+        .current_dir(dir)
+        .args(["-c", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    drop(child.stdin.take());
+    child.wait_with_output().unwrap()
+}
+
+/// Runs the script under util-linux `script`, which attaches a pty and forwards
+/// the test's piped stdin into it, making the shell's stdin a terminal (LESSONS:
+/// "Test tty-gated behavior from safe-crate integration tests via `script`");
+/// returns the pty stream, which carries both streams plus the fed input's echo
+/// with `\r\n` — so rows assert `contains` / absence, never exact equality.
+/// Empty `input` feeds nothing (the row's `read` is fed by its own fd). Every
+/// row ends with a read that gets its data, so the shell exits on its own and
+/// the wait is bounded. `script` runs the command through a shell, so the inner
+/// script is single-quoted and must quote with double quotes itself.
+fn run_on_a_tty(dir: &std::path::Path, script: &str, input: &str) -> String {
+    use std::io::Write as _;
+    let mut child = Command::new("script")
+        .current_dir(dir)
+        .args(["-qec", &format!("{BIN} -c '{script}'"), "/dev/null"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    if !input.is_empty() {
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+    }
+    drop(child.stdin.take());
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "script={script}");
+    str::from_utf8(&out.stdout).unwrap().to_string()
+}
+
+/// Task #607 (bash 5.3.9 measured): stdin is a pipe, so the prompt is not drawn.
+#[test]
+fn prompt_stays_silent_when_stdin_is_a_pipe() {
+    let dir = Scratch::new();
+    let script = r#"read -p "P: " x; echo got=$x"#;
+    let out = run_with_piped_stdin(&dir, script, "answer\n");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "got=answer\n", "script={script}");
+    assert_eq!(
+        stderr(&out),
+        "",
+        "a non-tty fd read from draws no prompt: script={script}"
+    );
+}
+
+/// Task #607 (bash 5.3.9 measured): stdin is a regular file — silence, as for a
+/// pipe.
+#[test]
+fn prompt_stays_silent_when_stdin_is_a_regular_file() {
+    let dir = Scratch::new();
+    let script = r#"printf "answer\n" > in; exec < in; read -p "P: " x; echo got=$x"#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "got=answer\n", "script={script}");
+    assert_eq!(
+        stderr(&out),
+        "",
+        "a non-tty fd read from draws no prompt: script={script}"
+    );
+}
+
+/// Task #607 (bash 5.3.9 measured): stdin is a terminal, so the prompt is drawn.
+#[test]
+fn prompt_is_drawn_when_stdin_is_a_tty() {
+    let dir = Scratch::new();
+    let stream = run_on_a_tty(&dir, r#"read -p "P: " x; echo got=$x"#, "answer\n");
+    assert!(stream.contains("P: "), "a tty fd read from draws: {stream}");
+    assert!(
+        stream.contains("got=answer"),
+        "the fed line is read: {stream}"
+    );
+}
+
+/// Task #607 (bash 5.3.9 measured): stdin is the terminal but `-u 3` reads a
+/// regular file — the fd tested is the fd read from, so nothing is drawn even
+/// though stdin would pass the test. Every fd-3 row establishes fd 3 itself, so
+/// no harness-inherited fd (a jobserver pipe) can leak into the mapping.
+#[test]
+fn prompt_stays_silent_on_a_tty_when_the_u_fd_is_a_regular_file() {
+    let dir = Scratch::new();
+    let script = r#"printf "answer\n" > in; exec 3< in; read -u 3 -p "P: " x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "");
+    assert!(
+        !stream.contains("P: "),
+        "the fd read from is not a tty: {stream}"
+    );
+    assert!(
+        stream.contains("got=answer"),
+        "the fd's line is read: {stream}"
+    );
+}
+
+/// Task #607 (bash 5.3.9 measured): the task's process-substitution row, whose
+/// executable stand-in here is a here-string — fdshell has no `<(...)`, and
+/// bash measures the same silence for `exec 3<<<answer` (neither fd is a
+/// terminal), so the rule pins identically.
+#[test]
+fn prompt_stays_silent_on_a_tty_when_the_u_fd_is_a_here_string() {
+    let dir = Scratch::new();
+    let script = r#"exec 3<<<answer; read -u 3 -p "P: " x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "");
+    assert!(
+        !stream.contains("P: "),
+        "the fd read from is not a tty: {stream}"
+    );
+    assert!(
+        stream.contains("got=answer"),
+        "the fd's line is read: {stream}"
+    );
+}
+
+/// Task #607 (bash 5.3.9 measured): stdin is the terminal and `-u 3` is opened
+/// on `/dev/tty` — under the `script` wrapper both names the same pty, so the fd
+/// passes the test and the prompt is drawn.
+#[test]
+fn prompt_is_drawn_on_a_tty_when_the_u_fd_is_the_tty() {
+    let dir = Scratch::new();
+    let script = r#"exec 3</dev/tty; read -u 3 -p "P: " x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "answer\n");
+    assert!(stream.contains("P: "), "a tty fd read from draws: {stream}");
+    assert!(
+        stream.contains("got=answer"),
+        "the fed line is read: {stream}"
+    );
 }
