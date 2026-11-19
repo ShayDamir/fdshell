@@ -47,8 +47,8 @@ fn a_rejected_name_answers_status_one_and_writes_nothing() {
     // line is pinned in `diagnostic/tests.rs`; here the state effects.
     let mut state = ShellState::new();
     state.set_last_exit(0);
-    write_counter(&mut state, 2).unwrap();
-    write_optarg(&mut state, Some(s(b"val")));
+    state.write_counter(2).unwrap();
+    state.write_optarg(Some(s(b"val")));
     report_name(&mut state, &s(b"1abc"), b'a', REPORT_STATUS).unwrap();
     assert_eq!(read(&state, b"1abc"), None, "nothing named");
     assert_eq!(state.last_status.exit_code(), FAILURE_STATUS);
@@ -67,9 +67,9 @@ fn an_accepted_name_gets_the_rows_character_and_its_status() {
 #[test]
 fn optarg_takes_the_argument_or_nothing_at_all() {
     let mut state = ShellState::new();
-    write_optarg(&mut state, Some(s(b"val")));
+    state.write_optarg(Some(s(b"val")));
     assert_eq!(read(&state, b"OPTARG"), Some(b"val".to_vec()));
-    write_optarg(&mut state, None);
+    state.write_optarg(None);
     assert!(read(&state, b"OPTARG").is_none(), "unbound, not empty");
 }
 
@@ -77,7 +77,7 @@ fn optarg_takes_the_argument_or_nothing_at_all() {
 fn the_counter_writer_moves_the_field_and_the_visible_row_together() {
     // The row bash's `$OPTIND` reads is the store row, so `set` lists it.
     let mut state = ShellState::new();
-    write_counter(&mut state, 2).unwrap();
+    state.write_counter(2).unwrap();
     assert_eq!(state.optind, 2);
     assert_eq!(read(&state, b"OPTIND"), Some(b"2".to_vec()));
 }
@@ -90,7 +90,7 @@ fn the_counter_writer_leaves_the_cursor_where_the_row_left_it() {
     // `set -- -abc val`: `a` reports, the counter stays 1, the cursor moves to 2.
     let mut state = ShellState::new();
     state.optchar = 2;
-    write_counter(&mut state, 1).unwrap();
+    state.write_counter(1).unwrap();
     assert_eq!(state.optchar, 2, "the cursor survived the counter write");
     assert_eq!(state.optind, 1);
     assert_eq!(read(&state, b"OPTIND"), Some(b"1".to_vec()));

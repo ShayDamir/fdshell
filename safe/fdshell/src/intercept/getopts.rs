@@ -88,17 +88,17 @@ fn commit(
             next_index,
             next_char,
         } => {
-            vars::write_counter(state, *next_index)?;
+            state.write_counter(*next_index)?;
             state.optchar = *next_char;
-            vars::write_optarg(state, arg.clone());
+            state.write_optarg(arg.clone());
             vars::report_name(state, name, *ch, vars::REPORT_STATUS)
         }
         scan::Scan::Presentation { .. } => {
             diagnostic::presentation_row(state, name, result, parsed)
         }
         scan::Scan::End { index } => {
-            vars::write_counter(state, *index)?;
-            vars::write_optarg(state, None);
+            state.write_counter(*index)?;
+            state.write_optarg(None);
             vars::report_name(state, name, vars::QUESTION, vars::FAILURE_STATUS)
         }
     }

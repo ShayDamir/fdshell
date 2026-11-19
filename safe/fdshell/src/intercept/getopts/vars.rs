@@ -52,6 +52,10 @@ pub(crate) const PLACEHOLDER: u8 = b':';
 /// `OPTARG` committed by the row above stay written, which is what fixes the order:
 /// `set -- -bval; getopts "ab:c" 1abc` commits OPTIND 2 and OPTARG `val`, names
 /// nothing, and answers 1.
+///
+/// Stays a free function: its message and its printer are `diagnostic`'s own data,
+/// and the writer it calls is this module's, not the state's (LESSONS: "A predicate
+/// whose only data is the domain type's state is a method").
 pub(crate) fn report_name(
     state: &mut ShellState,
     name: &ShortCStr,
@@ -103,32 +107,33 @@ fn write_name(state: &mut ShellState, name: &ShortCStr, ch: u8) -> Result<(), Re
     Ok(())
 }
 
-/// Write `OPTARG`: the argument through `set_var`, otherwise **unbind** the name —
-/// bash's unbound, not empty (plan §2).
-pub(crate) fn write_optarg(state: &mut ShellState, value: Option<ShortCStr>) {
-    let name: ShortCStr = c"OPTARG".into();
-    match value {
-        Some(value) => state.set_var(name.clone(), ImportedStr::shell(value)),
-        None => state.unset_var(&name),
+impl ShellState {
+    /// Write `OPTARG`: the argument through `set_var`, otherwise **unbind** the name —
+    /// bash's unbound, not empty (plan §2).
+    pub(crate) fn write_optarg(&mut self, value: Option<ShortCStr>) {
+        let name: ShortCStr = c"OPTARG".into();
+        match value {
+            Some(value) => self.set_var(name.clone(), ImportedStr::shell(value)),
+            None => self.unset_var(&name),
+        }
     }
-}
 
-/// Write the counter **and its visible store row**: bash's `$OPTIND` is the counter, so
-/// `set` lists it and `$OPTIND` reads it (the startup seed of `state/ctor.rs`). This is
-/// the one write that must **not** go through `set_var`: for the name `OPTIND` that
-/// setter is a name-sync, and an assignment resets the `optchar` cursor to 0 (task
-/// #590's "re-read the word from its start" rule). Routing the scan's commit through it
-/// would reset a cluster whose counter has not moved yet (`set -- -abc val`: `a`
-/// reports, the counter stays 1, the cursor moves to 2) and that same option would be
-/// reported forever. `set_var`/`unset_var` keep the **reverse** direction — a user
-/// assignment — working; `state/setters.rs` points back here.
-pub(crate) fn write_counter(state: &mut ShellState, index: u64) -> Result<(), Report<CmdError>> {
-    let row = sys::format!("{index}").change_context(CmdError::Never)?;
-    state.optind = index;
-    state
-        .strings
-        .insert(c"OPTIND".into(), ImportedStr::shell(row));
-    Ok(())
+    /// Write the counter **and its visible store row**: bash's `$OPTIND` is the counter, so
+    /// `set` lists it and `$OPTIND` reads it (the startup seed of `state/ctor.rs`). This is
+    /// the one write that must **not** go through `set_var`: for the name `OPTIND` that
+    /// setter is a name-sync, and an assignment resets the `optchar` cursor to 0 (task
+    /// #590's "re-read the word from its start" rule). Routing the scan's commit through it
+    /// would reset a cluster whose counter has not moved yet (`set -- -abc val`: `a`
+    /// reports, the counter stays 1, the cursor moves to 2) and that same option would be
+    /// reported forever. `set_var`/`unset_var` keep the **reverse** direction — a user
+    /// assignment — working; `state/setters.rs` points back here.
+    pub(crate) fn write_counter(&mut self, index: u64) -> Result<(), Report<CmdError>> {
+        let row = sys::format!("{index}").change_context(CmdError::Never)?;
+        self.optind = index;
+        self.strings
+            .insert(c"OPTIND".into(), ImportedStr::shell(row));
+        Ok(())
+    }
 }
 
 /// One byte as a store value — `None` only for a NUL, which no caller here can hand in:

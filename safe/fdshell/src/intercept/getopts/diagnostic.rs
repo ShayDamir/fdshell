@@ -55,9 +55,9 @@ pub(crate) fn presentation_row(
         return Err(Report::new(CmdError::Never));
     };
     let silent = parsed.is_silent();
-    vars::write_counter(state, *next_index)?;
+    state.write_counter(*next_index)?;
     state.optchar = *next_char;
-    vars::write_optarg(state, if silent { vars::one_byte(*ch) } else { None });
+    state.write_optarg(if silent { vars::one_byte(*ch) } else { None });
     let prog = state.program_name.value.clone();
     if let Some(message) = message(silent, problem, &prog, *ch) {
         print(&message);

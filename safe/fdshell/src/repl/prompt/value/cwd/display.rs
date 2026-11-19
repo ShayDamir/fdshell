@@ -29,6 +29,11 @@ use sys::{Origin, ShortCStr};
 /// borrow. `\W` is the basename of the *abbreviated* display path (bash
 /// measured `[~][~]` at `$HOME`), and `PROMPT_DIRTRIM` cannot move it: a
 /// single component never passes either threshold (measured unchanged).
+///
+/// Stays free: `cwd.rs` is its only caller, and it answers through
+/// `origin_path` and the `render` helpers — another module's own data
+/// (LESSONS: "A predicate whose only data is the domain type's state is a
+/// method").
 pub(crate) fn answer(state: &ShellState, esc: ValueEscape) -> Option<Vec<u8>> {
     let var = state.fd_var(&c"CWD".into())?;
     let home = state.var_value(&c"HOME".into());

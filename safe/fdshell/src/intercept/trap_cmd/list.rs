@@ -20,6 +20,10 @@ use crate::intercept::signalfd_cmd::signals;
 use crate::state::{EXIT, ShellState, TrapDisposition};
 
 /// Print the table to standard output, in one write.
+///
+/// Stays free: `trap_cmd.rs`'s list form is its only caller, so the chore's
+/// multi-file criterion is not met (LESSONS: "A predicate whose only data is
+/// the domain type's state is a method").
 pub(crate) fn print(state: &ShellState) -> Result<(), Report<CmdError>> {
     let mut out = Vec::new();
     for (cond, disposition) in state.trap_list() {
