@@ -29,6 +29,7 @@ use flags::parse_flags;
 use flags::source_is_tty;
 use io::read_line;
 use line::LineEnd;
+use putback::{put_back, take_pending};
 use words::split_fields;
 
 pub(crate) fn run_read(
@@ -68,7 +69,13 @@ pub(crate) fn run_read(
             .change_context(CmdError::Read)?;
     }
 
-    let (data, end) = read_line(&flags.source, resolved_fd.as_ref(), &flags)?;
+    // The source's putback buffer (task #609): what an earlier read of it did not
+    // consume. The drain-first reader serves it before any syscall, and whatever
+    // the line leaves behind goes back for the next read on the same source.
+    let mut pending = take_pending(cell, &flags.source, resolved_fd.as_ref())?;
+    let (data, end) = read_line(&flags.source, resolved_fd.as_ref(), &flags, &mut pending)?;
+    put_back(cell, &flags.source, resolved_fd.as_ref(), pending)?;
+
     let failed = matches!(end, LineEnd::Eof | LineEnd::Timeout);
     if data.is_empty() && failed {
         let mut state = cell.borrow_mut().change_context(CmdError::Read)?;
@@ -101,5 +108,6 @@ mod collect;
 mod flags;
 mod io;
 mod line;
+mod putback;
 mod read_from_fd;
 mod words;

@@ -120,5 +120,6 @@ pub(crate) fn build() -> ShellState {
         functions: HashMap::new(),
         traps: BTreeMap::new(),
         ignored_on_entry: seeded_ignored_on_entry(),
+        read_pending: HashMap::new(),
     }
 }

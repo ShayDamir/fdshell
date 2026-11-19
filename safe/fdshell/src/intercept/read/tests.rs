@@ -581,7 +581,7 @@ fn test_read_line_from_fd_eof() {
     drop(write_end);
 
     let mut line = Line::new(None, false, None);
-    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut line).unwrap();
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut Vec::new(), &mut line).unwrap();
     assert_eq!(line.end(), LineEnd::Eof);
     assert!(line.buf.is_empty());
 }
@@ -594,7 +594,7 @@ fn test_read_line_from_fd_max_bytes() {
     drop(write_end);
 
     let mut line = Line::new(None, false, Some(5));
-    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut line).unwrap();
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut Vec::new(), &mut line).unwrap();
     assert_eq!(line.buf, b"hello");
     assert_eq!(line.end(), LineEnd::Delim);
 }
@@ -607,7 +607,7 @@ fn test_read_line_from_fd_stops_at_newline() {
     drop(write_end);
 
     let mut line = Line::new(None, false, None);
-    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut line).unwrap();
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut Vec::new(), &mut line).unwrap();
     assert_eq!(line.buf, b"line1");
     assert_eq!(line.end(), LineEnd::Delim);
 }
@@ -620,7 +620,7 @@ fn test_read_line_from_fd_empty_delim_whole_stream() {
     drop(write_end);
 
     let mut line = Line::new(Some(b""), false, None);
-    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut line).unwrap();
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut Vec::new(), &mut line).unwrap();
     assert_eq!(line.buf, b"a:b:c");
     assert_eq!(line.end(), LineEnd::Eof);
 }
@@ -633,7 +633,7 @@ fn test_read_line_from_fd_colon_delimiter() {
     drop(write_end);
 
     let mut line = Line::new(Some(b":"), false, None);
-    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut line).unwrap();
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut Vec::new(), &mut line).unwrap();
     assert_eq!(line.buf, b"a");
     assert_eq!(line.end(), LineEnd::Delim);
 }
@@ -646,7 +646,7 @@ fn test_read_line_from_fd_backslash_processed() {
     drop(write_end);
 
     let mut line = Line::new(None, false, None);
-    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut line).unwrap();
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut Vec::new(), &mut line).unwrap();
     assert_eq!(line.buf, b"anb");
 }
 
@@ -658,14 +658,18 @@ fn test_read_line_from_fd_raw_keeps_backslash() {
     drop(write_end);
 
     let mut line = Line::new(None, true, None);
-    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut line).unwrap();
+    read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut Vec::new(), &mut line).unwrap();
     assert_eq!(line.buf, b"a\\nb");
 }
 
 #[test]
 fn test_read_line_from_fd_error() {
     let mut line = Line::new(None, false, None);
-    let result = read_line_from_fd(|_b: &mut [u8]| Err(SyscallError::EBADF("read")), &mut line);
+    let result = read_line_from_fd(
+        |_b: &mut [u8]| Err(SyscallError::EBADF("read")),
+        &mut Vec::new(),
+        &mut line,
+    );
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err().current_context(),
@@ -693,7 +697,7 @@ fn test_read_line_from_fd_multi_chunk() {
         }
         Some(pidfd) => {
             let mut line = Line::new(None, false, None);
-            read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut line).unwrap();
+            read_line_from_fd(|b: &mut [u8]| read_end.read(b), &mut Vec::new(), &mut line).unwrap();
             assert_eq!(line.end(), LineEnd::Delim);
             assert_eq!(line.buf.len(), 8192);
             assert!(line.buf.iter().all(|b| *b == b'x'));
@@ -721,7 +725,12 @@ fn test_read_line_rawfd_eof() {
     drop(write_end);
 
     let source = rawfd_source(&read_end);
-    let result = read_line(&source, None, &make_flags(None, false, None, None));
+    let result = read_line(
+        &source,
+        None,
+        &make_flags(None, false, None, None),
+        &mut Vec::new(),
+    );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
     assert_eq!(end, LineEnd::Eof);
@@ -736,7 +745,12 @@ fn test_read_line_rawfd_data() {
     drop(write_end);
 
     let source = rawfd_source(&read_end);
-    let result = read_line(&source, None, &make_flags(None, false, None, None));
+    let result = read_line(
+        &source,
+        None,
+        &make_flags(None, false, None, None),
+        &mut Vec::new(),
+    );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
     assert_eq!(end, LineEnd::Delim);
@@ -751,7 +765,12 @@ fn test_read_line_rawfd_max_bytes() {
     drop(write_end);
 
     let source = rawfd_source(&read_end);
-    let result = read_line(&source, None, &make_flags(None, false, Some(5), None));
+    let result = read_line(
+        &source,
+        None,
+        &make_flags(None, false, Some(5), None),
+        &mut Vec::new(),
+    );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
     assert_eq!(end, LineEnd::Delim);
@@ -766,7 +785,12 @@ fn test_read_line_rawfd_stops_at_newline() {
     drop(write_end);
 
     let source = rawfd_source(&read_end);
-    let result = read_line(&source, None, &make_flags(None, false, None, None));
+    let result = read_line(
+        &source,
+        None,
+        &make_flags(None, false, None, None),
+        &mut Vec::new(),
+    );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
     assert_eq!(end, LineEnd::Delim);
@@ -781,7 +805,12 @@ fn test_read_line_rawfd_empty_delim() {
     drop(write_end);
 
     let source = rawfd_source(&read_end);
-    let result = read_line(&source, None, &make_flags(Some(b""), false, None, None));
+    let result = read_line(
+        &source,
+        None,
+        &make_flags(Some(b""), false, None, None),
+        &mut Vec::new(),
+    );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
     assert_eq!(end, LineEnd::Eof);
@@ -796,7 +825,12 @@ fn test_read_line_rawfd_colon_delimiter() {
     drop(write_end);
 
     let source = rawfd_source(&read_end);
-    let result = read_line(&source, None, &make_flags(Some(b":"), false, None, None));
+    let result = read_line(
+        &source,
+        None,
+        &make_flags(Some(b":"), false, None, None),
+        &mut Vec::new(),
+    );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
     assert_eq!(end, LineEnd::Delim);
@@ -811,7 +845,12 @@ fn test_read_line_rawfd_n_zero() {
     drop(write_end);
 
     let source = rawfd_source(&read_end);
-    let result = read_line(&source, None, &make_flags(None, false, Some(0), None));
+    let result = read_line(
+        &source,
+        None,
+        &make_flags(None, false, Some(0), None),
+        &mut Vec::new(),
+    );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
     assert_eq!(end, LineEnd::Delim);
@@ -826,7 +865,12 @@ fn test_read_line_rawfd_timeout_zero_data_ready() {
     drop(write_end);
 
     let source = rawfd_source(&read_end);
-    let result = read_line(&source, None, &make_flags(None, false, None, Some(0)));
+    let result = read_line(
+        &source,
+        None,
+        &make_flags(None, false, None, Some(0)),
+        &mut Vec::new(),
+    );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
     assert_eq!(end, LineEnd::Delim);
@@ -838,7 +882,12 @@ fn test_read_line_rawfd_timeout_zero_no_data() {
     let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
     // Keep the write end open: an empty pipe with no EOF is not ready.
     let source = rawfd_source(&read_end);
-    let result = read_line(&source, None, &make_flags(None, false, None, Some(0)));
+    let result = read_line(
+        &source,
+        None,
+        &make_flags(None, false, None, Some(0)),
+        &mut Vec::new(),
+    );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
     assert_eq!(end, LineEnd::Timeout);
@@ -849,7 +898,12 @@ fn test_read_line_rawfd_timeout_zero_no_data() {
 #[test]
 fn test_read_line_fdvar_no_clone() {
     let source = SourceFd::FdVar(c"MYVAR".into());
-    let result = read_line(&source, None, &make_flags(None, false, None, None));
+    let result = read_line(
+        &source,
+        None,
+        &make_flags(None, false, None, None),
+        &mut Vec::new(),
+    );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
     assert_eq!(end, LineEnd::Eof);
@@ -868,6 +922,7 @@ fn test_read_line_fdvar_with_clone() {
         &source,
         Some(&read_end),
         &make_flags(None, false, None, None),
+        &mut Vec::new(),
     );
     assert!(result.is_ok());
     let (buf, end) = result.unwrap();
@@ -889,7 +944,7 @@ fn stdin_read_line(data: &[u8], flags: &ReadFlags) -> (Vec<u8>, LineEnd) {
         None => {
             data_r.export_to(0).unwrap();
             drop(data_r);
-            let (buf, end) = match read_line(&SourceFd::Stdin, None, flags) {
+            let (buf, end) = match read_line(&SourceFd::Stdin, None, flags, &mut Vec::new()) {
                 Ok(v) => v,
                 Err(_) => sys::exit(3),
             };
@@ -1887,4 +1942,322 @@ fn run_read_n_zero_empty_vars_status_0() {
         Some(&ShortCStr::new())
     );
     assert!(matches!(state.last_status, WaitStatus::Exited(0)));
+}
+
+// ---- task #609: the tail of a chunk feeds the next read on the same source ----
+
+// bash keeps the bytes one `read(2)` chunk carried past the end of the line and
+// answers them to the next read on that source; every expectation below is bash
+// 5.3.9 measured (the task's table). The pipes are pre-written in one write of at
+// most 4 KiB — no forked writer needed, no deadlock (LESSONS "Pre-writing more
+// than 4 KiB into a fresh pipe can deadlock…").
+
+/// The args of `read -u <number> <target>`, the shape whose buffer key is the fd
+/// number as the script spelled it.
+fn u_args(number: i32, target: ShortCStr) -> Vec<ShortCStr> {
+    vec![c"-u".into(), fd_arg(number), target]
+}
+
+/// The fd number as the script would spell it — the buffer key of the fd path.
+fn fd_arg(number: i32) -> ShortCStr {
+    ShortCStr::from_vec(number.to_string().into_bytes()).unwrap()
+}
+
+/// The args of `read -u <var> <target>`, the var spelled as the script spells it
+/// (`%NAME`) — the shape whose buffer key is the var's name, because its
+/// descriptor is cloned per call.
+fn var_args(var: &'static core::ffi::CStr, target: &ShortCStr) -> Vec<ShortCStr> {
+    vec![c"-u".into(), var.into(), target.clone()]
+}
+
+/// Puts `fd` in the state as the fd var `%name`, the way `builtin accept` does: a
+/// test in the safe crate cannot close a raw fd, so reassigning a source is done
+/// by replacing the var (the same move as `unset %f` followed by number reuse).
+fn put_fd_var(cell: &ForkCell<ShellState>, name: &'static core::ffi::CStr, fd: sys::LocalFd) {
+    let mut state = cell.borrow_mut().unwrap();
+    state.fds.insert(
+        name.into(),
+        crate::state::FdVar {
+            fd,
+            trace: sys::Trace::boundary(sys::Origin::Shell),
+        },
+    );
+}
+
+/// Runs one `read` through `cell` and returns the target's answer and the status
+/// the shell recorded: after task #609 the buffer that serves a second read lives
+/// in that state, so both halves of the answer come from there.
+fn read_on(
+    cell: &ForkCell<ShellState>,
+    args: &[ShortCStr],
+    target: &ShortCStr,
+) -> (ShortCStr, i32) {
+    let words: Vec<&str> = core::iter::once("read")
+        .chain(
+            args.iter()
+                .map(|arg| core::str::from_utf8(arg.as_bytes().unwrap()).unwrap()),
+        )
+        .collect();
+    let line = make_read_line(&words);
+    run_read(&line, &make_read_cmdline(args), &text(&line), cell).unwrap();
+    let state = cell.borrow().unwrap();
+    let value = state
+        .strings
+        .get::<ShortCStr>(target)
+        .map(|v| v.value.clone())
+        .unwrap_or_default();
+    (value, state.last_status.exit_code())
+}
+
+/// Two plain reads on one pipe: the first takes the chunk and keeps its tail, the
+/// second completes its line from the buffer alone — no syscall behind it, exactly
+/// what bash does with bytes already in its buffer. The third finds the buffer
+/// empty and learns EOF from the read that follows: bash answers the EOF status
+/// with an empty variable (measured `x=a y=b z= rc=1`).
+#[test]
+fn two_reads_on_one_pipe_answer_the_buffered_tail() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"a\nb\n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let cell = make_read_cell();
+
+    assert_eq!(
+        read_on(&cell, &u_args(fd, c"v1".into()), &c"v1".into()),
+        (c"a".into(), 0)
+    );
+    assert_eq!(
+        read_on(&cell, &u_args(fd, c"v2".into()), &c"v2".into()),
+        (c"b".into(), 0)
+    );
+    assert_eq!(
+        read_on(&cell, &u_args(fd, c"v3".into()), &c"v3".into()),
+        (ShortCStr::new(), 1)
+    );
+}
+
+/// The `-n` cap is a stop reason like the delimiter: the bytes past the cap belong
+/// to the next read (bash: `x=ab`, then `y=cdef`).
+#[test]
+fn a_capped_read_leaves_the_rest_of_the_chunk_for_the_next_one() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"abcdef\n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let cell = make_read_cell();
+
+    let cap = vec![
+        c"-u".into(),
+        fd_arg(fd),
+        c"-n".into(),
+        c"2".into(),
+        c"v1".into(),
+    ];
+    assert_eq!(read_on(&cell, &cap, &c"v1".into()), (c"ab".into(), 0));
+    assert_eq!(
+        read_on(&cell, &u_args(fd, c"v2".into()), &c"v2".into()),
+        (c"cdef".into(), 0)
+    );
+}
+
+/// A `-d` delimiter is the third stop reason (bash: `x=a`, then `y=b`).
+#[test]
+fn a_delimited_read_leaves_the_rest_of_the_chunk_for_the_next_one() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"a:b:c\n").unwrap();
+    drop(write_end);
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let cell = make_read_cell();
+
+    let first = vec![
+        c"-u".into(),
+        fd_arg(fd),
+        c"-d".into(),
+        c":".into(),
+        c"v1".into(),
+    ];
+    let second = vec![
+        c"-u".into(),
+        fd_arg(fd),
+        c"-d".into(),
+        c":".into(),
+        c"v2".into(),
+    ];
+    assert_eq!(read_on(&cell, &first, &c"v1".into()), (c"a".into(), 0));
+    assert_eq!(read_on(&cell, &second, &c"v2".into()), (c"b".into(), 0));
+}
+
+/// The fd var's buffer is keyed by the var's **name**, because `run_read` clones
+/// the var's descriptor per call and the clone is a fresh number each time — here
+/// a clone held by the test guarantees the two reads clone to different numbers,
+/// and both lines still arrive.
+#[test]
+fn two_reads_through_an_fd_var_answer_the_buffered_tail() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"one\ntwo\n").unwrap();
+    drop(write_end);
+
+    let cell = make_read_cell();
+    put_fd_var(&cell, c"MYFD", read_end);
+    // Held here so each read's clone lands on a different fd number.
+    let _kept = {
+        let state = cell.borrow().unwrap();
+        state
+            .fds
+            .get::<ShortCStr>(&c"MYFD".into())
+            .unwrap()
+            .fd
+            .try_clone()
+            .unwrap()
+    };
+
+    let first = var_args(c"%MYFD", &c"v1".into());
+    let second = var_args(c"%MYFD", &c"v2".into());
+    assert_eq!(read_on(&cell, &first, &c"v1".into()), (c"one".into(), 0));
+    assert_eq!(read_on(&cell, &second, &c"v2".into()), (c"two".into(), 0));
+}
+
+/// Buffered data short-circuits the `-t` poll: the bytes are already in hand and
+/// bash answers them. Deterministic — the kernel buffer is empty (the write end is
+/// still open), so a poll would time out and answer status 1 instead.
+#[test]
+fn buffered_data_answers_before_the_timeout_poll() {
+    let (read_end, write_end) = sys::pipe::pipe2(0).unwrap();
+    write_end.write(b"a\nb\n").unwrap();
+
+    let exported = read_end.export().unwrap();
+    let fd = exported.as_raw();
+    let cell = make_read_cell();
+
+    assert_eq!(
+        read_on(&cell, &u_args(fd, c"v1".into()), &c"v1".into()),
+        (c"a".into(), 0)
+    );
+    let timed = vec![
+        c"-u".into(),
+        fd_arg(fd),
+        c"-t".into(),
+        c"1".into(),
+        c"v2".into(),
+    ];
+    assert_eq!(read_on(&cell, &timed, &c"v2".into()), (c"b".into(), 0));
+    drop(write_end);
+}
+
+/// A reassigned source loses a stale buffer: the buffer key is stable (the fd var's
+/// name), the descriptor behind it is not. bash answers the new source's first line,
+/// and so must fdshell — the read after a reassignment behaves exactly as it did
+/// before buffers existed. The e2E twin of this pin reassigns stdin with `exec <`.
+#[test]
+fn a_reassigned_source_loses_a_stale_buffer() {
+    let (first_r, first_w) = sys::pipe::pipe2(0).unwrap();
+    first_w.write(b"a\nb\n").unwrap();
+    drop(first_w);
+
+    let cell = make_read_cell();
+    put_fd_var(&cell, c"MYFD", first_r);
+    assert_eq!(
+        read_on(&cell, &var_args(c"%MYFD", &c"v1".into()), &c"v1".into()),
+        (c"a".into(), 0)
+    );
+
+    let (second_r, second_w) = sys::pipe::pipe2(0).unwrap();
+    second_w.write(b"B\n").unwrap();
+    drop(second_w);
+    put_fd_var(&cell, c"MYFD", second_r);
+    assert_eq!(
+        read_on(&cell, &var_args(c"%MYFD", &c"v2".into()), &c"v2".into()),
+        (c"B".into(), 0)
+    );
+}
+
+/// The stdin twin of `stdin_read_line` for rows that do more than one read on one
+/// source: the child does `reads` reads sharing one putback buffer (the fork
+/// inherits it, as bash's subshell inherits its parent's buffers) and reports each
+/// answer as `data`, a status byte, and a `0xFF` separator on the result pipe. The
+/// child must `sys::exit` and must not panic (LESSONS), so every assertion lives in
+/// the parent.
+fn stdin_reads(data: &[u8], flags: &ReadFlags, reads: usize) -> Vec<(Vec<u8>, LineEnd)> {
+    let (res_r, res_w) = sys::pipe::pipe2(0).unwrap();
+    let (data_r, data_w) = sys::pipe::pipe2(0).unwrap();
+    data_w.write(data).unwrap();
+    drop(data_w);
+
+    match sys::fork_pidfd::fork_pidfd().unwrap().1 {
+        None => {
+            data_r.export_to(0).unwrap();
+            drop(data_r);
+            let mut pending = Vec::new();
+            for _ in 0..reads {
+                let (buf, end) = match read_line(&SourceFd::Stdin, None, flags, &mut pending) {
+                    Ok(v) => v,
+                    Err(_) => sys::exit(3),
+                };
+                let code = match end {
+                    LineEnd::Delim => 0u8,
+                    LineEnd::Eof => 1,
+                    LineEnd::Timeout => 2,
+                };
+                res_w.write(&buf).unwrap();
+                res_w.write(&[code]).unwrap();
+                res_w.write(&[0xFF]).unwrap();
+            }
+            drop(res_w);
+            sys::exit(0);
+        }
+        Some(pidfd) => {
+            drop(res_w);
+            let mut all = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let n = res_r.read(&mut chunk).unwrap();
+                if n == 0 {
+                    break;
+                }
+                if let Some(part) = chunk.get(..n) {
+                    all.extend_from_slice(part);
+                }
+            }
+            match pidfd.wait_pidfd().unwrap() {
+                WaitStatus::Exited(0) => {}
+                other => panic!("child failed: {}", other.exit_code()),
+            }
+            parse_status_records(&all)
+        }
+    }
+}
+
+/// Reads the `data`, `status`, separator records [`stdin_reads`] writes.
+fn parse_status_records(all: &[u8]) -> Vec<(Vec<u8>, LineEnd)> {
+    all.split(|byte| *byte == 0xFF)
+        .filter_map(|record| record.split_last().map(|(code, data)| (data, code)))
+        .map(|(data, code)| {
+            let end = match code {
+                0 => LineEnd::Delim,
+                1 => LineEnd::Eof,
+                _ => LineEnd::Timeout,
+            };
+            (data.to_vec(), end)
+        })
+        .collect()
+}
+
+/// Task #609 on the stdin path: the first read takes the whole chunk and keeps its
+/// tail, so the second answers the second line from the buffer, and the third —
+/// with the buffer drained — reports the EOF status. bash 5.3.9 measured:
+/// `printf 'a\nb\n' | bash -c 'read x; read y; read z; …'` gives `a`, `b`, empty
+/// at status 1.
+#[test]
+fn stdin_two_reads_share_the_buffer_and_the_third_reports_eof() {
+    let answers = stdin_reads(b"a\nb\n", &make_flags(None, false, None, None), 3);
+    let mut answers = answers.iter();
+    assert_eq!(answers.next().unwrap(), &(b"a".to_vec(), LineEnd::Delim));
+    assert_eq!(answers.next().unwrap(), &(b"b".to_vec(), LineEnd::Delim));
+    assert_eq!(answers.next().unwrap(), &(Vec::new(), LineEnd::Eof));
 }

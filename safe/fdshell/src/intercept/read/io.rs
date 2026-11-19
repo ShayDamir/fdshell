@@ -17,13 +17,17 @@ const INFINITE_MS: i32 = -1;
 ///
 /// The `-t` gate is a `poll`: bash re-polls per byte, so a peer that stalls
 /// mid-line past the timeout still blocks here; with data ready the read proceeds
-/// to completion like bash.
+/// to completion like bash. Bytes already in the putback `pending` buffer are in
+/// hand, so they answer without a poll — bash answers them the same way (task
+/// #609).
 pub(crate) fn read_line(
     source: &SourceFd,
     fd_clone: Option<&sys::LocalFd>,
     flags: &ReadFlags,
+    pending: &mut Vec<u8>,
 ) -> Result<(Vec<u8>, LineEnd), Report<CmdError>> {
     if let Some(ms) = flags.timeout_ms()
+        && pending.is_empty()
         && let Some(fd) = source_raw_fd(source, fd_clone)?
         && poll_unready(fd, ms)?
     {
@@ -32,14 +36,14 @@ pub(crate) fn read_line(
 
     let mut line = Line::new(flags.delim, flags.raw, flags.max_bytes);
     match source {
-        SourceFd::Stdin => read_line_from_fd(|b: &mut [u8]| sys::IN.read(b), &mut line)?,
+        SourceFd::Stdin => read_line_from_fd(|b: &mut [u8]| sys::IN.read(b), pending, &mut line)?,
         SourceFd::RawFd(fd_arg) => {
             let fd = ImportedFd::try_from(fd_arg).change_context(CmdError::Read)?;
-            read_line_from_fd(|b: &mut [u8]| fd.read(b), &mut line)?;
+            read_line_from_fd(|b: &mut [u8]| fd.read(b), pending, &mut line)?;
         }
         SourceFd::FdVar(_) => {
             if let Some(local) = fd_clone {
-                read_line_from_fd(|b: &mut [u8]| local.read(b), &mut line)?;
+                read_line_from_fd(|b: &mut [u8]| local.read(b), pending, &mut line)?;
             }
         }
     }

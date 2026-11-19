@@ -12,6 +12,7 @@ use sys::siginfo::WaitStatus;
 use crate::envfilter::EnvFilter;
 use frames::VarFrame;
 use jobs::Jobs;
+use read_pending::ReadKey;
 
 pub use fds::{FdArrayEntry, FdVar};
 pub(crate) use traps::{EXIT, TrapDisposition};
@@ -116,6 +117,11 @@ pub struct ShellState {
     /// `trap` refuse those conditions (task #584). The set is not empty here the
     /// way it is in bash: Rust's own runtime ignores `SIGPIPE`.
     pub(crate) ignored_on_entry: u64,
+    /// The `read` line path's putback buffers, one per source (task #609): the
+    /// tail of a `read(2)` chunk the line did not consume, kept for the next
+    /// `read` on the same source. Each entry is validated against the descriptor
+    /// it is about to be used with — see [`read_pending`].
+    pub(crate) read_pending: HashMap<ReadKey, read_pending::Entry>,
 }
 
 impl ShellState {
@@ -147,6 +153,7 @@ pub(crate) mod frames;
 mod functions;
 pub(crate) mod jobs;
 mod options;
+pub(crate) mod read_pending;
 mod setters;
 mod shell_arrays;
 mod traps;
