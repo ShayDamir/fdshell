@@ -856,6 +856,20 @@ Empirical note: the same hazard in `pipeline/child.rs` pipe clones does NOT
 reproduce — children inherit the low pipe-fd numbers, so a clone never lands
 on a file target.
 
+**Saving a target fd is the same rule on the save side, `dup_cloexec` included.**
+It returns the **lowest** free fd, which can be a hole below a later target; the next
+`dup2` (e.g. `2>&1`) closes its target fd and clobbers the saved copy, so the restore
+resurrects the wrong fd. The fix is `try_dup_above(max_target + 1)`, the
+`resolve_redirects`' `min_fd` rule above. A closed target saves as `None`. Since task
+**#184** the minimum is `max(max_target + 1, 10)`: the floor swallows every target
+below fd 10, so the fold is only observable for a command that names an fd at or above
+it, and the pin for the fold is
+`redirect/scope/tests.rs::saved_copy_above_the_floor_survives_a_lower_target_dup2`
+(it fills the table below the floor with its own opens, so the hole the later
+`dup2` closes is the lowest free fd); the neighbouring
+`saved_copy_survives_a_later_dup2` now tests the floor, and
+`saved_copy_lands_above_the_shell_fd_floor` pins the floor alone.
+
 ## `readlinkat` empty path on a non-link fd is ENOENT, not EINVAL
 The path form of `readlinkat` fails with `EINVAL` on a non-symlink, but the fd
 form (empty path behind an open handle) fails with `ENOENT` — so
@@ -4344,21 +4358,6 @@ Closing the gap retired the sibling-dup divergences of tasks #178/#183/#363
 (`cat 3<<<str <&3`, `cat 3<<T 1>&3`, `cat 3<<'a <<b' <&3` now match bash):
 `herestring::prefixed_here_string_sibling_dup_sees_the_descriptor` and the
 `*_known_divergences` rows of `tests/heredoc.rs`.
-
-## A command's fds must be saved above every redirect target of that command
-Saving a target fd with `dup_cloexec` returns the **lowest** free fd, which
-can be a hole below a later target; the next `dup2` (e.g. `2>&1`) closes its
-target fd and clobbers the saved copy, so the restore resurrects the wrong fd.
-Fix: `try_dup_above(max_target + 1)` — the same rule the redirect sources
-already follow (`resolve_redirects`' `min_fd`). A closed target saves as
-`None`. Since task **#184** the minimum is `max(max_target + 1, 10)`: the floor
-swallows every target below fd 10, so the fold is only observable for a command
-that names an fd at or above it, and the pin for the fold is
-`redirect/scope/tests.rs::saved_copy_above_the_floor_survives_a_lower_target_dup2`
-(it fills the table below the floor with its own opens, so the hole the later
-`dup2` closes is the lowest free fd); the neighbouring
-`saved_copy_survives_a_later_dup2` now tests the floor, and
-`saved_copy_lands_above_the_shell_fd_floor` pins the floor alone.
 
 ## The redirect scope restores in reverse apply order, on every exit path
 The last redirection to a fd is its winner, so restoring forward leaves the
