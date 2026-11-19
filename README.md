@@ -282,6 +282,19 @@ because POSIX wants no output for a mask operand. `-p` and `-S` cluster and repe
 (`-pS`, `-SS`), `--` ends the options and a lone `-` is an operand. A second
 operand is reported (`umask takes at most one argument`) where bash ignores it.
 
+Numeric arguments follow bash's parsers, and each builtin names the one it
+uses (Rust's `FromStr` is a fourth grammar that belongs to no builtin):
+`shift`, `read -n` and `exit` use bash's `legal_number` — surrounding
+whitespace is skipped and a sign accepted, decimal, so `" 1"`, `+1`, `010`
+(= 10) and `-0` parse; `ulimit`'s value word is a strict digit run — no
+whitespace, no sign — and `soft` and `hard` are words resolving, at apply
+time, to the current limit of the scope they name; `read -t` accepts
+fractional seconds — a leading `+` but no `-`, `0.5`, `.5` and `1.` parse.
+The per-builtin range rules stay at the call site. One accepted divergence:
+bash's seconds parser overflows non-monotonically — `4294967296` returns
+immediately (measured) — where fdshell's saturation blocks it, pinned at
+`tests/read.rs::timeout_past_u32_blocks_for_a_late_writer`.
+
 | Command | Description |
 |---|---|
 | `openat2 [--dirfd N] [--mode MODE] [--resolve FLAGS] [--flags FLAGS] [--path] path` | Open or create a file via `openat2`. Returns one fd. |

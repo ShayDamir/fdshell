@@ -12109,3 +12109,18 @@ Pins: `safe/fdshell/src/child/printf/tests.rs` (`hex_escape_in_format`,
 `printf_uppercase_hex_escape_stays_literal`,
 `printf_percent_s_leaves_the_hex_escape_literal`,
 `printf_hex_escape_without_a_digit_reports_and_continues`).
+
+## Builtin numeric arguments name a bash grammar; Rust's `FromStr` is a fourth, wrong one (task #600)
+
+bash routes each builtin's numeric word through one of a few parsers —
+`legal_number` (leading whitespace skipped, sign accepted, decimal), the
+strict digit-run parser (`ulimit`: no whitespace, no sign), and the
+fractional-seconds parser (`read -t`: no whitespace, `+` but no `-`) — and
+they differ in opposite directions, so one shared `parse::<T>()` cannot serve
+them. `src/numarg.rs` keeps the grammars as named constants and each call
+site names the one bash uses for it; range rules stay at the call site.
+Cross-reference (do not merge): LESSONS: "bash `strtol`/`strtod` print the
+parsed prefix on trailing junk, not 0" (that family is bash's base-0
+arithmetic/printf parsers — `printf`, `getopts`, the arithmetic lexer — which
+are *not* the builtin argument grammars) and LESSONS: "A parse-level keyword
+inherits an operand grammar — check the grammar you inherit (task #290)".
