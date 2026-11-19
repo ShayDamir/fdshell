@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C ulimit -- -E 'test(/^intercept::ulimit_cmd::/) | binary(ulimit)'
+
 use error_stack::{Report, ResultExt, bail};
 
 use crate::error::cmd::CmdError;
@@ -5,10 +7,23 @@ use crate::intercept::ulimit_cmd::resources;
 use sys::ShortCStr;
 
 /// A limit value word: the parsed amount and the original text (for errors).
+/// A keyword word carries no number: `set.rs` resolves it against the current
+/// limits at apply time.
+#[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 pub(super) struct Value {
     pub(super) amount: u64,
+    pub(super) keyword: Option<Keyword>,
     pub(super) text: ShortCStr,
+}
+
+/// A value word naming the current limit it resolves to (bash's `soft` and
+/// `hard` spellings); `unlimited` is an amount, not a keyword.
+#[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
+pub(super) enum Keyword {
+    Soft,
+    Hard,
 }
 
 /// Parsed `ulimit` arguments: scope flags, at most one resource, the value.
@@ -49,7 +64,7 @@ pub(super) fn parse(args: &[ShortCStr]) -> Result<Parsed, Report<CmdError>> {
                 }
             }
         } else if value.is_none() {
-            value = Some(parse_value(arg)?);
+            value = Some(value::parse_value(arg)?);
         }
     }
     Ok(Parsed {
@@ -73,17 +88,4 @@ fn set_resource(
     Ok(())
 }
 
-fn parse_value(text: &ShortCStr) -> Result<Value, Report<CmdError>> {
-    let amount = if text.eq_bytes(b"unlimited") {
-        sys::rlimit::UNLIMITED
-    } else {
-        let err = CmdError::UlimitBadValue {
-            value: text.clone(),
-        };
-        text.parse::<u64>().change_context(err)?
-    };
-    Ok(Value {
-        amount,
-        text: text.clone(),
-    })
-}
+mod value;

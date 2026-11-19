@@ -165,3 +165,37 @@ fn raising_above_hard_limit_requires_privilege() {
     assert!(err.contains("failed to set"), "stderr={err}");
     assert!(out.is_empty(), "stdout={out}");
 }
+
+/// Task #600 (#606): `soft` and `hard` are bash's keyword value words,
+/// resolved at apply time to the current limit of the scope they name
+/// (bash 5.3.9 measured; baselines set first so no machine-dependent hard
+/// limit is pinned). The keyword write lands in both fields at default
+/// scope, exactly as the numeric write does.
+#[test]
+fn keyword_value_resolves_to_the_named_scope() {
+    let (out, err, code) =
+        run("ulimit -n 2048; ulimit -Sn 1000; ulimit -n soft; ulimit -n; ulimit -Hn");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "1000\n1000\n", "stdout={out}");
+
+    let (out, err, code) =
+        run("ulimit -n 2048; ulimit -Sn 1000; ulimit -n hard; ulimit -n; ulimit -Hn");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "2048\n2048\n", "stdout={out}");
+
+    // A unit-bearing resource (bash 5.3.9 measured: the keyword lands in the
+    // resource's own unit).
+    let (out, err, code) = run("ulimit -t 100; ulimit -t soft; ulimit -t");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "100\n", "stdout={out}");
+}
+
+/// Task #600 (#606): the value grammar is bash's strict digit run — `+5`
+/// is not a limit value (the Rust `FromStr` path accepted it; the parse-level
+/// rejection keeps its `UlimitBadValue` report, pinned in the unit tests).
+#[test]
+fn plus_sign_value_stays_rejected() {
+    let (out, err, code) = run("ulimit -f +5");
+    assert_eq!(code, 1, "stdout={out}");
+    assert!(err.contains("+5"), "the report names the word: {err}");
+}

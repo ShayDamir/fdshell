@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use error_stack::Report;
 use sys::ShortCStr;
 
-use super::parse::{Parsed, Value, parse};
+use super::parse::{Keyword, Parsed, Value, parse};
 use super::set::scale;
 use crate::error::cmd::CmdError;
 use crate::intercept::ulimit_cmd::resources;
@@ -85,9 +85,20 @@ fn extra_value_words_are_ignored() {
     assert_eq!(p.value.unwrap().amount, 1);
 }
 
+/// Task #600 (#606): the value grammar is bash's strict digit run — no sign,
+/// no whitespace — so `+5`, which Rust's `FromStr` used to accept, is a bad
+/// value again; and `soft`/`hard` are keyword words resolved at apply time.
+#[test]
+fn keyword_values_parse_to_markers() {
+    for (word, keyword) in [("soft", Keyword::Soft), ("hard", Keyword::Hard)] {
+        let p = run(&["-n", word]).unwrap();
+        assert_eq!(p.value.unwrap().keyword, Some(keyword), "{word:?}");
+    }
+}
+
 #[test]
 fn bad_values_are_rejected() {
-    for word in ["abc", "100K", "99999999999999999999"] {
+    for word in ["abc", "100K", "99999999999999999999", "+5"] {
         let r = run(&["-n", word]);
         assert!(
             matches!(
@@ -129,6 +140,7 @@ fn invalid_options_are_rejected() {
 fn val(amount: u64) -> Value {
     Value {
         amount,
+        keyword: None,
         text: ShortCStr::from_vec(b"v".to_vec()).unwrap(),
     }
 }
