@@ -12124,3 +12124,37 @@ parsed prefix on trailing junk, not 0" (that family is bash's base-0
 arithmetic/printf parsers — `printf`, `getopts`, the arithmetic lexer — which
 are *not* the builtin argument grammars) and LESSONS: "A parse-level keyword
 inherits an operand grammar — check the grammar you inherit (task #290)".
+
+## The last `read` variable gets the tail of the trimmed line, not a rejoin (task #604)
+
+bash trims IFS whitespace at the **line** edges and keeps the separator text
+**between** the fields that land in the last variable: `a··b⇥c` into `x y`
+answers `x=a`, `y=b⇥c`, and `··a··b··` into `x` answers `a··b`. A join with a
+fixed byte (`b' '`) is a different operation — it is what loses tabs and the
+edge runs — and the trim runs before any field is assigned, so an
+all-whitespace line yields zero fields and every target pads to empty. A
+separator run before the tail's first field is one boundary and belongs to no
+field, so `a···b` into `x y` answers `a` / `b`.
+
+CR is content, not IFS whitespace, and bash does not strip it. The trim set is
+the default-IFS whitespace — space, tab, newline — while the **cut** set in
+`read/words.rs` is still space+tab until task #158 lands, so a newline can
+only act as a delimiter inside the tail (reached today through `-d ''` EOF
+reads); that deliberate split of the two sets is pinned as a control.
+
+Pins: `safe/fdshell/src/intercept/read/tests.rs`
+(`test_split_fields_last_keeps_separator_tabs`,
+`test_split_fields_last_keeps_double_spaces`,
+`test_split_fields_single_target_trims_edges`,
+`test_split_fields_trimmed_edges_exact_count`,
+`test_split_fields_whitespace_only_line_yields_empty`,
+`test_split_fields_tab_edges_trimmed`,
+`test_split_fields_tab_edges_and_separator`,
+`test_split_fields_newline_edges_trimmed`,
+`test_split_fields_newline_inside_tail_kept`,
+`test_split_fields_cr_is_content_not_ifs`,
+`test_split_fields_cr_field_with_double_space_separator`,
+`test_split_fields_run_before_last_field_is_consumed`) and
+`safe/fdshell/tests/read.rs` (`last_variable_keeps_the_separator_text`,
+`edges_are_trimmed_internal_separators_stay`,
+`trim_applies_to_the_capped_text`, `newline_edges_trimmed_on_an_eof_read`).
