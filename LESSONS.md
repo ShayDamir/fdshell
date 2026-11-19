@@ -11621,14 +11621,18 @@ takes a local extension trait, when the call syntax earns its keep).
 records the rejection.
 
 Inside the defining crate the same rule reads positively, and `sys` lives by
-it: a syscall whose receiver is one of the crate's own fd types is a method
-on that type — the fd-type files already spell it so (`fallocate`, `flock`,
-`dir_batch`, `set_passcred`), and task #601 moved the last fd-receiver
-syscalls (accept/listen/bind/connect/getsockname/sendmsg/recvmsg,
-timerfd_settime, `ForkCell::fork_pidfd`) into `impl` blocks. Two borders close
-the census: a receiver of a foreign type is E0116 (the half above), and a
-receiver that is a *slice* is E0390 — `poll(&mut [PollFd], ..)` cannot become
-a method on one `PollFd`, because an element cannot poll the set.
+it: a syscall whose receiver is a *reference* to one of the crate's own fd
+types is a method on that type — the fd-type files already spell it so
+(`fallocate`, `flock`, `dir_batch`, `set_passcred`), and task #601 moved the
+last reference-receiver fd syscalls (accept/listen/bind/connect/getsockname/
+sendmsg/recvmsg, timerfd_settime, `ForkCell::fork_pidfd`) into `impl` blocks.
+The reference is the criterion: the `*at` family (`execveat`, `mkdirat`,
+`mkfifoat`, `renameat2`, `unlinkat`, `utimensat`, `statx`, `readlinkat`) takes
+its `AtFd` **by value** — STYLE §5.10's borrowed view — so it stays a free
+function. Two borders close the census: a receiver of a foreign type is E0116
+(the half above), and a receiver that is a *slice* is E0390 —
+`poll(&mut [PollFd], ..)` cannot become a method on one `PollFd`, because an
+element cannot poll the set.
 
 ## A boundary comparison with an unproducible equality class is accepted-equivalent at that boundary
 
