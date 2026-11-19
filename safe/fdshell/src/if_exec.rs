@@ -1,24 +1,14 @@
 // mutants: -C --lib -C --test -C cond_blocks -C --test -C errexit -C --test -C set_opts -- -E 'test(/^if_exec::/) | test(/^tests::run::/) | binary(cond_blocks) | binary(errexit) | binary(set_opts)'
 
 use crate::loop_control::LoopControl;
-use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
-use crate::cond::errexit;
+use crate::cond::{body_bytes, errexit};
 use crate::error::cmd::CmdError;
 use crate::parse::if_block::IfBlock;
 use crate::run::failing;
 use crate::state::ShellState;
-use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
-
-/// The condition's heredoc bodies as byte vectors (for `run_cond_list`).
-fn body_bytes(bodies: &[ShortCStr]) -> Vec<Vec<u8>> {
-    bodies
-        .iter()
-        .filter_map(|b| b.as_bytes().ok().map(|bytes| bytes.to_vec()))
-        .collect()
-}
 
 pub(crate) fn run_if(
     ifblock: &IfBlock,
