@@ -42,8 +42,8 @@ fn listening_state() -> (ShellState, sys::LocalFd, String) {
     let n = name("srv");
     let n_c = CString::new(n.clone()).unwrap();
     let fd = sys::net::socket(sys::net::AF_UNIX, sys::net::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_abstract(&fd, &n_c).unwrap();
-    sys::net::listen(&fd, 4).unwrap();
+    fd.bind_uds_abstract(&n_c).unwrap();
+    fd.listen(4).unwrap();
     let (shell_sock, receiver) = sys::net::socketpair().unwrap();
     shell_sock.verify().unwrap();
     receiver.verify().unwrap();
@@ -139,7 +139,7 @@ fn accept_handler_on_non_listening_socket_is_syscall_error() {
     let n = name("nope");
     let n_c = CString::new(n).unwrap();
     let fd = sys::net::socket(sys::net::AF_UNIX, sys::net::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_abstract(&fd, &n_c).unwrap();
+    fd.bind_uds_abstract(&n_c).unwrap();
     let (shell_sock, receiver) = sys::net::socketpair().unwrap();
     shell_sock.verify().unwrap();
     receiver.verify().unwrap();

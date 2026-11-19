@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C recvmsg -C --test -C sendmsg -- -E 'test(/^intercept::recvmsg/) | binary(recvmsg) | binary(sendmsg)'
 //! `recvmsg [--cred VAR] %sock VAR [%fdvar ...]`
 //!
 //! Runs in-shell: it blocks on the socket (the fd stays in this process'
@@ -35,13 +36,9 @@ pub(crate) fn run_recvmsg(
     }
 
     let mut buf = vec![0u8; MAX_PAYLOAD];
-    let msg = sys::net::recvmsg(
-        &sock,
-        &mut buf,
-        parsed.fd_slots.len(),
-        parsed.cred.is_some(),
-    )
-    .map_err(io::map_recv_error)?;
+    let msg = sock
+        .recvmsg(&mut buf, parsed.fd_slots.len(), parsed.cred.is_some())
+        .map_err(io::map_recv_error)?;
     let origin = io::origin(&parsed.sock);
 
     if msg.eof {

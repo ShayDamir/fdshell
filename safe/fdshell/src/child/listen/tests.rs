@@ -67,7 +67,7 @@ fn listen_inet_zero(state: &ShellState, receiver: &sys::LocalFd, flag: &str) -> 
 
 /// The kernel-assigned port read back off the `--port 0` listening socket.
 fn inet_port(fd: &sys::LocalFd) -> u16 {
-    match sys::net::getsockname(fd).unwrap() {
+    match fd.getsockname().unwrap() {
         sys::net::SockName::Inet { port } => {
             assert_ne!(port, 0, "port 0 must come back kernel-assigned");
             port

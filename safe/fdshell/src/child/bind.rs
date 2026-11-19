@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C sockets -- -E 'test(/^child::bind::/) | binary(sockets)'
 //! `bind [--type stream|dgram] ADDRESS` — create a socket and bind it; the
 //! new socket is captured into an fd var via `%>%var` (bounded form
 //! `%>%array[N]`).
@@ -54,15 +55,15 @@ pub(super) fn create_socket(
 
 pub(super) fn bind_socket(fd: &LocalFd, addr: &Address) -> Result<(), Report<BuiltinError>> {
     match addr {
-        Address::UdsPath(p) => {
-            sys::net::bind_uds_path(fd, p.export()).change_context(BuiltinError::Syscall)
-        }
-        Address::UdsAbstract(n) => {
-            sys::net::bind_uds_abstract(fd, n.export()).change_context(BuiltinError::Syscall)
-        }
-        Address::Inet { addr, port } => {
-            sys::net::bind_inet(fd, addr.export(), *port).change_context(BuiltinError::Syscall)
-        }
+        Address::UdsPath(p) => fd
+            .bind_uds_path(p.export())
+            .change_context(BuiltinError::Syscall),
+        Address::UdsAbstract(n) => fd
+            .bind_uds_abstract(n.export())
+            .change_context(BuiltinError::Syscall),
+        Address::Inet { addr, port } => fd
+            .bind_inet(addr.export(), *port)
+            .change_context(BuiltinError::Syscall),
     }
 }
 

@@ -1,7 +1,6 @@
 use super::*;
 use sys::SyscallError;
 use sys::errno;
-use sys::fork_pidfd::fork_pidfd_cell;
 use sys::pipe::pipe2;
 use sys::siginfo::WaitStatus;
 use sys::signal::Action;
@@ -11,7 +10,7 @@ fn make_cell() -> ForkCell<ShellState> {
     ForkCell::new(ShellState::new())
 }
 
-/// Fork a child with [`fork_pidfd_cell`], let it report one `usize` over a
+/// Fork a child with `ForkCell::fork_pidfd`, let it report one `usize` over a
 /// pipe, and return what the parent read.
 ///
 /// Install, deliver and run all run **in the child**: the in-process harness
@@ -26,7 +25,7 @@ fn make_cell() -> ForkCell<ShellState> {
 /// cap is respected.
 fn child_reports(cell: &ForkCell<ShellState>, report: impl FnOnce() -> usize) -> usize {
     let (rd, wr) = pipe2(0).unwrap();
-    let (ret, pidfd_opt) = fork_pidfd_cell(cell).unwrap();
+    let (ret, pidfd_opt) = cell.fork_pidfd().unwrap();
     if ret.as_raw() == 0 {
         let value = report();
         if wr.write_all(&value.to_ne_bytes()).is_err() {

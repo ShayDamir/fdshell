@@ -27,7 +27,7 @@ pub(crate) fn run_and_capture(
             .change_context(CmdSubstError::Never)?
             .capture_limit;
         let (r, w) = sys::pipe::pipe2(0).change_context(CmdSubstError::Pipe)?;
-        match sys::fork_pidfd::fork_pidfd_cell(cell).change_context(CmdSubstError::Fork)? {
+        match cell.fork_pidfd().change_context(CmdSubstError::Fork)? {
             (_, None) => {
                 // child stdout → pipe; failure means empty output
                 let _ = w.export_to(1);

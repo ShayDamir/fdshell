@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C sendmsg -- -E 'test(/^intercept::sendmsg/) | binary(sendmsg)'
 //! `sendmsg %sock [--msg TEXT | --msgfd %var COUNT] [--fd %var]... [--passcred]`
 //!
 //! Runs in-shell: the fds sent are this process' own fd vars and the message
@@ -30,7 +31,7 @@ pub(crate) fn run_sendmsg(
     }
     let payload = payload::build(&parsed, cell)?;
     let fds = collect_fds(&parsed.fd_vars, cell)?;
-    sys::net::sendmsg(&sock, &payload, &fds).map_err(map_send_error)?;
+    sock.sendmsg(&payload, &fds).map_err(map_send_error)?;
 
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.set_last_exit(0);
@@ -80,7 +81,7 @@ fn collect_fds(
     Ok(fds)
 }
 
-/// Map a `sys::net::sendmsg` failure to a `CmdError`, keeping the chain.
+/// Map a `LocalFd::sendmsg` failure to a `CmdError`, keeping the chain.
 fn map_send_error(e: Report<SyscallError>) -> Report<CmdError> {
     let cmd = match e.current_context() {
         SyscallError::EINVAL("sendmsg") => CmdError::SendmsgEmptyPayload,

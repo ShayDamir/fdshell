@@ -31,7 +31,7 @@ pub(crate) enum Address {
     UdsPath(ShortCStr),
     /// AF_UNIX abstract namespace; no filesystem object exists.
     UdsAbstract(ShortCStr),
-    /// AF_INET v4 endpoint (dotted-quad, validated by `sys::net::bind_inet`).
+    /// AF_INET v4 endpoint (dotted-quad, validated by `LocalFd::bind_inet`).
     Inet { addr: ShortCStr, port: u16 },
 }
 

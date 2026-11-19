@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C async -- -E 'test(/^run::async_job::/) | binary(async)'
 //! The plain `&` async job (task #326): fork the whole shell so the child
 //! runs the statement through the **identical foreground path** (word-0
 //! expansion, function lookup, parent-side intercepts, pipeline launch with
@@ -16,7 +17,7 @@ use error_stack::{Report, ResultExt};
 use sys::ScriptText;
 use sys::fork_cell::ForkCell;
 
-/// Run `parsed` asynchronously: fork the shell ( [`sys::fork_pidfd_cell`], the
+/// Run `parsed` asynchronously: fork the shell (`ForkCell::fork_pidfd`, the
 /// single fork choke point), let the child run the foreground path and
 /// `sys::exit` with its status, and record the child as a nameless job in the
 /// parent (`$!` reports it, `wait`/`wait <pid>` reap it).
@@ -29,8 +30,7 @@ pub(crate) fn spawn(
 ) -> Result<Option<LoopControl>, Report<CmdError>> {
     // No cell borrow is held across the fork (LESSONS: a held `RefMut`
     // poisons the child's and the parent's nested borrows).
-    let (child_pid, pidfd) =
-        sys::fork_pidfd::fork_pidfd_cell(cell).change_context(CmdError::Launch)?;
+    let (child_pid, pidfd) = cell.fork_pidfd().change_context(CmdError::Launch)?;
     let Some(pidfd) = pidfd else {
         run_and_exit(parsed, text, cell);
     };

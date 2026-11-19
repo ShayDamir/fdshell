@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C timeout -C --test -C trap -- -E 'test(/^intercept::timeout_cmd/) | binary(timeout) | binary(trap)'
 //! The deadline poll of `timeout`: the child's pidfd against a one-shot
 //! deadline timer, and the SIGTERM → grace → SIGKILL sequence a fired deadline
 //! triggers. The 124 exit code of coreutils `timeout` is decided here, by the
@@ -15,7 +16,8 @@ pub(super) fn bounded_wait(
     seconds: i64,
 ) -> Result<(i32, sys::getrusage::CpuTimes), Report<TimeoutError>> {
     let timer = sys::timerfd::timerfd_create(0).change_context(TimeoutError::TimeoutTimer)?;
-    sys::timerfd::timerfd_settime(&timer, (seconds, 0), (0, 0))
+    timer
+        .timerfd_settime((seconds, 0), (0, 0))
         .change_context(TimeoutError::TimeoutTimer)?;
     let mut pfd = [
         sys::poll::PollFd::new(pidfd.as_raw(), sys::poll::POLLIN),

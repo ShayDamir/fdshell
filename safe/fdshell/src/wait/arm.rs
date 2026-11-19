@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C wait -- -E 'test(/^wait::/) | binary(wait)'
+
 mod reap;
 
 use core::fmt::Write;
@@ -27,8 +29,7 @@ pub(crate) fn dispatch(
     }
     let (parent_end, child_end) =
         sys::net::socketpair_with_passcred().change_context(WaitError::ArmFork)?;
-    let (child_pid, pidfd_opt) =
-        sys::fork_pidfd::fork_pidfd_cell(cell).change_context(WaitError::ArmFork)?;
+    let (child_pid, pidfd_opt) = cell.fork_pidfd().change_context(WaitError::ArmFork)?;
     match pidfd_opt {
         None => {
             let code = reap::child_main(arm, raw, child_end, cell);

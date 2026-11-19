@@ -1,7 +1,7 @@
 //! Integration tests for the socket-lifecycle wrappers
-//! (`sys::net::{socket, bind_uds_path, bind_uds_abstract, bind_inet,
-//! connect_uds_path, connect_uds_abstract, connect_inet, listen, accept,
-//! getsockname}`).
+//! (`sys::net::socket` plus the `LocalFd` methods `bind_uds_path`,
+//! `bind_uds_abstract`, `bind_inet`, `connect_uds_path`,
+//! `connect_uds_abstract`, `connect_inet`, `listen`, `accept`, `getsockname`).
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
@@ -82,10 +82,10 @@ fn test_socket_dgram() {
 fn test_bind_uds_abstract_and_duplicate() {
     let name = abs_name("dup");
     let a = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_abstract(&a, cstr(&name)).unwrap();
+    a.bind_uds_abstract(cstr(&name)).unwrap();
     // Bind the exact same name a second time: EADDRINUSE.
     let b = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    let err = sys::net::bind_uds_abstract(&b, cstr(&name)).unwrap_err();
+    let err = b.bind_uds_abstract(cstr(&name)).unwrap_err();
     assert_eq!(
         err,
         sys::SyscallError::Other {
@@ -100,9 +100,9 @@ fn test_bind_uds_abstract_max_length() {
     // 107 bytes fit `sun_path` with the leading NUL; 108 do not.
     let ok = "a".repeat(107);
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_abstract(&fd, cstr(&ok)).unwrap();
+    fd.bind_uds_abstract(cstr(&ok)).unwrap();
     let long = "b".repeat(108);
-    let err = sys::net::bind_uds_abstract(&fd, cstr(&long)).unwrap_err();
+    let err = fd.bind_uds_abstract(cstr(&long)).unwrap_err();
     // The wrapper rejects the over-long name itself, so it carries "bind".
     assert_eq!(err, sys::SyscallError::EINVAL("bind"));
 }
@@ -112,7 +112,7 @@ fn test_bind_uds_path_creates_file() {
     let dir = scratch("path");
     let sock_path = dir.join("sock");
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_path(&fd, cstr(sock_path.to_str().unwrap())).unwrap();
+    fd.bind_uds_path(cstr(sock_path.to_str().unwrap())).unwrap();
     let meta = std::fs::metadata(&sock_path).unwrap();
     assert!(
         meta.file_type().is_socket(),
@@ -123,10 +123,10 @@ fn test_bind_uds_path_creates_file() {
 #[test]
 fn test_bind_inet_loopback_port_zero() {
     let fd = sys::net::socket(libc::AF_INET, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_inet(&fd, cstr("127.0.0.1"), 0).unwrap();
+    fd.bind_inet(cstr("127.0.0.1"), 0).unwrap();
     // Port 0 asks the kernel for a port; `getsockname` must report the one
     // it assigned (task #254: the read-back is what lets a test bind 0).
-    match sys::net::getsockname(&fd).unwrap() {
+    match fd.getsockname().unwrap() {
         sys::net::SockName::Inet { port } => assert_ne!(port, 0),
         other => panic!("AF_INET socket must report an Inet name, got {other:?}"),
     }
@@ -135,14 +135,14 @@ fn test_bind_inet_loopback_port_zero() {
 #[test]
 fn test_bind_inet_non_numeric_is_einval() {
     let fd = sys::net::socket(libc::AF_INET, libc::SOCK_STREAM).unwrap();
-    let err = sys::net::bind_inet(&fd, cstr("not-an-ip"), 8080).unwrap_err();
+    let err = fd.bind_inet(cstr("not-an-ip"), 8080).unwrap_err();
     assert_eq!(err, sys::SyscallError::EINVAL("inet_pton"));
 }
 
 #[test]
 fn test_listen_on_dgram_is_unsupported() {
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_DGRAM).unwrap();
-    let err = sys::net::listen(&fd, 1).unwrap_err();
+    let err = fd.listen(1).unwrap_err();
     assert_eq!(
         err,
         sys::SyscallError::Other {
@@ -156,13 +156,13 @@ fn test_listen_on_dgram_is_unsupported() {
 fn test_accept_roundtrip() {
     let name = abs_name("accept");
     let listener = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_abstract(&listener, cstr(&name)).unwrap();
-    sys::net::listen(&listener, 1).unwrap();
+    listener.bind_uds_abstract(cstr(&name)).unwrap();
+    listener.listen(1).unwrap();
 
     let client = SocketAddr::from_abstract_name(name.as_bytes()).unwrap();
     let mut peer = UnixStream::connect_addr(&client).unwrap();
 
-    let conn = sys::net::accept(&listener).unwrap();
+    let conn = listener.accept().unwrap();
     conn.verify().unwrap();
 
     // The accepted fd is a usable connection: a byte written by the std
@@ -182,8 +182,8 @@ fn test_accept_roundtrip() {
 fn test_accept_on_non_listening_is_einval() {
     let name = abs_name("nolisten");
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_abstract(&fd, cstr(&name)).unwrap();
-    let err = match sys::net::accept(&fd) {
+    fd.bind_uds_abstract(cstr(&name)).unwrap();
+    let err = match fd.accept() {
         Ok(_) => panic!("accept on a non-listening socket must fail"),
         Err(e) => e,
     };
@@ -194,13 +194,13 @@ fn test_accept_on_non_listening_is_einval() {
 fn test_connect_uds_abstract_roundtrip() {
     let name = abs_name("connect-abs");
     let listener = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_abstract(&listener, cstr(&name)).unwrap();
-    sys::net::listen(&listener, 1).unwrap();
+    listener.bind_uds_abstract(cstr(&name)).unwrap();
+    listener.listen(1).unwrap();
 
     let client = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::connect_uds_abstract(&client, cstr(&name)).unwrap();
+    client.connect_uds_abstract(cstr(&name)).unwrap();
 
-    let conn = sys::net::accept(&listener).unwrap();
+    let conn = listener.accept().unwrap();
     conn.verify().unwrap();
 
     // The client's `connect` used the exact addrlen the kernel stored at
@@ -221,12 +221,16 @@ fn test_connect_uds_path_roundtrip() {
     let dir = scratch("connect-path");
     let sock_path = dir.join("sock");
     let listener = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_path(&listener, cstr(sock_path.to_str().unwrap())).unwrap();
-    sys::net::listen(&listener, 1).unwrap();
+    listener
+        .bind_uds_path(cstr(sock_path.to_str().unwrap()))
+        .unwrap();
+    listener.listen(1).unwrap();
 
     let client = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::connect_uds_path(&client, cstr(sock_path.to_str().unwrap())).unwrap();
-    let conn = sys::net::accept(&listener).unwrap();
+    client
+        .connect_uds_path(cstr(sock_path.to_str().unwrap()))
+        .unwrap();
+    let conn = listener.accept().unwrap();
     conn.verify().unwrap();
     client.write_all(b"ok\n").unwrap();
     let mut buf = [0u8; 3];
@@ -245,7 +249,9 @@ fn test_connect_uds_path_to_unbound_path_is_enoent() {
     let dir = scratch("connect-missing");
     let missing = dir.join("never-bound");
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    let err = sys::net::connect_uds_path(&fd, cstr(missing.to_str().unwrap())).unwrap_err();
+    let err = fd
+        .connect_uds_path(cstr(missing.to_str().unwrap()))
+        .unwrap_err();
     assert_eq!(err, sys::SyscallError::ENOENT(UNKNOWN));
 }
 
@@ -257,7 +263,7 @@ fn test_connect_uds_abstract_max_length() {
     // the error carries the `call` argument, "connect".
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
     let ok = "a".repeat(107);
-    let err = sys::net::connect_uds_abstract(&fd, cstr(&ok)).unwrap_err();
+    let err = fd.connect_uds_abstract(cstr(&ok)).unwrap_err();
     assert_eq!(
         err,
         sys::SyscallError::Other {
@@ -266,7 +272,7 @@ fn test_connect_uds_abstract_max_length() {
         }
     );
     let long = "b".repeat(108);
-    let err = sys::net::connect_uds_abstract(&fd, cstr(&long)).unwrap_err();
+    let err = fd.connect_uds_abstract(cstr(&long)).unwrap_err();
     assert_eq!(err, sys::SyscallError::EINVAL("connect"));
 }
 
@@ -276,7 +282,7 @@ fn test_connect_inet_loopback() {
     let port = listener.local_addr().unwrap().port();
 
     let client = sys::net::socket(libc::AF_INET, libc::SOCK_STREAM).unwrap();
-    sys::net::connect_inet(&client, cstr("127.0.0.1"), port).unwrap();
+    client.connect_inet(cstr("127.0.0.1"), port).unwrap();
 
     let (mut conn, _) = listener.accept().unwrap();
     client.write_all(b"hi\n").unwrap();
@@ -293,7 +299,7 @@ fn test_connect_inet_loopback() {
 #[test]
 fn test_connect_inet_non_numeric_is_einval() {
     let fd = sys::net::socket(libc::AF_INET, libc::SOCK_STREAM).unwrap();
-    let err = sys::net::connect_inet(&fd, cstr("not-an-ip"), 8080).unwrap_err();
+    let err = fd.connect_inet(cstr("not-an-ip"), 8080).unwrap_err();
     assert_eq!(err, sys::SyscallError::EINVAL("inet_pton"));
 }
 
@@ -301,7 +307,7 @@ fn test_connect_inet_non_numeric_is_einval() {
 fn test_connect_refused_when_nothing_bound() {
     let name = abs_name("refused");
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    let err = sys::net::connect_uds_abstract(&fd, cstr(&name)).unwrap_err();
+    let err = fd.connect_uds_abstract(cstr(&name)).unwrap_err();
     assert_eq!(
         err,
         sys::SyscallError::Other {
@@ -320,9 +326,9 @@ fn test_connect_refused_when_nothing_bound() {
 #[test]
 fn test_getsockname_inet_reports_bound_port() {
     let fd = sys::net::socket(libc::AF_INET, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_inet(&fd, cstr("127.0.0.1"), 0).unwrap();
-    sys::net::listen(&fd, 1).unwrap();
-    let port = match sys::net::getsockname(&fd).unwrap() {
+    fd.bind_inet(cstr("127.0.0.1"), 0).unwrap();
+    fd.listen(1).unwrap();
+    let port = match fd.getsockname().unwrap() {
         sys::net::SockName::Inet { port } => port,
         other => panic!("AF_INET socket must report an Inet name, got {other:?}"),
     };
@@ -338,8 +344,8 @@ fn test_getsockname_inet_reports_bound_port() {
 fn test_getsockname_uds_abstract_reports_name() {
     let name = abs_name("gsn-abs");
     let (fd, _peer) = sys::net::socketpair().unwrap();
-    sys::net::bind_uds_abstract(&fd, cstr(&name)).unwrap();
-    match sys::net::getsockname(&fd).unwrap() {
+    fd.bind_uds_abstract(cstr(&name)).unwrap();
+    match fd.getsockname().unwrap() {
         sys::net::SockName::Unix { name: got } => assert_eq!(got, name.as_bytes()),
         other => panic!("AF_UNIX socket must report a Unix name, got {other:?}"),
     }
@@ -353,8 +359,8 @@ fn test_getsockname_uds_path_reports_name() {
     let dir = scratch("gsn-path");
     let sock_path = dir.join("sock");
     let fd = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_path(&fd, cstr(sock_path.to_str().unwrap())).unwrap();
-    match sys::net::getsockname(&fd).unwrap() {
+    fd.bind_uds_path(cstr(sock_path.to_str().unwrap())).unwrap();
+    match fd.getsockname().unwrap() {
         sys::net::SockName::Unix { name: got } => {
             assert_eq!(got, sock_path.as_os_str().as_bytes())
         }
@@ -371,10 +377,11 @@ fn test_getsockname_on_non_socket_is_enotsock() {
     let dir = scratch("gsn-notsock");
     let sock_path = dir.join("sock");
     let sock = sys::net::socket(libc::AF_UNIX, libc::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_path(&sock, cstr(sock_path.to_str().unwrap())).unwrap();
-    sys::net::getsockname(&sock).unwrap();
+    sock.bind_uds_path(cstr(sock_path.to_str().unwrap()))
+        .unwrap();
+    sock.getsockname().unwrap();
     let memfd = sys::memfd::memfd_create().unwrap();
-    let err = sys::net::getsockname(&memfd).unwrap_err();
+    let err = memfd.getsockname().unwrap_err();
     assert_eq!(
         err,
         sys::SyscallError::Other {
@@ -391,6 +398,6 @@ fn test_getsockname_on_non_socket_is_enotsock() {
 #[test]
 fn test_getsockname_on_other_family_is_einval() {
     let fd = sys::net::socket(libc::AF_INET6, libc::SOCK_STREAM).unwrap();
-    let err = sys::net::getsockname(&fd).unwrap_err();
+    let err = fd.getsockname().unwrap_err();
     assert_eq!(err, sys::SyscallError::EINVAL("getsockname"));
 }

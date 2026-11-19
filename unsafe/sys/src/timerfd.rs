@@ -1,3 +1,5 @@
+// mutants: -C --test -C timerfd -- -E 'binary(timerfd)'
+
 use crate::LocalFd;
 
 pub const TFD_NONBLOCK: i32 = libc::TFD_NONBLOCK;
@@ -14,27 +16,29 @@ pub fn timerfd_create(flags: i32) -> Result<LocalFd, crate::SyscallError> {
     Ok(unsafe { LocalFd::from_raw(ret as i32) })
 }
 
-/// Arm the timerfd: `value` is the initial expiry, `interval` the repeat
-/// period (zero for a one-shot timer). Each is `(sec, nsec)`.
-pub fn timerfd_settime(
-    fd: &LocalFd,
-    value: (i64, i64),
-    interval: (i64, i64),
-) -> Result<(), crate::SyscallError> {
-    let new = libc::itimerspec {
-        it_value: libc::timespec {
-            tv_sec: value.0,
-            tv_nsec: value.1,
-        },
-        it_interval: libc::timespec {
-            tv_sec: interval.0,
-            tv_nsec: interval.1,
-        },
-    };
-    // SAFETY: `fd` is a valid timerfd; `new` is a valid `itimerspec`; a null
-    // `old_value` skips the read-back. Out-of-range values return `EINVAL`.
-    crate::cvt(unsafe {
-        libc::timerfd_settime(fd.as_raw(), 0, &new, core::ptr::null_mut()) as isize
-    })?;
-    Ok(())
+impl LocalFd {
+    /// Arm the timerfd: `value` is the initial expiry, `interval` the repeat
+    /// period (zero for a one-shot timer). Each is `(sec, nsec)`.
+    pub fn timerfd_settime(
+        &self,
+        value: (i64, i64),
+        interval: (i64, i64),
+    ) -> Result<(), crate::SyscallError> {
+        let new = libc::itimerspec {
+            it_value: libc::timespec {
+                tv_sec: value.0,
+                tv_nsec: value.1,
+            },
+            it_interval: libc::timespec {
+                tv_sec: interval.0,
+                tv_nsec: interval.1,
+            },
+        };
+        // SAFETY: `self` is a valid timerfd; `new` is a valid `itimerspec`; a null
+        // `old_value` skips the read-back. Out-of-range values return `EINVAL`.
+        crate::cvt(unsafe {
+            libc::timerfd_settime(self.as_raw(), 0, &new, core::ptr::null_mut()) as isize
+        })?;
+        Ok(())
+    }
 }

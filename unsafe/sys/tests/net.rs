@@ -1,8 +1,8 @@
-//! `sys::net::sendmsg` / `sys::net::recvmsg` integration tests.
+//! `LocalFd::sendmsg` / `LocalFd::recvmsg` integration tests.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use sys::SyscallError;
-use sys::net::{recvmsg, sendmsg, socketpair};
+use sys::net::socketpair;
 use sys::poll::{POLLIN, PollFd, poll};
 
 const BUF: usize = 64 * 1024;
@@ -14,9 +14,9 @@ fn buf() -> Vec<u8> {
 #[test]
 fn test_sendmsg_recvmsg_payload_roundtrip() {
     let (a, b) = socketpair().unwrap();
-    sendmsg(&a, b"hello", &[]).unwrap();
+    a.sendmsg(b"hello", &[]).unwrap();
     let mut buf = buf();
-    let msg = recvmsg(&b, &mut buf, 0, false).unwrap();
+    let msg = b.recvmsg(&mut buf, 0, false).unwrap();
     assert!(!msg.eof);
     assert_eq!(&buf[..msg.payload_len], b"hello");
     assert!(msg.fds.is_empty());
@@ -29,9 +29,9 @@ fn test_sendmsg_recvmsg_payload_roundtrip() {
 fn test_sendmsg_recvmsg_fd_roundtrip() {
     let (a, b) = socketpair().unwrap();
     let (c, peer) = socketpair().unwrap();
-    sendmsg(&a, b"x", &[c]).unwrap();
+    a.sendmsg(b"x", &[c]).unwrap();
     let mut buf = buf();
-    let msg = recvmsg(&b, &mut buf, 1, false).unwrap();
+    let msg = b.recvmsg(&mut buf, 1, false).unwrap();
     assert_eq!(&buf[..msg.payload_len], b"x");
     assert_eq!(msg.fds.len(), 1);
     // The received fd is a live dup of `c`: writing through it reaches the peer.
@@ -45,14 +45,14 @@ fn test_sendmsg_recvmsg_fd_roundtrip() {
 fn test_sendmsg_empty_payload_with_fds_fails() {
     let (a, _b) = socketpair().unwrap();
     let (c, _peer) = socketpair().unwrap();
-    let err = sendmsg(&a, b"", &[c]).unwrap_err();
+    let err = a.sendmsg(b"", &[c]).unwrap_err();
     assert_eq!(err.current_context(), &SyscallError::EINVAL("sendmsg"));
 }
 
 #[test]
 fn test_sendmsg_empty_payload_no_fds_is_noop() {
     let (a, b) = socketpair().unwrap();
-    sendmsg(&a, b"", &[]).unwrap();
+    a.sendmsg(b"", &[]).unwrap();
     // A zero-length, cmsg-less send is invisible to the peer: not readable.
     let n = poll(&mut [PollFd::new(b.as_raw(), POLLIN)], 100).unwrap();
     assert_eq!(n, 0);
@@ -66,7 +66,7 @@ fn test_sendmsg_too_many_fds_fails() {
         let (c, _peer) = socketpair().unwrap();
         fds.push(c);
     }
-    let err = sendmsg(&a, b"x", &fds).unwrap_err();
+    let err = a.sendmsg(b"x", &fds).unwrap_err();
     assert_eq!(err.current_context(), &SyscallError::E2BIG("sendmsg"));
 }
 
@@ -75,7 +75,7 @@ fn test_recvmsg_eof() {
     let (a, b) = socketpair().unwrap();
     drop(a);
     let mut buf = buf();
-    let msg = recvmsg(&b, &mut buf, 1, false).unwrap();
+    let msg = b.recvmsg(&mut buf, 1, false).unwrap();
     assert!(msg.eof);
     assert_eq!(msg.payload_len, 0);
     assert!(msg.fds.is_empty());
@@ -86,7 +86,7 @@ fn test_recvmsg_eagain_on_empty_nonblocking_socket() {
     let (a, b) = socketpair().unwrap();
     let _keep = a;
     let mut buf = buf();
-    let err = recvmsg(&b, &mut buf, 1, false).unwrap_err();
+    let err = b.recvmsg(&mut buf, 1, false).unwrap_err();
     assert_eq!(err.current_context(), &SyscallError::EAGAIN("unknown"));
 }
 
@@ -101,12 +101,12 @@ fn test_recvmsg_truncates_excess_fds() {
     let (c1, _p1) = socketpair().unwrap();
     let (c2, _p2) = socketpair().unwrap();
     let (c3, _p3) = socketpair().unwrap();
-    sendmsg(&a, b"xy", &[c1, c2, c3]).unwrap();
+    a.sendmsg(b"xy", &[c1, c2, c3]).unwrap();
     // The control buffer holds one fd; the kernel truncates the rest and has
     // already duped the in-buffer fd into our table.
     let before = open_fd_count();
     let mut buf = buf();
-    let err = recvmsg(&b, &mut buf, 1, false).unwrap_err();
+    let err = b.recvmsg(&mut buf, 1, false).unwrap_err();
     assert_eq!(err.current_context(), &SyscallError::E2BIG("recvmsg"));
     // The error path must close the received fd: no net leak.
     assert_eq!(open_fd_count(), before);
@@ -120,13 +120,13 @@ fn test_recvmsg_large_payload_chunked() {
     // `sendmsg` queues the whole 128 KiB atomically; the kernel splits it
     // into fragments, so `recvmsg` returns them one per call (sized by the
     // kernel, not by the read buffer). The fd rides the first fragment.
-    sendmsg(&a, &payload, &[c]).unwrap();
+    a.sendmsg(&payload, &[c]).unwrap();
 
     let mut got = Vec::new();
     let mut first = true;
     loop {
         let mut buf = buf();
-        let msg = match recvmsg(&b, &mut buf, if first { 1 } else { 0 }, false) {
+        let msg = match b.recvmsg(&mut buf, if first { 1 } else { 0 }, false) {
             Ok(m) => m,
             // All data was queued before the first read: EAGAIN ends the stream.
             Err(e) if matches!(e.current_context(), SyscallError::EAGAIN(_)) => break,
@@ -148,9 +148,9 @@ fn test_recvmsg_creds() {
     // SO_PASSCRED is a receiver-side option: enable it on the reading end.
     let (a, b) = socketpair().unwrap();
     b.set_passcred().unwrap();
-    sendmsg(&a, b"cred", &[]).unwrap();
+    a.sendmsg(b"cred", &[]).unwrap();
     let mut buf = buf();
-    let msg = recvmsg(&b, &mut buf, 0, true).unwrap();
+    let msg = b.recvmsg(&mut buf, 0, true).unwrap();
     assert_eq!(&buf[..msg.payload_len], b"cred");
     let Some((pid, uid, gid)) = msg.cred else {
         panic!("expected a SCM_CREDENTIALS cmsg");
@@ -166,9 +166,9 @@ fn test_recvmsg_creds() {
 fn test_recvmsg_cred_requested_but_not_enabled() {
     // No SO_PASSCRED: no ucred cmsg arrives, `cred` stays None, no error.
     let (a, b) = socketpair().unwrap();
-    sendmsg(&a, b"no-cred", &[]).unwrap();
+    a.sendmsg(b"no-cred", &[]).unwrap();
     let mut buf = buf();
-    let msg = recvmsg(&b, &mut buf, 0, true).unwrap();
+    let msg = b.recvmsg(&mut buf, 0, true).unwrap();
     assert!(msg.cred.is_none());
 }
 
@@ -179,9 +179,9 @@ fn test_recvmsg_ctrunc_on_unreserved_cred_cmsg() {
     // sets MSG_CTRUNC, which the wrapper surfaces as E2BIG.
     let (a, b) = socketpair().unwrap();
     b.set_passcred().unwrap();
-    sendmsg(&a, b"skip-cred", &[]).unwrap();
+    a.sendmsg(b"skip-cred", &[]).unwrap();
     let mut buf = buf();
-    let err = recvmsg(&b, &mut buf, 0, false).unwrap_err();
+    let err = b.recvmsg(&mut buf, 0, false).unwrap_err();
     assert_eq!(err.current_context(), &SyscallError::E2BIG("recvmsg"));
 }
 
@@ -193,9 +193,9 @@ fn test_recvmsg_creds_with_fd() {
     let (a, b) = socketpair().unwrap();
     let (c, peer) = socketpair().unwrap();
     b.set_passcred().unwrap();
-    sendmsg(&a, b"cf", &[c]).unwrap();
+    a.sendmsg(b"cf", &[c]).unwrap();
     let mut buf = buf();
-    let msg = recvmsg(&b, &mut buf, 1, true).unwrap();
+    let msg = b.recvmsg(&mut buf, 1, true).unwrap();
     assert_eq!(&buf[..msg.payload_len], b"cf");
     assert_eq!(msg.fds.len(), 1);
     msg.fds[0].write(b"q").unwrap();
@@ -222,9 +222,9 @@ fn test_recvmsg_max_fds() {
         let (c, _peer) = socketpair().unwrap();
         fds.push(c);
     }
-    sendmsg(&a, b"m", &fds).unwrap();
+    a.sendmsg(b"m", &fds).unwrap();
     let mut buf = buf();
-    let msg = recvmsg(&b, &mut buf, 64, false).unwrap();
+    let msg = b.recvmsg(&mut buf, 64, false).unwrap();
     assert_eq!(&buf[..msg.payload_len], b"m");
     assert_eq!(msg.fds.len(), 64);
 }
@@ -257,7 +257,7 @@ fn test_sendmsg_retries_eagain_until_fully_sent() {
         let mut fd_frags = 0usize;
         loop {
             let mut buf = buf();
-            let msg = match recvmsg(&b, &mut buf, 4, false) {
+            let msg = match b.recvmsg(&mut buf, 4, false) {
                 Ok(m) => m,
                 Err(e) if matches!(e.current_context(), SyscallError::EAGAIN(_)) => {
                     std::thread::yield_now();
@@ -277,7 +277,7 @@ fn test_sendmsg_retries_eagain_until_fully_sent() {
     });
     // Let the reader start draining before the (blocking) send.
     std::thread::sleep(std::time::Duration::from_millis(50));
-    sendmsg(&a, &payload, &[c]).unwrap();
+    a.sendmsg(&payload, &[c]).unwrap();
     let (got, fd_frags) = reader.join().unwrap();
     assert_eq!(got, payload);
     assert_eq!(fd_frags, 1);

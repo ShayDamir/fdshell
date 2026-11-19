@@ -1,3 +1,5 @@
+// mutants: -C --test -C poll -- -E 'binary(poll)'
+
 use crate::cvt;
 
 /// Poll event bits, mirroring the kernel `pollfd.events`.
@@ -29,6 +31,11 @@ impl PollFd {
 
 /// Poll a set of descriptors for up to `timeout_ms` (`-1` blocks indefinitely).
 /// Returns the number of descriptors with non-zero `revents`, or `0` on timeout.
+///
+/// Stays a free function (task #601): its receiver is the whole *set*, and an
+/// inherent impl on `[PollFd]` is E0390 — a method on one `PollFd` cannot poll
+/// the others (see LESSONS: "A method can only be added to a type this crate
+/// defines").
 pub fn poll(fds: &mut [PollFd], timeout_ms: i32) -> Result<usize, crate::SyscallError> {
     // SAFETY: `PollFd` is `#[repr(C)]` with the exact field layout of `libc::pollfd`
     // (c_int, c_short, c_short on x86_64); `fds` is a valid mutable slice and

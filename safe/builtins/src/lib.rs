@@ -4,6 +4,11 @@
 
 extern crate alloc;
 
+// The per-builtin `X_exec(&parse::XConfig, ..)` entry points stay free functions
+// (task #601): each has exactly one caller — the `child/delegated.rs` dispatch
+// table — so the family is a single-caller shape, not a reusable method on one
+// builtin's parse type. `argparse.rs` records the `&CStr`-receiver half.
+
 pub mod argparse;
 pub mod copy_file_range;
 pub mod error;

@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C pipeline -- -E 'test(/^pipeline::/) | binary(pipeline)'
+
 mod child;
 mod reap;
 use alloc::vec::Vec;
@@ -43,8 +45,7 @@ pub fn launch_pipeline(
     let mut children: Vec<(sys::Pid, sys::LocalFd)> = Vec::with_capacity(n);
 
     for i in 0..n {
-        let (child_pid, pidfd_opt) =
-            sys::fork_pidfd::fork_pidfd_cell(cell).change_context(PipelineError::Pipeline)?;
+        let (child_pid, pidfd_opt) = cell.fork_pidfd().change_context(PipelineError::Pipeline)?;
         match pidfd_opt {
             None => {
                 match child::run_child(i, &pipes, &mut capture_pairs, &children, stages, envs, cell)

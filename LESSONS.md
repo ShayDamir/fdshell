@@ -138,11 +138,11 @@ Two more classes join this adjudication. **Command-substitution output** is an
 ingestion point too, and it does answer a domain variant:
 `v=$(printf 'a\0b'); echo "$v"` reports `ResolveError::NulByte` — the
 *wording* naming a variable name while the NUL came from substituted data is a
-§4.7 wording fix for its own task, not a `Never`. And the
-**fork path is not an escape hatch** for the RefCell class: `fork_pidfd_cell`
-calls `reset_after_fork()` in the child, so a `ForkCellError` needs a borrow
-*held* across a nested borrow of the same cell — see LESSONS:
-"Never hold a ForkCell borrow across a recursive call that re-borrows".
+§4.7 wording fix for its own task, not a `Never`. And the **fork path is not
+an escape hatch** for the RefCell class: `ForkCell::fork_pidfd` calls
+`reset_after_fork()` in the child, so a `ForkCellError` needs a borrow *held*
+across a nested borrow of the same cell — see LESSONS: "Never hold a ForkCell
+borrow across a recursive call that re-borrows".
 
 Chore #529 adds two closure facts to this adjudication. A variant with
 **zero producers repo-wide** is the trivially-unreproducible case: no script
@@ -4959,7 +4959,7 @@ retry that swallows other statuses converts a real failure into a pass.
 naming. `bind(127.0.0.1:0)` gets a kernel-assigned free port — free *at
 assignment time*, so concurrent suite runs cannot collide, and the assignee
 never re-binds a port that is `TIME_WAIT` for itself — and
-`sys::net::getsockname` reads the port back off the socket the test captured
+`LocalFd::getsockname` reads the port back off the socket the test captured
 (its pins in `unsafe/sys/tests/sockets.rs`; the test shape is
 `listen_handler_addr_alias_sends_listening_socket`, which derived
 `30000 + pid % 10000` and failed once in 48 full-suite runs under
@@ -5052,8 +5052,8 @@ only `sigaction`), so `sys::signal::reset_sigpipe` does
 `sigaction(SIGPIPE, SIG_DFL)` **and** `sigprocmask(SIG_UNBLOCK, {SIGPIPE})`.
 
 Rule: the reset lives at the two boundaries where fdshell hands off to another
-program — the fork wrapper `fork_pidfd_cell` (the single choke point of all
-four shell fork sites: pipeline, launch, `$(…)`, `wait` arm) and the
+program — the fork wrapper `ForkCell::fork_pidfd` (the single choke point of
+all four shell fork sites: pipeline, launch, `$(…)`, `wait` arm) and the
 parent-side image replacement in `replacer/external` (which runs
 **in the shell process**, so `exec seq 1000000` with a closed stdout is
 signaled by SIGPIPE, as in bash). Per-site resets in
@@ -11619,6 +11619,16 @@ and a helper whose receiver is `sys`'s type stays a free function (or
 takes a local extension trait, when the call syntax earns its keep).
 `safe/fdshell/src/nest.rs::deeper` is such a helper; its own comment
 records the rejection.
+
+Inside the defining crate the same rule reads positively, and `sys` lives by
+it: a syscall whose receiver is one of the crate's own fd types is a method
+on that type — the fd-type files already spell it so (`fallocate`, `flock`,
+`dir_batch`, `set_passcred`), and task #601 moved the last fd-receiver
+syscalls (accept/listen/bind/connect/getsockname/sendmsg/recvmsg,
+timerfd_settime, `ForkCell::fork_pidfd`) into `impl` blocks. Two borders close
+the census: a receiver of a foreign type is E0116 (the half above), and a
+receiver that is a *slice* is E0390 — `poll(&mut [PollFd], ..)` cannot become
+a method on one `PollFd`, because an element cannot poll the set.
 
 ## A boundary comparison with an unproducible equality class is accepted-equivalent at that boundary
 

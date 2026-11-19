@@ -1,3 +1,5 @@
+// mutants: -C --lib -C --test -C pipeline -C --test -C sockets -C --test -C hash -- -E 'test(/^launch::/) | binary(pipeline) | binary(sockets) | binary(hash)'
+
 use core::fmt::Write;
 use error_stack::{Report, ResultExt};
 
@@ -36,7 +38,8 @@ pub fn launch(
             .change_context(crate::error::launch::LaunchError::CaptureSocket)?;
         (Some(cap), Some(ch))
     };
-    let (child_pid, pidfd_opt) = sys::fork_pidfd::fork_pidfd_cell(cell)
+    let (child_pid, pidfd_opt) = cell
+        .fork_pidfd()
         .change_context(crate::error::launch::LaunchError::Fork)?;
 
     match pidfd_opt {

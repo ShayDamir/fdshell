@@ -34,7 +34,7 @@ fn cell_normal_mut_borrow() {
 fn fork_pidfd_cell_child_mut_borrow() -> Result<(), SyscallError> {
     let cell = ForkCell::new(100);
 
-    let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd_cell(&cell)?;
+    let (ret, pidfd_opt) = cell.fork_pidfd()?;
     if ret.as_raw() == 0 {
         // Child: reset_after_fork should succeed, then borrow_mut.
         // SAFETY: we are in the forked child process -- exclusive ownership of
@@ -70,7 +70,7 @@ fn fork_pidfd_cell_with_active_borrows() -> Result<(), SyscallError> {
     // was non-zero before forking; its value doesn't survive the fork).
     let _parent_borrow = cell.borrow().unwrap();
 
-    let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd_cell(&cell)?;
+    let (ret, pidfd_opt) = cell.fork_pidfd()?;
     if ret.as_raw() == 0 {
         // Child: without reset_after_fork(), borrow_mut would fail because
         // SAFETY: we are in the forked child process -- exclusive ownership of
@@ -102,7 +102,7 @@ fn fork_pidfd_cell_with_active_borrows() -> Result<(), SyscallError> {
 fn fork_pidfd_cell_parent_uses_borrow() -> Result<(), SyscallError> {
     let cell = ForkCell::new(7);
 
-    let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd_cell(&cell)?;
+    let (ret, pidfd_opt) = cell.fork_pidfd()?;
     if ret.as_raw() == 0 {
         // SAFETY: we are in the forked child process -- exclusive ownership of
         // this copy of memory; calling reset_after_fork is safe.
@@ -132,7 +132,7 @@ fn fork_pidfd_cell_parent_uses_borrow() -> Result<(), SyscallError> {
 fn fork_pidfd_cell_with_struct() -> Result<(), SyscallError> {
     let cell = ForkCell::new(MyStruct { a: 1, b: "hello" });
 
-    let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd_cell(&cell)?;
+    let (ret, pidfd_opt) = cell.fork_pidfd()?;
     if ret.as_raw() == 0 {
         // SAFETY: we are in the forked child process -- exclusive ownership of
         // this copy of memory; calling reset_after_fork is safe.
@@ -168,7 +168,7 @@ fn fork_pidfd_cell_preserves_parent_borrow_state() -> Result<(), SyscallError> {
     let _parent_borrow = cell.borrow().unwrap();
 
     // Fork — the parent's borrow count should remain 1.
-    let (ret, pidfd_opt) = sys::fork_pidfd::fork_pidfd_cell(&cell)?;
+    let (ret, pidfd_opt) = cell.fork_pidfd()?;
     if ret.as_raw() == 0 {
         // Child: reset and exit.
         // SAFETY: we are in the forked child process -- exclusive ownership of

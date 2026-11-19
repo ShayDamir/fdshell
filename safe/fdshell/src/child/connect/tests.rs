@@ -109,8 +109,8 @@ fn connect_handler_sends_connected_abstract_socket() {
     // The listener is built by the test (as `listen/tests.rs` does); the
     // handler's socket must connect to it.
     let listener = sys::net::socket(sys::net::AF_UNIX, sys::net::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_abstract(&listener, cstr(&n)).unwrap();
-    sys::net::listen(&listener, 1).unwrap();
+    listener.bind_uds_abstract(cstr(&n)).unwrap();
+    listener.listen(1).unwrap();
     let (state, receiver) = capture_state();
     with_refs(&[&format!("@{n}")], |refs| {
         assert_eq!(
@@ -120,7 +120,7 @@ fn connect_handler_sends_connected_abstract_socket() {
     });
     let (fd, tag) = recv(&receiver);
     assert_eq!(tag, b"connect");
-    let conn = sys::net::accept(&listener).unwrap();
+    let conn = listener.accept().unwrap();
     // A byte round-trip proves the captured fd is connected, not just open.
     assert_eq!(fd.write(b"hi\n").unwrap(), 3);
     let mut buf = [0u8; 3];
@@ -133,7 +133,7 @@ fn connect_handler_dgram_sends_connected_socket() {
     let n = name("dgram");
     // A bound dgram socket is the peer (no `listen` for datagrams).
     let listener = sys::net::socket(sys::net::AF_UNIX, sys::net::SOCK_DGRAM).unwrap();
-    sys::net::bind_uds_abstract(&listener, cstr(&n)).unwrap();
+    listener.bind_uds_abstract(cstr(&n)).unwrap();
     let (state, receiver) = capture_state();
     with_refs(&["--type", "dgram", &format!("@{n}")], |refs| {
         assert_eq!(

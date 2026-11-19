@@ -1,3 +1,5 @@
+// mutants: -C --test -C net -C --test -C shellfd -- -E 'binary(net) | binary(shellfd)'
+
 mod accept;
 mod addr;
 mod bind;
@@ -9,14 +11,9 @@ mod recvmsg;
 mod sendmsg;
 mod socket;
 
-pub use accept::accept;
-pub use bind::{bind_inet, bind_uds_abstract, bind_uds_path};
 pub use cmsg::MAX_FDS;
-pub use connect::{connect_inet, connect_uds_abstract, connect_uds_path};
-pub use getsockname::{SockName, getsockname};
-pub use listen::listen;
-pub use recvmsg::{Msg, recvmsg};
-pub use sendmsg::sendmsg;
+pub use getsockname::SockName;
+pub use recvmsg::Msg;
 pub use socket::socket;
 
 pub use libc::{AF_INET, AF_UNIX, SOCK_DGRAM, SOCK_STREAM};

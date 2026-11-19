@@ -26,7 +26,7 @@ fn create_accepts_nonblock() {
 fn settime_arms_the_timer() {
     let fd = timerfd::timerfd_create(0).unwrap();
     // A stub returning `Ok(())` without arming would leave the fd unreadable.
-    timerfd::timerfd_settime(&fd, (0, 10_000_000), (0, 0)).unwrap();
+    fd.timerfd_settime((0, 10_000_000), (0, 0)).unwrap();
     let mut pfd = [sys::poll::PollFd::new(fd.as_raw(), sys::poll::POLLIN)];
     let n = sys::poll::poll(&mut pfd, 2000).unwrap();
     assert_eq!(n, 1);
@@ -38,6 +38,6 @@ fn settime_arms_the_timer() {
 fn settime_rejects_bad_nsecs() {
     let fd = timerfd::timerfd_create(0).unwrap();
     // `tv_nsec >= 1e9` is out of range for the kernel.
-    let err = timerfd::timerfd_settime(&fd, (0, 1_000_000_000), (0, 0)).unwrap_err();
+    let err = fd.timerfd_settime((0, 1_000_000_000), (0, 0)).unwrap_err();
     assert!(matches!(err, sys::SyscallError::EINVAL(_)), "got {err}");
 }

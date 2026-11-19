@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C sockets -- -E 'test(/^child::connect::/) | binary(sockets)'
 //! `connect [--type stream|dgram] ADDRESS` — create a socket and connect it
 //! to a peer address; the connected socket is captured into an fd var via
 //! `%>%var` (bounded form `%>%array[N]`, tagged form `%connect>%array[N]`).
@@ -30,15 +31,15 @@ pub(super) fn handle_connect(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
 /// Connect `fd` to the parsed `addr` (the peer endpoint).
 pub(super) fn connect_socket(fd: &LocalFd, addr: &Address) -> Result<(), Report<BuiltinError>> {
     match addr {
-        Address::UdsPath(p) => {
-            sys::net::connect_uds_path(fd, p.export()).change_context(BuiltinError::Syscall)
-        }
-        Address::UdsAbstract(n) => {
-            sys::net::connect_uds_abstract(fd, n.export()).change_context(BuiltinError::Syscall)
-        }
-        Address::Inet { addr, port } => {
-            sys::net::connect_inet(fd, addr.export(), *port).change_context(BuiltinError::Syscall)
-        }
+        Address::UdsPath(p) => fd
+            .connect_uds_path(p.export())
+            .change_context(BuiltinError::Syscall),
+        Address::UdsAbstract(n) => fd
+            .connect_uds_abstract(n.export())
+            .change_context(BuiltinError::Syscall),
+        Address::Inet { addr, port } => fd
+            .connect_inet(addr.export(), *port)
+            .change_context(BuiltinError::Syscall),
     }
 }
 

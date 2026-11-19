@@ -783,12 +783,14 @@ fn connect_and_bind_in_one_script_dgram() {
 fn connect_to_script_client_from_test_process() {
     let n = uniq("xproc");
     let listener = sys::net::socket(sys::net::AF_UNIX, sys::net::SOCK_STREAM).unwrap();
-    sys::net::bind_uds_abstract(&listener, std::ffi::CString::new(n.as_str()).unwrap()).unwrap();
-    sys::net::listen(&listener, 1).unwrap();
+    listener
+        .bind_uds_abstract(std::ffi::CString::new(n.as_str()).unwrap())
+        .unwrap();
+    listener.listen(1).unwrap();
     let (out, err, code) = run(&format!("builtin connect @{n} %>%c; printf \"hi\\n\" >%c"));
     assert_eq!(code, 0, "stderr={err:?}");
     assert!(out.is_empty(), "stdout={out:?}");
-    let conn = sys::net::accept(&listener).unwrap();
+    let conn = listener.accept().unwrap();
     let mut buf = [0u8; 3];
     let mut got = 0;
     while got < buf.len() {

@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C recvmsg -- -E 'test(/^intercept::recvmsg/) | binary(recvmsg)'
 //! `recvmsg` socket resolution and error mapping.
 
 use error_stack::{Report, ResultExt};
@@ -43,7 +44,7 @@ pub(super) fn origin(sock: &ShortCStr) -> Origin {
     }
 }
 
-/// Map a `sys::net::recvmsg` failure to a `CmdError`, keeping the chain.
+/// Map a `LocalFd::recvmsg` failure to a `CmdError`, keeping the chain.
 pub(super) fn map_recv_error(e: Report<SyscallError>) -> Report<CmdError> {
     let cmd = match e.current_context() {
         SyscallError::E2BIG("recvmsg") => CmdError::RecvmsgTooManyFds,

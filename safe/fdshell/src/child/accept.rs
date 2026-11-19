@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C sockets -- -E 'test(/^child::accept::/) | binary(sockets)'
 //! `accept %fd` — blocking accept on a listening fd var; the accepted
 //! connection is captured into a fd var via `%>%var` (bounded form
 //! `%>%array[N]`).
@@ -21,7 +22,7 @@ pub(super) fn handle_accept(ctx: &Ctx) -> Result<i32, Report<BuiltinError>> {
     let var = var_arg(ctx.args)?;
     no_extra(ctx.refs.len(), 1)?;
     let found = ctx.state.fds.get(&var).ok_or(BuiltinError::FdVarNotFound)?;
-    let conn = sys::net::accept(&found.fd).change_context(BuiltinError::Syscall)?;
+    let conn = found.fd.accept().change_context(BuiltinError::Syscall)?;
     let sock = shell_sock(ctx)?;
     sock.send_fd(&conn, c"accept")
         .change_context(BuiltinError::SendFdFailed)?;
