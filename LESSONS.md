@@ -800,8 +800,8 @@ event and nothing past it (`safe/fdshell/tests/repl.rs::tally`,
 non-interactive shell drops `PS1` from its child's environment, so a row that
 pins an **inherited** variable sets it after the shell:
 `safe/fdshell/tests/repl.rs::an_inherited_env_value_reaches_the_prompt` runs
-`script -qec "env PS1=… <bin>"`, because `script` may run the command through a
-shell and the direct-exec form then measures the shell's own startup
+`script -qec "env PS1=… <bin>"`, because `script` may run the command through
+a shell and the direct-exec form then measures the shell's own startup
 environment.
 
 ## `cargo mutants` runs only the mutated package's own tests unless `--test-workspace true`
@@ -857,13 +857,14 @@ reproduce — children inherit the low pipe-fd numbers, so a clone never lands
 on a file target.
 
 **Saving a target fd is the same rule on the save side, `dup_cloexec` included.**
-It returns the **lowest** free fd, which can be a hole below a later target; the next
-`dup2` (e.g. `2>&1`) closes its target fd and clobbers the saved copy, so the restore
-resurrects the wrong fd. The fix is `try_dup_above(max_target + 1)`, the
-`resolve_redirects`' `min_fd` rule above. A closed target saves as `None`. Since task
-**#184** the minimum is `max(max_target + 1, 10)`: the floor swallows every target
-below fd 10, so the fold is only observable for a command that names an fd at or above
-it, and the pin for the fold is
+It returns the **lowest** free fd, which can be a hole below a later target;
+the next `dup2` (e.g. `2>&1`) closes its target fd and clobbers the saved
+copy, so the restore resurrects the wrong fd. The fix is
+`try_dup_above(max_target + 1)`, the `resolve_redirects`' `min_fd` rule above.
+A closed target saves as `None`. Since task **#184** the minimum is
+`max(max_target + 1, 10)`: the floor swallows every target below fd 10, so the
+fold is only observable for a command that names an fd at or above it, and the
+pin for the fold is
 `redirect/scope/tests.rs::saved_copy_above_the_floor_survives_a_lower_target_dup2`
 (it fills the table below the floor with its own opens, so the hole the later
 `dup2` closes is the lowest free fd); the neighbouring
@@ -1165,10 +1166,10 @@ matrix), `…::brace_expanded_redirect_operand_parity_rows` (the kept
 divergences — `>{,zz}`, `cat {3,4}>f`, the unopened preceding `out`, the
 `<&word` rows #370 owns),
 `…::ambiguous_redirect_fails_the_command_and_continues` (the guard's report
-now fails only the command — bash parity, task #179). Coverage records the guard's
-`span.get(off..)`/`ShortCStr::from_vec` and `operand_offset`'s in-range
-slicing `?`s as **unreachable by construction** (a raw span is never shorter
-than its quote-stripped text; source bytes are NUL-free).
+now fails only the command — bash parity, task #179). Coverage records the
+guard's `span.get(off..)`/`ShortCStr::from_vec` and `operand_offset`'s
+in-range slicing `?`s as **unreachable by construction** (a raw span is never
+shorter than its quote-stripped text; source bytes are NUL-free).
 
 ## `literal_indices`: the pinned pattern tokens can't match the searched needles — delete an operator that restates that fact
 In `parse/case_block/literal.rs`, each clause's `)` is pinned by the
@@ -4372,31 +4373,35 @@ as `let _ =` (the handler's report is the actionable error). Pins, all through
 must land on the restored target, so a forward restore leaves the loser's file
 holding that write).
 
-**The saved copy sits above the range a script can name (fd >= 10, as bash's save
-does), so the parent-level restore failure is unconstructible: the copy is
-unreachable.** Task **#184** floored every fd the shell allocates for itself — the
-saved copies, the re-homed opens and the source clones — at fd 10. Before it, target
-fd 1's copy landed at **fd 6** (`fcntl(1, F_DUPFD_CLOEXEC, 2) = 6`; nested scopes
-landed 6 then 7), inside the script-visible range, and a body closed it with
-`exec 6>&-`, so the parent's `scope.restore()?` failed: rc 1, `redirection failed` +
-`Bad file descriptor` (errno `EBADF`'s standard description), the two-context report
-with **no** `failed to close redirection target fd N` middle frame. Pins:
-`run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command` (the copy fd
-measured by opening the same scope once, so it is the proof of the mechanism, not of a
-number), `tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call`
-(fd 6 closed in the child's start state: the close now fails at the `exec`'s **own**
-arm — the report gains the middle frame — the restore succeeds, the shell continues
-and the next command's stdout works; bash 5.3.9 runs it silently at rc 0, and the
-close-of-an-already-closed-fd rule that decides the message is **#613**'s) and its
-floor twin `tests/redirect_scope.rs::body_that_closes_the_saved_copy_above_the_floor_fails_the_restore`
-(with fds 3-9 closed in the child the open pass takes fd 10, the source clone 11 and
-the saved copy 12, so `exec 12>&-` closes the copy and the restore fails). Know the
-distinction a fd sweep misses: `exec 4>&-`, `5>&-` and `7..11>&-` also exit rc 1, but
-they fail at the `exec`'s **own** close (the report gains the middle
-`failed to close redirection target fd N` frame), not at the restore — rc 1 alone does
-not identify the restore arm. The shell's `-c` fd table is `0,1,2,3` plus whatever the
-harness left above it (the original strace saw `8,9`), not "0-2 plus its own CLOEXEC
-fds" — which is why fd 6 was nameable, and why the floor is 10.
+**The saved copy sits above the range a script can name (fd >= 10, as bash's
+save does), so the parent-level restore failure is unconstructible: the copy
+is unreachable.** Task **#184** floored every fd the shell allocates for
+itself — the saved copies, the re-homed opens and the source clones — at fd
+10. Before it, target fd 1's copy landed at **fd 6**
+(`fcntl(1, F_DUPFD_CLOEXEC, 2) = 6`; nested scopes landed 6 then 7), inside
+the script-visible range, and a body closed it with `exec 6>&-`, so the
+parent's `scope.restore()?` failed: rc 1, `redirection failed` +
+`Bad file descriptor` (errno `EBADF`'s standard description), the two-context
+report with **no** `failed to close redirection target fd N` middle frame.
+Pins: `run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command`
+(the copy fd measured by opening the same scope once, so it is the proof of
+the mechanism, not of a number),
+`tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call` (fd
+6 closed in the child's start state: the close now fails at the `exec`'s
+**own** arm — the report gains the middle frame — the restore succeeds, the
+shell continues and the next command's stdout works; bash 5.3.9 runs it
+silently at rc 0, and the close-of-an-already-closed-fd rule that decides the
+message is **#613**'s) and its floor twin
+`tests/redirect_scope.rs::body_that_closes_the_saved_copy_above_the_floor_fails_the_restore`
+(with fds 3-9 closed in the child the open pass takes fd 10, the source clone
+11 and the saved copy 12, so `exec 12>&-` closes the copy and the restore
+fails). Know the distinction a fd sweep misses: `exec 4>&-`, `5>&-` and
+`7..11>&-` also exit rc 1, but they fail at the `exec`'s **own** close (the
+report gains the middle `failed to close redirection target fd N` frame), not
+at the restore — rc 1 alone does not identify the restore arm. The shell's
+`-c` fd table is `0,1,2,3` plus whatever the harness left above it (the
+original strace saw `8,9`), not "0-2 plus its own CLOEXEC fds" — which is why
+fd 6 was nameable, and why the floor is 10.
 
 ## A test that hand-copies the implementation pins the copy, not the code
 Four `redirect/scope/tests.rs` pins copied `Scope::restore`'s loop by hand
@@ -8429,24 +8434,26 @@ command-list terminator and keep it in a body slice, where the body's own
 `run_script` scan creates the job; see the #354 entry below.
 
 Task #588 fixed the **order** of that target list: the word being scanned wins
-the tie with the buffered runs, and `has_target` and `mark` must ask in the same
-order. The word between a `;` and the `&` **is** the run the `&` faces — bash's
-`async_list` target — so `echo a; echo b & echo c` prints `a`, `b`, `c` at rc 0
-(measured 5.3.9), and so does `echo a; echo b &`. The `sep_since_run` gate
-answers only for a `&` with **no word of its own** (`echo a ; & b` — bash's
-rc 2, which the preflight mirrors); gating the pending word on it refused a
-shape bash accepts, and `mark` marking runs first would background `echo a` and
-silently lose `echo b`. The tie (runs non-empty **and** pending non-empty) is
-reachable only through a `;`-family separator — `&&` and `|` are word bytes at
-scan time — so the order is the whole fix, and the flush rule above (the `&`
-terminates only the list since the previous `&`) still owns the rest. Pins:
+the tie with the buffered runs, and `has_target` and `mark` must ask in the
+same order. The word between a `;` and the `&` **is** the run the `&` faces —
+bash's `async_list` target — so `echo a; echo b & echo c` prints `a`, `b`, `c`
+at rc 0 (measured 5.3.9), and so does `echo a; echo b &`. The `sep_since_run`
+gate answers only for a `&` with **no word of its own** (`echo a ; & b` —
+bash's rc 2, which the preflight mirrors); gating the pending word on it
+refused a shape bash accepts, and `mark` marking runs first would background
+`echo a` and silently lose `echo b`. The tie (runs non-empty **and** pending
+non-empty) is reachable only through a `;`-family separator — `&&` and `|` are
+word bytes at scan time — so the order is the whole fix, and the flush rule
+above (the `&` terminates only the list since the previous `&`) still owns the
+rest. Pins:
 `segment/bg/split/tests.rs::the_pending_word_wins_the_tie_with_a_sep_closed_buffered_run`
-and `segment/bg/split/tests.rs::mark_pushes_the_pending_word_of_a_sep_closed_run`
-(one per reordered function, each kills the other order; the mark pin also pins
-`pending_off`), and
+and
+`segment/bg/split/tests.rs::mark_pushes_the_pending_word_of_a_sep_closed_run`
+(one per reordered function, each kills the other order; the mark pin also
+pins `pending_off`), and
 `tests/async.rs::the_word_between_a_separator_and_the_ampersand_is_the_job`
-(both bash-accepted rows pinned at the filesystem: one file per writer, `wait`,
-never stdout order).
+(both bash-accepted rows pinned at the filesystem: one file per writer,
+`wait`, never stdout order).
 
 ## POSIX `wait` with no operands returns 0, whatever the reaped jobs exited with
 POSIX 2.14 (`wait` with no arguments) is not "the last job's status":
@@ -8505,9 +8512,9 @@ shell dies with rc 101 where bash and fdshell print nothing at rc 0; in
 release the wrapped index finds no separator and the mutant is equivalent
 there. Pinned by
 `tests/glued_pair.rs::one_byte_operand_glued_to_the_pair_keeps_the_gate_behind_the_pair`
-(`:||echo b`, `:||echo b; echo after`, the `&&` twin and the spaced twins,
-all measured against bash 5.3.9): the row pins the shape, the dev profile
-does the killing — the pin fails on the applied mutant (task #577).
+(`:||echo b`, `:||echo b; echo after`, the `&&` twin and the spaced twins, all
+measured against bash 5.3.9): the row pins the shape, the dev profile does the
+killing — the pin fails on the applied mutant (task #577).
 
 ## A clamp the tail guard already enforces is a provably equivalent mutant: delete it, and pin a cursor rule with the rows that need it (task #326, round 3)
 
@@ -9593,12 +9600,13 @@ test is the one member that has since closed — it is bash parity through
 LESSONS: "A loop's own status is the body's last command"
 
 **Add the body rule at the call site, never re-derive the trim (task #302).**
-`f() { }` defined a function at rc 0 where bash stops at rc 2. The predicate the fix
-needed already had one owner: `parse/semi/trim.rs::block_body` trims the bracketing
-`;`s (`trim_body`, with the `&`/`& ;` carve-out of #354/#355) and `ensure!`s the slice
-non-empty with a caller-chosen variant; every block arm calls it, and the group
-(`parse/group_block.rs`) writes the same predicate as an inline `ensure!`. So the whole
-fix is `block_body(body_tokens, line, ParseError::FunctionEmptyBody)` in
+`f() { }` defined a function at rc 0 where bash stops at rc 2. The predicate
+the fix needed already had one owner: `parse/semi/trim.rs::block_body` trims
+the bracketing `;`s (`trim_body`, with the `&`/`& ;` carve-out of #354/#355)
+and `ensure!`s the slice non-empty with a caller-chosen variant; every block
+arm calls it, and the group (`parse/group_block.rs`) writes the same predicate
+as an inline `ensure!`. So the whole fix is
+`block_body(body_tokens, line, ParseError::FunctionEmptyBody)` in
 `function_block.rs::tokens_to_function` — both definer forms (`name() {`,
 `function name [()] {`) and the pipeline-stage path go through it.
 
@@ -11887,22 +11895,23 @@ prompt is cheap and a hostname change shows on the next prompt.
 
 A source that fails answers `None` — decision D2's "no value", drawn as the
 placeholder's own text. bash answers differently in the two places where that
-choice shows (measured): off a terminal, where it prints `tty` for
-`\l`, and in `\s \v \V`, where it prints its own identity (`bash-5.3$ `). Both are
+choice shows (measured): off a terminal, where it prints `tty` for `\l`, and
+in `\s \v \V`, where it prints its own identity (`bash-5.3$ `). Both are
 #623's wording; the pins record fdshell's answer, never bash's.
 
 A pty pin for a **machine-dependent** value computes its expectation from the
-same wrappers the provider calls — the test process and the child share the uid,
-the hostname and the password database — and hardcodes only the rules. Where even
-the wrappers cannot answer (the pts number differs per run), pin the **shape**: a
-non-empty run of ASCII digits inside the prompt's brackets, which the echoed
-input cannot produce. Blank lines are counted by neither `\!` nor `\#` (measured),
-so the counter moves once per non-blank input the REPL executes and the prompt
-draws the number the **next** command will get — `1` for the first one.
+same wrappers the provider calls — the test process and the child share the
+uid, the hostname and the password database — and hardcodes only the rules.
+Where even the wrappers cannot answer (the pts number differs per run), pin
+the **shape**: a non-empty run of ASCII digits inside the prompt's brackets,
+which the echoed input cannot produce. Blank lines are counted by neither `\!`
+nor `\#` (measured), so the counter moves once per non-blank input the REPL
+executes and the prompt draws the number the **next** command will get — `1`
+for the first one.
 
-Pins: `safe/fdshell/src/repl/prompt/value/shell/tests.rs` (the wrapper-computed
-answers — `\u`, `\h`/`\H`, `\$`, the off-terminal `None`, `\s` through its setter,
-`\v`/`\V`, `\j`, the two counters), and the pty rows
+Pins: `safe/fdshell/src/repl/prompt/value/shell/tests.rs` (the
+wrapper-computed answers — `\u`, `\h`/`\H`, `\$`, the off-terminal `None`,
+`\s` through its setter, `\v`/`\V`, `\j`, the two counters), and the pty rows
 `safe/fdshell/tests/repl.rs::the_identity_escapes_answer_their_wrappers`,
 `safe/fdshell/tests/repl.rs::the_tty_escape_draws_the_last_component_of_its_path`,
 `safe/fdshell/tests/repl.rs::the_command_counter_counts_commands_and_no_blank_line`,
@@ -11931,9 +11940,10 @@ strings through the provider's `fn()` clock field, and the end-to-end row pins
 shapes only, the posture LESSONS: "The value provider answers per escape, and a
 pty pin computes its expectation" already set for the machine's uid and hostname.
 
-Pins: `safe/fdshell/src/repl/prompt/value/clock/tests.rs` (the injected-instant
-table, UTC + C spelled), `safe/fdshell/src/repl/prompt/value/clock/civil/tests.rs`
-(the weekday anchor, the era and leap boundaries, 2038), and the pty row
+Pins: `safe/fdshell/src/repl/prompt/value/clock/tests.rs` (the
+injected-instant table, UTC + C spelled),
+`safe/fdshell/src/repl/prompt/value/clock/civil/tests.rs` (the weekday anchor,
+the era and leap boundaries, 2038), and the pty row
 `safe/fdshell/tests/repl.rs::the_clock_escapes_draw_their_shapes_on_a_terminal`.
 
 ## The prompt's directory display is provenance; the printed one is `getcwd` (task #619)
@@ -11973,35 +11983,37 @@ for its three state reads; say so in the module doc, do not re-litigate them.
 
 Pins: `safe/fdshell/src/repl/prompt/value/cwd/tests.rs`
 (`a_path_origin_draws_the_origin_itself`,
-`a_relative_origin_draws_what_was_typed`,
-`the_home_prefix_becomes_a_tilde`, `an_absent_home_drops_the_abbreviation`,
+`a_relative_origin_draws_what_was_typed`, `the_home_prefix_becomes_a_tilde`,
+`an_absent_home_drops_the_abbreviation`,
 `an_env_var_origin_answers_only_home`,
 `an_origin_without_a_path_answers_no_value`,
 `no_dirstack_means_no_plus_or_minus_prefix`) and the pty rows
 `safe/fdshell/tests/repl.rs::the_working_directory_escape_draws_the_provenance`,
 `safe/fdshell/tests/repl.rs::an_origin_without_a_path_draws_the_escape_text`,
 `safe/fdshell/tests/repl.rs::the_home_hop_draws_a_tilde`,
-`safe/fdshell/tests/repl.rs::unset_home_drops_the_abbreviation`, plus the D2-through-
-`resolve` row `safe/fdshell/src/repl/prompt/tests.rs`.
+`safe/fdshell/tests/repl.rs::unset_home_drops_the_abbreviation`, plus the
+D2-through- `resolve` row `safe/fdshell/src/repl/prompt/tests.rs`.
 
 ## `PROMPT_DIRTRIM`'s ellipsis has two thresholds (task #619)
 
-Measured against bash 5.3.9: the **plain** branch replaces the
-leading components when `components > n` and keeps the last `n` (11-component
-path: `n=1 → .../8`, `n=10 → .../opencode/pdt/1/…`, `n=11` and `n=0` draw the
-full path; the one-component-drop boundary **does** trim — 2 components at
+Measured against bash 5.3.9: the **plain** branch replaces the leading
+components when `components > n` and keeps the last `n` (11-component path:
+`n=1 → .../8`, `n=10 → .../opencode/pdt/1/…`, `n=11` and `n=0` draw the full
+path; the one-component-drop boundary **does** trim — 2 components at
 `n=1 → .../opencode`). The **`~` branch** shows the ellipsis only when the
-components after `~` exceed `n + 1` — at least two components must be droppable
-(rest 5: trims at `n=1..3`, not at `n=4`; rest 3: does not trim at `n=2`, does
-at `n=1`). Those two boundary rows are the proof that one unified rule cannot
-reproduce bash, so both branches are pinned; a "simplify to one rule"
-refactor changes behaviour. `$HOME` itself and `/` are never trimmed.
+components after `~` exceed `n + 1` — at least two components must be
+droppable (rest 5: trims at `n=1..3`, not at `n=4`; rest 3: does not trim at
+`n=2`, does at `n=1`). Those two boundary rows are the proof that one unified
+rule cannot reproduce bash, so both branches are pinned; a
+"simplify to one rule" refactor changes behaviour. `$HOME` itself and `/` are
+never trimmed.
 
-The value's parse is strict ASCII decimal with an optional `+`, the whole value
-(`0`/`abc`/`1e3`/`-1`/overflow → no trim; `+2` and `010` trim — bash's `010` is
-decimal, so fdshell agrees *by construction*, and `parse_base0_int` with its
-base detection is not the right helper here). bash tolerates surrounding
-whitespace and fdshell does not: pinned divergence, fdshell answers no trim.
+The value's parse is strict ASCII decimal with an optional `+`, the whole
+value (`0`/`abc`/`1e3`/`-1`/overflow → no trim; `+2` and `010` trim — bash's
+`010` is decimal, so fdshell agrees *by construction*, and `parse_base0_int`
+with its base detection is not the right helper here). bash tolerates
+surrounding whitespace and fdshell does not: pinned divergence, fdshell
+answers no trim.
 
 Pins: `safe/fdshell/src/repl/prompt/value/cwd/tests.rs`
 (`dirtrim_keeps_the_last_n_components`,
@@ -12012,17 +12024,18 @@ Pins: `safe/fdshell/src/repl/prompt/value/cwd/tests.rs`
 
 ## A prompt expansion acts only on the decoder's bytes, never on a provider's answer (task #620)
 
-Bash's PROMPTING order is **decode, then expand**, and fdshell's prompt pipeline
-follows it; the half that is fdshell's own is **which bytes the expansion stage
-may act on**, and it splits the bytes into two classes. A byte the decoder
-produced mechanically — three-octal `\044`, the fdshell-only hex `\x24`, the
-`\\` pair — is part of the literal run and **is** scanned, so `\044v ` expands. A
-byte a value **provider** answered with is pasted **verbatim and never scanned**:
-providers run after the decoder, their answers are data, and scanning them would
-re-trigger every value escape whose answer holds a `$` or a `~` (the pins whose
-answers contain them — `the_home_hop_draws_a_tilde`, the identity rows — are the
-guard). The decoder's own escape is not a trigger either: `\$v ` draws `$v `,
-which is exactly the row the two classes are read from.
+Bash's PROMPTING order is **decode, then expand**, and fdshell's prompt
+pipeline follows it; the half that is fdshell's own is **which bytes the
+expansion stage may act on**, and it splits the bytes into two classes. A byte
+the decoder produced mechanically — three-octal `\044`, the fdshell-only hex
+`\x24`, the `\\` pair — is part of the literal run and **is** scanned, so
+`\044v ` expands. A byte a value **provider** answered with is pasted
+**verbatim and never scanned**: providers run after the decoder, their answers
+are data, and scanning them would re-trigger every value escape whose answer
+holds a `$` or a `~` (the pins whose answers contain them —
+`the_home_hop_draws_a_tilde`, the identity rows — are the guard). The
+decoder's own escape is not a trigger either: `\$v ` draws `$v `, which is
+exactly the row the two classes are read from.
 
 Because the stage is a byte loop over a run, the run has **no quote spans and no
 mask bits** — quote characters are literal data and they do not protect (`"$v" `
@@ -12035,11 +12048,11 @@ grammar in the tree, after
 LESSONS: "The two escape decoders have different grammars, and the record keeps the boundary (task #616)";
 they are not interchangeable and neither is the word grammar's.
 
-The join mode is the surface's own data, and the measured prompt row
-(`IFS=,`, two positionals, `[${*}|${@}] ` → `[a,b|a b] `) is the
-`` `$@` ``-space-joins-`$*`-takes-the-`IFS`-byte one — `Join::Pattern`, whose
-existing rows say so; `Join::Message` (both space-join) is wrong on a non-empty
-`IFS`, and an empty `IFS` separates them too (`$*` concatenates).
+The join mode is the surface's own data, and the measured prompt row (`IFS=,`,
+two positionals, `[${*}|${@}] ` → `[a,b|a b] `) is the `` `$@`
+``-space-joins-`$*`-takes-the-`IFS`-byte one — `Join::Pattern`, whose existing
+rows say so; `Join::Message` (both space-join) is wrong on a non-empty `IFS`,
+and an empty `IFS` separates them too (`$*` concatenates).
 
 Pins: `safe/fdshell/src/repl/prompt/render/expand/tests.rs`
 (`the_backslash_quotes_only_the_special_set`,
@@ -12050,26 +12063,28 @@ Pins: `safe/fdshell/src/repl/prompt/render/expand/tests.rs`
 `safe/fdshell/src/repl/prompt/render/tests.rs::a_provider_answer_is_data_and_never_a_trigger`,
 `safe/fdshell/src/repl/prompt/tests.rs::a_decoded_dollar_is_a_live_trigger`,
 `safe/fdshell/src/repl/prompt/tests.rs::the_dollars_escape_answer_is_not_a_trigger`,
-and the pty rows `safe/fdshell/tests/repl.rs::a_hex_decoded_dollar_expands_in_a_prompt`,
+and the pty rows
+`safe/fdshell/tests/repl.rs::a_hex_decoded_dollar_expands_in_a_prompt`,
 `safe/fdshell/tests/repl.rs::the_prompt_positional_join_is_the_measured_one`.
 
 ## printf's `\x` digit cap and its rc-0 diagnostic are bash's, not ISO C's (task #602)
 
-ISO C's `printf(3)` leaves `\xhh` open-ended; bash 5.3.9 stops at **two** digits
-(measured `\x414` → `A4`, `\x1FF` → `0x1F F`) and takes **one** when only one is
-there (measured `\x4` → `0x04`, `\xd` → `0x0D`). The cap is a decision, so it
-lives in a named constant and a pin — a "follow the C standard" change moves it
-silently. Lowercase `\x` is the escape and uppercase `\X` is not (measured), so
-the dispatch arm is lowercase-only and pinned as a control.
+ISO C's `printf(3)` leaves `\xhh` open-ended; bash 5.3.9 stops at **two**
+digits (measured `\x414` → `A4`, `\x1FF` → `0x1F F`) and takes **one** when
+only one is there (measured `\x4` → `0x04`, `\xd` → `0x0D`). The cap is a
+decision, so it lives in a named constant and a pin — a
+"follow the C standard" change moves it silently. Lowercase `\x` is the escape
+and uppercase `\X` is not (measured), so the dispatch arm is lowercase-only
+and pinned as a control.
 
 A `\x` with no hex digit is no error either: bash writes
 `printf: missing hex digit for \x` **once per occurrence** — a reused format
-reports once per round, two `%b` arguments report twice — leaves the escape bytes
-literal and stays at **rc 0**. So the report must not travel the numeric-report
-path, which raises the sink's failure flag and with it the exit status. The
-scanner is shared by the format string and `%b`, so both surfaces move together
-(that is the point); `%s` never expands escapes, and that control is what pins
-which arm answers.
+reports once per round, two `%b` arguments report twice — leaves the escape
+bytes literal and stays at **rc 0**. So the report must not travel the
+numeric-report path, which raises the sink's failure flag and with it the exit
+status. The scanner is shared by the format string and `%b`, so both surfaces
+move together (that is the point); `%s` never expands escapes, and that
+control is what pins which arm answers.
 
 Pins: `safe/fdshell/src/child/printf/tests.rs` (`hex_escape_in_format`,
 `hex_escape_stops_at_two_digits`, `hex_escape_in_argument`,
