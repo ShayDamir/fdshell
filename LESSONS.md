@@ -4650,7 +4650,7 @@ task #97 work — the same mutant is missed in the `master` mutation run. Task
 #477 **resolved** the site by following the rule: the conjunct is deleted (the
 gate arm in `cond/boundary/gate.rs` now folds onto the callee's own answer),
 the hand-applied `==`→`!=` mutant was re-measured green on the whole
-`-p fdshell` suite (also by task #466), and the simplified arm keeps the pins
+`-p fdshell` suite, and the simplified arm keeps the pins
 that name the surviving behaviour — the region rows of
 `cond/tests.rs::gate_end_skips_the_gated_and_list_to_its_separator` and
 `cond/boundary/body/tests.rs`. Delete the outer test when the callee guards
@@ -5647,7 +5647,7 @@ at
    release `line.get(0..usize::MAX)` is `None`, so the anchor collapses to `0`
 and
     the window widens. `region_window_is_the_runs_own_physical_line` no longer
-    kills the helper's literal mutants `→ 0` and `→ 1` (re-measured);
+    kills the helper's literal mutants `→ 0` and `→ 1`;
     those are killed by
     `scan/heredoc/opaque/tests.rs::a_window_starting_on_the_claiming_line_blinds_the_terminator_chevron`
     and
@@ -5754,7 +5754,7 @@ only
 but
   no longer by
   `parse/cond_bodies/tests.rs::condition_bodies_window_is_bounded_to_the_conditions_line`
-  (it passes under both since #364; re-measured): the killers are the two pins
+  (it passes under both since #364): the killers are the two pins
   above plus the `cond/` region pins
 `a_body_position_region_is_the_bodys_own_data`,
   `block_regions_split_on_their_earliest_operator`,
@@ -7837,7 +7837,7 @@ some rows and the acceptance divergence on others. Every row that can end at
 the script*, never stall the suite, and a hang pin whose expectation flips is
 a disclosure, not a test-failure to be patched.
 
-Task #436 re-measured the same sweep and moved one arm of it. Where the closer
+Where the closer
 word stands in **command position** with the pairing **empty** — the scan's
 own top level — bash refuses the line at rc 2 and runs nothing, and fdshell
 reports it at its house rc 1 (`stray 'fi' — it closes no open block`, with a
@@ -11886,7 +11886,7 @@ prompt is cheap and a hostname change shows on the next prompt.
 
 A source that fails answers `None` — decision D2's "no value", drawn as the
 placeholder's own text. bash answers differently in the two places where that
-choice shows (measured 2026-11-18): off a terminal, where it prints `tty` for
+choice shows (measured): off a terminal, where it prints `tty` for
 `\l`, and in `\s \v \V`, where it prints its own identity (`bash-5.3$ `). Both are
 #623's wording; the pins record fdshell's answer, never bash's.
 
@@ -11910,7 +11910,7 @@ answers — `\u`, `\h`/`\H`, `\$`, the off-terminal `None`, `\s` through its set
 ## The clock escapes pin fdshell's own answer because bash's is machine-dependent (task #618)
 
 bash's five clock formats are what bash *does*, not what the PROMPTING table
-says (measured against bash 5.3.9 on 2026-11-18): `\d` is `%a %b %e` with no
+says (measured against bash 5.3.9): `\d` is `%a %b %e` with no
 time tail (the manual shows `+%a %b %e %H:%M:%S %Z %Y`), `\@` is `%I:%M %p`
 **with** the space (the manual says `%I:%M%p`), and `\t`/`\T` swap spellings
 against their manual lines — `\t` prints the 24-hour `%H:%M:%S`, `\T` the
@@ -11954,7 +11954,7 @@ first prompt of a session). bash draws its logical `$PWD` there; a `getcwd`
 fallback for those cases would buy parity at one syscall per prompt and is
 what the rule refuses. The divergence is recorded for #623.
 
-The display rules measured off bash 5.3.9 (2026-11-18) and pinned as fdshell's
+The display rules measured off bash 5.3.9 and pinned as fdshell's
 own answer: the `~` abbreviation applies when the path **is** `$HOME` or starts
 with `$HOME/`, through the shell's own `var_value` lookup (the same one `$HOME`
 and `~` use, LESSONS #282). A shell with no `HOME` has no abbreviation, and
@@ -11985,7 +11985,7 @@ Pins: `safe/fdshell/src/repl/prompt/value/cwd/tests.rs`
 
 ## `PROMPT_DIRTRIM`'s ellipsis has two thresholds (task #619)
 
-Measured against bash 5.3.9 (2026-11-18): the **plain** branch replaces the
+Measured against bash 5.3.9: the **plain** branch replaces the
 leading components when `components > n` and keeps the last `n` (11-component
 path: `n=1 → .../8`, `n=10 → .../opencode/pdt/1/…`, `n=11` and `n=0` draw the
 full path; the one-component-drop boundary **does** trim — 2 components at
