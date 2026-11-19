@@ -6146,9 +6146,10 @@ claims the body region, so a token-leading line now consumes its body and
 reports its operator word (`> <<EOF` + body → rc 1 `">" not found`, `; <<EOF`
 + body → rc 1, message `expected command before ';'` since task #487
 re-decided this row as the line-leading separator report (bash rc 2 names the
-`;` — the message matches exactly; the `">" not found` row stays #185's own))
-where master ran the body lines as commands; bash is a syntax error (rc 2) on
-all of them (task #185, `tests/heredoc.rs::heredoc_leading_*`).
+`;` — the message matches exactly; the `">" not found` row stayed #185's own
+(both closed)) where master ran the body lines as commands; bash is a syntax
+error (rc 2) on all of them (task #185,
+`tests/heredoc.rs::heredoc_leading_*`).
 
 ## The pipeline-pipe test is the tokenizer's pipe token — unquoted, unescaped, not `>|`-absorbed; the arith region stays opaque to the byte scan
 The leading-redirect-operator class of the byte/token `<<`-count divergence
