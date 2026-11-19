@@ -5958,7 +5958,7 @@ the
   `printf '%%s' x` prints `%s` at rc 0 and `printf "%s\n" hi` prints `hi` —
   pinned by `tests/printf.rs::printf_double_percent_with_bound_fd_name`
   and the quote-table rows in `tests/quotes.rs`. The two gate levels stay
-  distinct: the **word-level** raw-text gate `substitute.rs::has_trigger`
+   distinct: the **word-level** raw-text gate `substitute/surface.rs::has_trigger`
   must never read the mask (a masked-out trigger byte still enters the
   pipeline — `"$(echo ls)"` must expand), while the **arm-level** gate reads
   the mask bit; on the redirect-target surface the whole arm is off

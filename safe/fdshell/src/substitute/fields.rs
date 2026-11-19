@@ -47,7 +47,7 @@ pub(crate) fn word_fields(
     cache: &mut HashMap<ShortCStr, ExportedFd>,
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<(ShortCStr, Vec<MaskBit>)>, Report<ResolveError>> {
-    let fq = super::fully_quoted(mask);
+    let fq = super::surface::fully_quoted(mask);
     if word.eq_bytes(b"$@") || word.eq_bytes(b"$*") {
         // The fast path is the loop's own shape, so it takes the same cap: a
         // `$` whose quote region ends at the `$` starts no reference — bash

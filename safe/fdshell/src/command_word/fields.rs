@@ -23,7 +23,7 @@ use super::args::{consume, leading_args};
 /// command name (`echo`, `ls`, `cd`) borrowed — no allocation at all.
 pub(super) fn passes_through(word: &ShortCStr, mask: &[MaskBit]) -> bool {
     word.as_bytes().is_ok_and(|bytes| {
-        !crate::substitute::has_trigger(bytes, PercentArm::Fires)
+        !crate::substitute::surface::has_trigger(bytes, PercentArm::Fires)
             && !bytes.contains(&b'\\')
             && !crate::glob::has_unquoted_pattern(bytes, mask)
     })
@@ -47,7 +47,7 @@ pub(crate) fn fields(
     cell: &ForkCell<ShellState>,
 ) -> Result<Vec<ShortCStr>, Report<CmdError>> {
     let bytes = word.as_bytes().change_context(CmdError::Never)?;
-    if !crate::substitute::has_trigger(bytes, PercentArm::Fires) {
+    if !crate::substitute::surface::has_trigger(bytes, PercentArm::Fires) {
         let (folded, folded_mask) = fold_word(word, mask).change_context(CmdError::Never)?;
         return crate::glob::expand(&folded, &folded_mask, cell).change_context(CmdError::Resolve);
     }

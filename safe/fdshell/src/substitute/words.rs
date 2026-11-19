@@ -56,7 +56,7 @@ fn push_word(
     mask: &[MaskBit],
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<ResolveError>> {
-    if super::fully_quoted(mask) {
+    if super::surface::fully_quoted(mask) {
         result.push(word.clone());
         return Ok(());
     }

@@ -3973,7 +3973,7 @@ fn word_fields_are_the_pre_glob_step_of_substitute_args() {
         for (field, mask) in &fields {
             // `substitute_args::push_word`: a fully quoted field is kept
             // whole, any other field is pathname-expanded.
-            if super::fully_quoted(mask) {
+            if super::surface::fully_quoted(mask) {
                 want.push(field.clone());
                 continue;
             }

@@ -53,7 +53,7 @@ pub(super) fn resolve(
         return Err(Report::new(OpenRedirectError::Never));
     };
     let bytes = path.as_bytes().change_context(OpenRedirectError::Never)?;
-    if !crate::substitute::has_trigger(bytes, PercentArm::Off) {
+    if !crate::substitute::surface::has_trigger(bytes, PercentArm::Off) {
         return literal(path, mask, base, cell);
     }
     expand::target(path, mask, spans, *quoted, base, cache, cell)
