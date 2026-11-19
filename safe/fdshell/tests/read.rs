@@ -681,3 +681,192 @@ fn a_reassigned_stdin_loses_the_stale_buffer() {
     );
     assert_eq!(stdout(&out), "a=FIRST-1 b=SECOND-1\n", "script={script}");
 }
+
+// ---- task #610: a nameless `read` fills REPLY with the raw line ----
+
+// bash's extension over POSIX's ≥1-name rule. Every expectation below was
+// measured against bash 5.3.9 on this machine before being pinned: the raw line
+// (no edge trim, no field splitting), the EOF assignment of an empty REPLY at
+// status 1, and the explicit `read REPLY` name staying an ordinary, trimmed
+// target.
+
+/// [`run`] with the `build.rs` helper dir first on `PATH` (the
+/// `tests/getopts.rs::run` shape) so the script's `env_print` call resolves,
+/// and with `REPLY` removed from the harness environment so an absent row is
+/// the script's own doing.
+fn run_with_helper_path(dir: &std::path::Path, script: &str) -> Output {
+    let helper_dir = env!("ENV_PRINT_PATH")
+        .rsplit_once('/')
+        .map(|(d, _)| d)
+        .unwrap_or("/usr/bin");
+    let ambient = std::env::var("PATH").unwrap_or_default();
+    Command::new(BIN)
+        .current_dir(dir)
+        .args(["-c", script])
+        .env("PATH", format!("{helper_dir}:{ambient}"))
+        .env_remove("REPLY")
+        .output()
+        .unwrap()
+}
+
+/// No names: the raw line arrives whole, edges included (bash
+/// `rc=0 REPLY=[  a  b  ]`).
+#[test]
+fn no_names_assign_reply_the_raw_line() {
+    let dir = Scratch::new();
+    let script =
+        r#"printf '  a  b  \n' > in; exec < in; read; printf 'rc=%s REPLY=[%s]\n' "$?" "$REPLY""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "rc=0 REPLY=[  a  b  ]\n", "script={script}");
+}
+
+/// EOF with nothing read: bash **assigns** REPLY the empty value at status 1 —
+/// a named target stays fdshell's pinned divergence (unset), REPLY is assigned
+/// (bash `rc=1 REPLY=[]`).
+#[test]
+fn no_names_at_eof_clears_reply() {
+    let dir = Scratch::new();
+    let script = r#"REPLY=old; : > e; exec < e; read; printf 'rc=%s REPLY=[%s]\n' "$?" "$REPLY""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "rc=1 REPLY=[]\n", "script={script}");
+}
+
+/// The same EOF row under `set -u`: bash prints `[]` without an unbound report,
+/// because REPLY was assigned — the row pins the assignment, not the value
+/// (fdshell's `${NAME+word}` is not expanded, LESSONS, so the set-ness marker
+/// cannot be used at this level).
+#[test]
+fn set_u_reports_nothing_for_a_reply_cleared_at_eof() {
+    let dir = Scratch::new();
+    let script = r#"set -u; : > e; exec < e; read; printf '[%s]\n' "$REPLY""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "[]\n", "script={script}");
+}
+
+/// Flags-only forms take the same REPLY path (bash rows: `rc=0 REPLY=[a\nb]`,
+/// `rc=0 REPLY=[ab]`, `rc=0 REPLY=[ab]`), each after backslash processing,
+/// delimiter removal and the `-n`/`-d` stop — with no trim.
+#[test]
+fn a_flags_only_read_fills_reply() {
+    for (printf_body, read_part, want) in [
+        (r#""a\\\\nb\\n""#, "read -r", "rc=0 REPLY=[a\\nb]\n"),
+        (r#""abcdef\\n""#, "read -n 2", "rc=0 REPLY=[ab]\n"),
+        (r#""ab:cd\\n""#, "read -d :", "rc=0 REPLY=[ab]\n"),
+    ] {
+        let dir = Scratch::new();
+        let script = format!(
+            "printf {printf_body} > in; exec < in; {read_part}; printf 'rc=%s REPLY=[%s]\\n' \"$?\" \"$REPLY\""
+        );
+        let out = run(&dir, &script);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "script={script} stderr={}",
+            stderr(&out)
+        );
+        assert_eq!(stdout(&out), want, "script={script}");
+    }
+}
+
+/// An explicit `read REPLY` is an ordinary target — trimmed like any other
+/// (bash `rc=0 REPLY=[a  b]`), which is why "no names" must stay a distinct
+/// signal rather than a synthetic REPLY target.
+#[test]
+fn an_explicit_reply_name_is_trimmed_like_any_target() {
+    let dir = Scratch::new();
+    let script = r#"printf '  a  b  \n' > in; exec < in; read REPLY; printf 'rc=%s REPLY=[%s]\n' "$?" "$REPLY""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "rc=0 REPLY=[a  b]\n", "script={script}");
+}
+
+/// The multi-line `while read` through the REPLY path (also the putback buffer
+/// of task #609): three lines, all raw (bash rows `[line one]`…`[line three]`).
+#[test]
+fn while_read_fills_reply_for_every_line() {
+    let dir = Scratch::new();
+    let script = r#"printf 'line one\nline two\nline three\n' > in; exec < in; while read; do printf '[%s]\n' "$REPLY"; done"#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(
+        stdout(&out),
+        "[line one]\n[line two]\n[line three]\n",
+        "script={script}"
+    );
+}
+
+/// A newline-only line assigns REPLY the empty string at rc 0 in both shells.
+#[test]
+fn a_newline_only_line_assigns_an_empty_reply() {
+    let dir = Scratch::new();
+    let script = r#"printf '\n' > in; exec < in; read; printf 'rc=%s REPLY=[%s]\n' "$?" "$REPLY""#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "rc=0 REPLY=[]\n", "script={script}");
+}
+
+/// The env row mirroring `tests/getopts.rs`: REPLY is an ordinary variable —
+/// absent from the child environment by default, present after an ordinary
+/// `export` (bash agrees on both).
+#[test]
+fn reply_stays_out_of_the_child_environment() {
+    let dir = Scratch::new();
+    let script = r#"printf "x\\n" > in; exec < in; read; env_print"#;
+    let out = run_with_helper_path(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert!(
+        !stdout(&out).lines().any(|l| l.starts_with("REPLY=")),
+        "bash measures no REPLY row here: script={script}"
+    );
+
+    let script = r#"printf "x\\n" > in; exec < in; read; export REPLY; env_print"#;
+    let out = run_with_helper_path(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert!(
+        stdout(&out).lines().any(|l| l == "REPLY=x"),
+        "the ordinary export path exports, in bash too: script={script}"
+    );
+}
