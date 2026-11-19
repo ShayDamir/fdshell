@@ -1,24 +1,14 @@
 // mutants: -C --lib -C --test -C loops -C --test -C errexit -- -E 'test(/^loop_::/) | test(/^tests::run::/) | binary(loops) | binary(errexit)'
 
 use crate::loop_control::{AtLevel, LoopControl, at_level, in_loop};
-use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 
-use crate::cond::errexit;
+use crate::cond::{body_bytes, errexit};
 use crate::error::cmd::CmdError;
 use crate::parse::while_block::LoopBlock;
 use crate::run::failing;
 use crate::state::ShellState;
-use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
-
-/// The condition's heredoc bodies as byte vectors (for `run_cond_list`).
-fn body_bytes(bodies: &[ShortCStr]) -> Vec<Vec<u8>> {
-    bodies
-        .iter()
-        .filter_map(|b| b.as_bytes().ok().map(|bytes| bytes.to_vec()))
-        .collect()
-}
 
 pub(crate) fn run_loop(
     block: &LoopBlock,

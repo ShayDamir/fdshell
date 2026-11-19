@@ -1,4 +1,4 @@
-// mutants: -C --lib -C --test -C cond_blocks -C --test -C errexit -C --test -C set_opts -C --test -C group -C --test -C loops -- -E 'test(/^cond::/) | test(/^tests::run::/) | binary(errexit) | binary(cond_blocks) | binary(set_opts) | binary(group) | binary(loops)'
+// mutants: -C --lib -C --test -C cond_blocks -C --test -C errexit -C --test -C set_opts -C --test -C group -C --test -C loops -- -E 'test(/^cond::/) | test(/^tests::run::/) | test(/^loop_::/) | test(/^if_exec::/) | binary(errexit) | binary(cond_blocks) | binary(set_opts) | binary(group) | binary(loops)'
 
 pub(crate) mod list;
 pub(crate) use list::run_list;
@@ -16,6 +16,7 @@ use crate::state::ShellState;
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt};
 use sys::ScriptText;
+use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 /// The condition entry: the two parse-error pre-passes (bash parses the whole
@@ -64,6 +65,16 @@ pub(crate) fn run_cond_list(
         );
     }
     units::run_units(text, bodies, cell, background)
+}
+
+/// The condition's heredoc bodies as byte vectors (for [`run_cond_list`]),
+/// built by the `if`/`while`/`until` callers (`if_exec.rs`, `loop_.rs`) that
+/// own a condition's body list.
+pub(crate) fn body_bytes(bodies: &[ShortCStr]) -> Vec<Vec<u8>> {
+    bodies
+        .iter()
+        .filter_map(|b| b.as_bytes().ok().map(|bytes| bytes.to_vec()))
+        .collect()
 }
 
 #[cfg(test)]
