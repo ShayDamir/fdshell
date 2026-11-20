@@ -43,13 +43,14 @@ pub(super) fn run(
 
     // Which arm answers the name, decided once (bash's order: the forked table,
     // then a user function, then the intercepted table, then `PATH`) so that the
-    // trace below goes to the arm that runs it.
+    // trace below goes to the arm that runs it. Only a stage whose name is a user
+    // function looks a body up: a prefix answers `None` there, and a non-stage
+    // child has no stage text to run a body in (both arms below need it).
     let stage = stage_text.is_some();
-    let fn_body = if builtin || !stage {
-        None
-    } else {
-        crate::function_call::look_up(cmdline, cell)
-            .change_context(ChildProcessError::BorrowFailed)?
+    let fn_body = match (builtin, stage) {
+        (false, true) => crate::function_call::look_up(cmdline, cell)
+            .change_context(ChildProcessError::BorrowFailed)?,
+        _ => None,
     };
     let intercepts = child::intercepted::answers(&cmd.name, builtin, stage, &fn_body);
     // The intercept arm owns its trace: `intercept::try_intercept` prints the

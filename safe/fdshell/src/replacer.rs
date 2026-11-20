@@ -1,4 +1,4 @@
-// mutants: -C --test -C builtin_first -C --test -C command -- -E 'binary(builtin_first) | binary(command)'
+// mutants: -C --test -C test -- -E 'binary(test)'
 mod external;
 
 use crate::bytes::fold::fold_word;

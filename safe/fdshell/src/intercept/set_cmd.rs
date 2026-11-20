@@ -1,4 +1,4 @@
-// mutants: -C --test -C set_cmd -C --test -C set_opts -- -E 'binary(set_cmd) | binary(set_opts)'
+// mutants: -C --test -C set_cmd -C --test -C set_opts -C --test -C xtrace -- -E 'binary(set_cmd) | binary(set_opts) | binary(xtrace)'
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
