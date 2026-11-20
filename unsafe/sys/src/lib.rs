@@ -18,6 +18,8 @@ pub use shortcstr::{
     ExportedCStr, FloatParse, IntParse, NoNul, ShortCStr, ShortCStrError, UintParse,
 };
 pub use syscall_error::SyscallError;
+pub use tcgetattr::Termios;
+pub use tiocgwinsz::Winsize;
 pub use umask::UmaskError;
 
 pub use exit::exit;
@@ -99,6 +101,8 @@ pub mod stat;
 pub mod statx;
 pub mod syscall_error;
 pub mod syscall_error_from;
+pub mod tcgetattr;
 pub mod timerfd;
+pub mod tiocgwinsz;
 pub mod umask;
 pub mod unistd;
