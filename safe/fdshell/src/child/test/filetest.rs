@@ -3,6 +3,8 @@
 //! test (`-t`), permissions (`-r -w -x`), and the binary comparisons
 //! (`-nt -ot -ef -fdeq -fdne`).
 
+// mutants: -C --lib -C --test -C test -- -E 'test(/^child::test::/) | binary(test)'
+
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
@@ -34,7 +36,10 @@ pub(super) fn file_test(
     Ok(usize::from(!ok) as i32)
 }
 
-/// Binary file tests: `-nt -ot -ef -fdeq -fdne`.
+/// Binary file tests: `-nt -ot -ef -fdeq -fdne`. POSIX/bash existence rule: an
+/// existing operand beats a missing one for the operator that prefers the
+/// existing side (`-nt` wants the left, `-ot` the right); `-ef` and the
+/// fdshell `-fdeq`/`-fdne` extensions need both operands.
 pub(super) fn file_binary_test(
     lhs: &CStr,
     op: &[u8],
@@ -47,6 +52,8 @@ pub(super) fn file_binary_test(
     let r = stat_operand(rhs, rorig, state, true)?;
     let ok = match (l, r) {
         (Some(a), Some(b)) => binary_op(op, &a, &b)?,
+        (Some(_), None) => op == b"-nt",
+        (None, Some(_)) => op == b"-ot",
         _ => false,
     };
     Ok(usize::from(!ok) as i32)

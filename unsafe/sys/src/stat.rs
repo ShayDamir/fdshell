@@ -1,3 +1,4 @@
+// mutants: -C --test -C utimensat -C --test -C fallocate -C --test -C fchmod -C --test -C mkfifoat -- -E 'binary(utimensat) | binary(fallocate) | binary(fchmod) | binary(mkfifoat)'
 use crate::{ImportedFd, LocalFd};
 
 pub const S_IFMT: u32 = libc::S_IFMT;
@@ -15,6 +16,9 @@ pub const S_ISVTX: u32 = libc::S_ISVTX;
 // cross-crate integration test `safe/builtins/tests/openat2.rs` asserts
 // `assert_eq!(before, after)` while `sys` is compiled as a dependency (no test
 // cfg). All fields are primitives, so no trait-propagation concern.
+// `mtime`/`mtime_nsec` are the two halves of the same timestamp
+// (`st_mtime`/`st_mtime_nsec`); callers that order mtimes must compare both,
+// the kernel keeps nanoseconds.
 #[derive(PartialEq, Debug)]
 pub struct FileStat {
     pub ino: u64,
@@ -23,6 +27,7 @@ pub struct FileStat {
     pub rdev: u64,
     pub size: u64,
     pub mtime: i64,
+    pub mtime_nsec: i64,
 }
 
 fn to_filestat(raw: &libc::stat) -> FileStat {
@@ -33,6 +38,7 @@ fn to_filestat(raw: &libc::stat) -> FileStat {
         rdev: raw.st_rdev,
         size: raw.st_size as u64,
         mtime: raw.st_mtime,
+        mtime_nsec: raw.st_mtime_nsec,
     }
 }
 

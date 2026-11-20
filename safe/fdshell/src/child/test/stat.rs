@@ -1,3 +1,4 @@
+// mutants: -C --lib -C --test -C test -- -E 'test(/^child::test::/) | binary(test)'
 use crate::state::ShellState;
 use builtins::error::BuiltinError;
 use core::ffi::CStr;
@@ -34,15 +35,17 @@ pub(super) fn fd_var<'a>(orig: Option<&ShortCStr>, state: &'a ShellState) -> Opt
         .map(|var| &var.fd)
 }
 
-/// Binary comparison of two stat results (`-nt -ot -ef -fdeq -fdne`).
+/// Binary comparison of two stat results (`-nt -ot -ef -fdeq -fdne`). The
+/// mtime order compares `(sec, nsec)` lexicographically, like bash: the
+/// kernel keeps nanoseconds, so whole seconds alone are not enough.
 pub(super) fn binary_op(
     op: &[u8],
     l: &sys::stat::FileStat,
     r: &sys::stat::FileStat,
 ) -> Result<bool, Report<BuiltinError>> {
     Ok(match op {
-        b"-nt" => l.mtime > r.mtime,
-        b"-ot" => l.mtime < r.mtime,
+        b"-nt" => (l.mtime, l.mtime_nsec) > (r.mtime, r.mtime_nsec),
+        b"-ot" => (l.mtime, l.mtime_nsec) < (r.mtime, r.mtime_nsec),
         b"-ef" | b"-fdeq" => same_inode(l, r),
         b"-fdne" => !same_inode(l, r),
         _ => bail!(BuiltinError::Never),
