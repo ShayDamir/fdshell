@@ -381,6 +381,14 @@ script can name, as bash keeps its own bookkeeping. So a script cannot close one
 of the shell's own fds with `exec N>&-`: the redirections are always undone when
 the command ends.
 
+Closing a descriptor that is **not open** does nothing and succeeds (rc 0), and
+the run continues — bash's behaviour, and the reason there is nothing for
+`set -e` or a special builtin to abort on: the abort scope needs an error, and
+this is not one. The `N>&-` arm and the scope's restore agree on it, so
+`exec 4>&-`, `exec 4<&-` and a second close of the same fd are all silent; a
+close of a descriptor that **is** open really closes it, and the consequence of
+losing it (a failed read from the fd, a lost saved copy) is what gets reported.
+
 The target of `>` can also be `%var` (an fd variable), `/dev/fd/N` (the file
 that open fd `N` points at — the magic path is **opened** with the operator's
 flags as the redirection runs, so `> /dev/fd/1` truncates the file stdout is on

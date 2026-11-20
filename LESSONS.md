@@ -4373,35 +4373,49 @@ as `let _ =` (the handler's report is the actionable error). Pins, all through
 must land on the restored target, so a forward restore leaves the loser's file
 holding that write).
 
+**The apply arm and the restore arm agree: a close of a fd the process does not
+own is not an error.** `close(2)` answers `EBADF` for such a fd, the requested
+end state already holds, so there is nothing for the user to fix (§4.12) — bash
+calls `close(2)`, ignores that errno and continues, and `Redirect::export()`'s
+`Close` arm maps `EBADF` to success for the same reason. The other errnos keep
+the `CloseFd` chain: only a fd that *is* open answers `EIO`/`ENOSPC`/`EINTR`,
+and its close really lands, so what gets reported is the consequence (a failed
+read from the fd, a lost saved copy). Silence is the whole shape — `exec 4>&-`,
+`4<&-`, a double close, `set -e`, a special builtin — rc 0, no message, the run
+continues, because POSIX's special-builtin abort needs an error and there is
+none. Pins: `redirect/tests.rs::close_of_a_never_opened_fd_is_silent` and
+`close_of_an_open_fd_actually_closes_it` (the two unit arms),
+`tests/redirect_scope.rs::closing_a_never_opened_fd_is_silent` (every shape, its
+fds closed in the child's start state),
+`tests/redirect_scope.rs::a_body_that_closes_a_never_opened_fd_is_silent`,
+`tests/block_redirect.rs::a_body_that_closes_a_never_opened_fd_is_silent` and
+its `a_tail_that_closes_a_never_opened_fd_is_silent` (the call, block and group
+scopes), and the live-fd controls
+`tests/redirect_scope.rs::a_close_of_an_opened_fd_lands_and_the_next_command_reports`
+and `tests/fddup.rs::close_redirect_closes_fd_in_shell` (asserts the `fd 3 is
+not open` report: it must stay unsilenced).
+
 **The saved copy sits above the range a script can name (fd >= 10, as bash's
-save does), so the parent-level restore failure is unconstructible: the copy
-is unreachable.** Task **#184** floored every fd the shell allocates for
-itself — the saved copies, the re-homed opens and the source clones — at fd
-10. Before it, target fd 1's copy landed at **fd 6**
-(`fcntl(1, F_DUPFD_CLOEXEC, 2) = 6`; nested scopes landed 6 then 7), inside
-the script-visible range, and a body closed it with `exec 6>&-`, so the
-parent's `scope.restore()?` failed: rc 1, `redirection failed` +
-`Bad file descriptor` (errno `EBADF`'s standard description), the two-context
-report with **no** `failed to close redirection target fd N` middle frame.
-Pins: `run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command`
-(the copy fd measured by opening the same scope once, so it is the proof of
-the mechanism, not of a number),
-`tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call` (fd
-6 closed in the child's start state: the close now fails at the `exec`'s
-**own** arm — the report gains the middle frame — the restore succeeds, the
-shell continues and the next command's stdout works; bash 5.3.9 runs it
-silently at rc 0, and the close-of-an-already-closed-fd rule that decides the
-message is **#613**'s) and its floor twin
+save does), so the parent-level restore failure needs a fd at or above the
+floor.** Task **#184** floored every fd the shell allocates for itself — the
+saved copies, the re-homed opens and the source clones — at 10. A body that
+closes one of them: the close succeeds, the restore's `dup2` has lost its
+source, and the report is the two-context `redirection failed` +
+`Bad file descriptor` with **no** `failed to close redirection target fd N`
+middle frame, at rc 1. Pins:
+`run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command` (the
+copy fd measured by opening the same scope once, so it is the proof of the
+mechanism, not of a number),
+`redirect/scope/tests.rs::restore_of_a_lost_saved_copy_is_a_redirect_error`
+(the deterministic unit version) and
 `tests/redirect_scope.rs::body_that_closes_the_saved_copy_above_the_floor_fails_the_restore`
-(with fds 3-9 closed in the child the open pass takes fd 10, the source clone
-11 and the saved copy 12, so `exec 12>&-` closes the copy and the restore
-fails). Know the distinction a fd sweep misses: `exec 4>&-`, `5>&-` and
-`7..11>&-` also exit rc 1, but they fail at the `exec`'s **own** close (the
-report gains the middle `failed to close redirection target fd N` frame), not
-at the restore — rc 1 alone does not identify the restore arm. The shell's
-`-c` fd table is `0,1,2,3` plus whatever the harness left above it (the
-original strace saw `8,9`), not "0-2 plus its own CLOEXEC fds" — which is why
-fd 6 was nameable, and why the floor is 10.
+(with fds 3-9 closed in the child the open pass takes fd 10, the source clone 11
+and the saved copy 12, so `exec 12>&-` closes the copy and the restore fails).
+A fd sweep used to see rc 1 from `exec 4>&-`, `5>&-` and `7..11>&-`; those are
+silence now, so rc 1 names only this arm or a close of a live fd (the middle
+frame present). The shell's `-c` fd table is `0,1,2,3` plus whatever the harness
+left above it (the original strace saw `8,9`), not "0-2 plus its own CLOEXEC
+fds" — which is why a low fd was once nameable, and why the floor is 10.
 
 ## A test that hand-copies the implementation pins the copy, not the code
 Four `redirect/scope/tests.rs` pins copied `Scope::restore`'s loop by hand
