@@ -2088,6 +2088,23 @@ decoder's own escape `\$` is not a trigger (`\$v ` draws `$v `). `\` before
 `` $ ` " ' \ `` is a quote operator and loses its own byte; before anything else
 it keeps it.
 
+`PS4` — the xtrace prefix — goes through the same pipeline **at every trace line**
+(bash re-expands it per use), and the `promptvars` shopt gates it exactly as it
+gates `PS1`/`PS2`. Two rules are `PS4`'s own, both measured against bash 5.3.9: the
+off-terminal rule belongs to `PS1`/`PS2`, so `PS4` expands and draws in `bash -c`;
+and a non-toggling `\[…\]` marker escape contributes **nothing** to `PS4`, where
+the two prompts draw readline's `\001`/`\002` byte (`a\]b` draws `ab`, while
+`a\001b` keeps its byte in both).
+
+Two `PS4` answers differ from bash, deliberately. `${BASH_SOURCE}`,
+`${BASH_LINENO}` and `${BASH_COMMAND}` are bash-maintained per trace line there and
+ordinary variables here, so an unset one expands empty — `PS4='[${BASH_COMMAND}] '`
+traces `[] echo hi` where bash traces `[echo hi] echo hi`
+(`tests/xtrace.rs::bash_command_in_ps4_expands_empty_here`). And a `$( … )` inside
+`PS4` runs in a forked child that traces its own command, so such a `PS4` prints a
+line per nested level where bash prints one
+(`tests/xtrace.rs::a_command_substitution_in_ps4_runs_per_line`).
+
 Nothing else expands here: **no tilde expansion**, **no pathname expansion**, **no
 field splitting** — `~ `, `* `, `a  b `, `a;b `, `a|b ` draw verbatim — and quote
 characters are **data**: they survive and they do not protect, so `"$v" ` draws

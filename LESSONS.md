@@ -4165,10 +4165,20 @@ stream
     (bash reads the body after the *logical* line, comment included), the
 flush
     and the region jump sit at the cursor in `segment/line.rs::end_comment`,
-and
+    and
     the `single_line == false` arm is the total-function defense for the
     `&`-deferred runs alone. A pins-only task's biggest risk is the temptation
     to fix the neighbour rows it discovers.
+- **A measurement taken through a quoting layer measures that layer** (task
+  #621). bash expands the **right side of an assignment** — `PS4="$(echo S)"`
+  stores `S` — so a row spelled that way proves nothing about the expansion it
+  claims to measure. Task #621's `promptvars` row did exactly that: re-measured
+  with the script passed **verbatim** as one argv word (`PS4='[$v] '`, single
+  quotes inside), bash leaves it unexpanded, so the shopt gates `PS4` as it
+  gates `PS1`/`PS2`, and the plan's decision built on the row was wrong. Pins:
+  `safe/fdshell/tests/xtrace.rs::ps4_follows_the_promptvars_shopt`,
+  `safe/fdshell/src/repl/prompt/tests.rs::ps4_follows_the_promptvars_shopt`.
+
 ## Word patterns have no `FNM_PERIOD` rule
 `${d#*c}` on `d=.abc` strips the whole value, while the pathname glob with
 `dotglob` off refuses the leading dot. A word pattern is not a pathname: pass
@@ -11925,11 +11935,22 @@ bytes, measured). So the decoder's record must keep the run boundaries, not
 just the payload — epic #198's width math asks which bytes are visible, and
 only the split record answers it.
 
+The marker byte is that **drawer's** answer, not a decoder rule (task #621):
+`PS1`/`PS2` are drawn through readline, which is where the two bytes come
+from, while `PS4` is written raw to stderr, where bash emits **nothing** for
+the same escape (measured `a\]b` → `ab`). Only the decoder knows which bytes
+it inserted — an octal `\001` is data and both policies keep it — so the
+policy enters at the decoder's entry as data (`Markers`, the
+`PromptVars`/task #371 pattern), not as a second decoder.
+
 Pins:
 `safe/fdshell/src/repl/prompt/decode/tests.rs::octal_needs_exactly_three_digits`,
 `safe/fdshell/src/repl/prompt/decode/tests.rs::three_octal_digits_are_consumed_and_the_rest_stays_literal`,
 `safe/fdshell/src/repl/prompt/decode/tests.rs::a_close_marker_that_closes_nothing_is_data`,
-`safe/fdshell/src/repl/prompt/decode/tests.rs::an_open_marker_inside_a_region_is_data`.
+`safe/fdshell/src/repl/prompt/decode/tests.rs::an_open_marker_inside_a_region_is_data`,
+`safe/fdshell/src/repl/prompt/decode/tests.rs::the_dropped_policy_draws_nothing_for_a_marker_escape`,
+`safe/fdshell/src/repl/prompt/decode/markers/tests.rs`,
+`safe/fdshell/src/repl/prompt/tests.rs::ps4_a_stray_marker_emits_nothing_while_an_octal_byte_stays`.
 
 ## The value provider answers per escape, and a pty pin computes its expectation (task #617)
 
