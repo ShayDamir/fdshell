@@ -2618,6 +2618,28 @@ accepted) and assert only the *absence* of the size-limit error — under a
 `>=`/`==` mutant the child bails on the cap-th byte with the error and the
 test fails.
 
+Task #630 joins the **parse side** to the buffer: on a stdin-fed session the
+parse layer reads stdin through this reader *and* the `read` builtin through
+the task #609 buffer, and bash answers both from one buffered reader, so they
+must share one buffer. Two rules join the reader to it — **consult the buffer
+before any syscall** (its bytes precede this reader's reads in stream order; a
+buffered `\n` completes the line and its bytes past it go back to the buffer
+for the next line, so take-once suffices — the buffer holds one chunk's tail
+at most), and **yield what a line did not take** — so at every yield point the
+reader's private chunk is empty and the buffer holds all unassigned stdin
+bytes. Bytes before/at the `\n` still land straight in `buf`, so the cap
+accounting above is unchanged and an empty tail stores nothing — the 64 MiB
+cap rows stay byte-for-byte on the old path. Identity is validated through the
+same state methods as the builtin side, so an `exec <` mid-session drops the
+buffer from the parser side too. Pins: `safe/fdshell/tests/read.rs`
+(`a_stdin_fed_session_shares_the_stdin_buffer`,
+`a_read_consumes_the_parsers_buffered_line`,
+`a_read_putback_is_visible_to_the_parsers_next_line` — the third pins stdout
+only: stderr carries command-not-found reports on both shells and their exit
+codes disagree).
+
+Cross-reference (do not merge): LESSONS: "A chunked reader that can stop mid-chunk needs a putback buffer, keyed by source identity (task #609)" (the buffer this reader now drains first).
+
 ## `FS_IOC_READ_VERITY_METADATA` (≥ 6.13): the descriptor is the 256-byte redesigned struct; a single-block tree item is empty; an unsigned signature is `ENODATA`
 The ≥ 6.13 on-disk descriptor is *not* the old 20-byte-header-plus-digest
 format (the one a pre-6.13 plan would pin): it is the fixed 256-byte
