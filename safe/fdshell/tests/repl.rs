@@ -1673,3 +1673,288 @@ fn no_prompt_off_a_terminal() {
     assert!(out.is_empty(), "no prompt bytes on a pipe: {out:?}");
     assert!(!out.contains("[p2] "), "stdout: {out:?}");
 }
+
+// ——— `PS0` (task #622), the value bash ≥ 5.1 **displays** after reading a complete
+// input line and before its command runs. bash's `NEWS` entry says "executed", and
+// the measured behavior, `man bash` and bash's `eval.c` all say displayed; the rows
+// below are the measurements (bash 5.3.9, 2026-11-20) through the pty harness of
+// LESSONS: "Test tty-gated behavior from safe-crate integration tests via `script`".
+// Every row ends with `exit` (the exit is the bounded event) and every needle is a
+// byte stream the pty echo cannot produce — the typed line keeps the raw `$v`, the
+// raw `\#`, the raw `\[` — except where a count says otherwise. The counts are
+// displays **including** the one for the final `exit`, and never one for the line
+// that sets `PS0` while it is still empty. ———
+
+/// The "PS0 running an echo" row: the display lands between the read and the
+/// command's own output, with **no trailing newline** — `p-Vout` is one display and
+/// the `echo`'s output, concatenated. Three displays: the reads of `true`, of
+/// `echo out` and of `exit`; the assignment's own read shows nothing, because the
+/// value shown is the one held when the line was read, and `PS0` was empty then
+/// (measured on both sides).
+#[test]
+fn ps0_shows_between_the_read_line_and_the_command() {
+    let (tty, code, _) = run_tty("v=V\nPS0='p-$v'\ntrue\necho out\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("p-V").count(), 3, "pty: {tty:?}");
+    assert!(
+        tty.contains("p-Vout"),
+        "no newline between the display and the output: {tty:?}"
+    );
+}
+
+/// `shopt -u promptvars` gates `PS0`'s expansion exactly as it gates `PS1`/`PS2`
+/// and `PS4`: the two reads before the `shopt` line show the expanded value, the two
+/// after it show the stored text as it stands. The raw-text count is those two
+/// displays plus the pty's echo of the typed assignment line (measured: bash draws
+/// `p-V`, `p-V`, `p-$v`, `p-$v` — the row's three raw matches are two displays and
+/// the echo).
+#[test]
+fn promptvars_off_shows_ps0_unexpanded() {
+    let (tty, code, _) = run_tty(
+        "v=V\nPS0='p-$v'\ntrue\nshopt -u promptvars\ntrue\nexit\n",
+        Event::Exit,
+    );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("p-V").count(), 2, "pty: {tty:?}");
+    assert_eq!(
+        tty.matches("p-$v").count(),
+        3,
+        "echo + two displays: {tty:?}"
+    );
+}
+
+/// The one prompt variable with **no** default string: unset and set-empty both
+/// answer nothing, so the default `PS0` is a no-op. First row: two displays — the
+/// read of `true` and the read of the `unset` itself, which still shows the value
+/// that is about to go — and silence for the two reads after it (measured: bash shows
+/// the same two). Second row: the value emptied mid-row shows exactly once, for the
+/// read of the line that empties it, and never again (measured, both sides).
+#[test]
+fn ps0_unset_and_set_empty_show_nothing() {
+    let (tty, code, _) = run_tty(
+        "v=V\nPS0='p-$v'\ntrue\nunset PS0\ntrue\nexit\n",
+        Event::Exit,
+    );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("p-V").count(), 2, "pty: {tty:?}");
+
+    let (tty, code, _) = run_tty("v=V\nPS0='p-$v'\nPS0=''\ntrue\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("p-V").count(), 1, "pty: {tty:?}");
+}
+
+/// The row that decides display-not-execute, because a real execution would fail it:
+/// a `PS0` whose value *is* a command leaves `$?` alone — `true` then `rc=0`, `false`
+/// then `rc=1`, both measured against bash 5.3.9 (which prints the text `echo` and
+/// its argument rather than running them).
+#[test]
+fn the_exit_status_survives_ps0() {
+    let (tty, code, _) = run_tty("v=V\nPS0='p-$v'\ntrue\necho rc=$?\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("p-V").count(), 3, "pty: {tty:?}");
+    assert_eq!(tty.matches("rc=0").count(), 1, "pty: {tty:?}");
+
+    let (tty, code, _) = run_tty("v=V\nPS0='p-$v'\nfalse\necho rc=$?\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("p-V").count(), 3, "pty: {tty:?}");
+    assert_eq!(tty.matches("rc=1").count(), 1, "pty: {tty:?}");
+}
+
+/// One fork per use, the rule the prompt expansion already pays for `PS1`: the
+/// substitution re-runs at every display, so the needle is the substitution's answer
+/// three times — bash draws three too (measured). Where they part is `$?`: bash
+/// preserves the command's own status (measured `rc=1`), while here the fork's status
+/// lands in it, the expansion stage's pre-existing rule that `PS1` follows too.
+#[test]
+fn a_command_substitution_in_ps0_runs_per_use() {
+    let (tty, code, _) = run_tty(
+        "PS0='p$(true; echo sub)'\nfalse\necho rc=$?\nexit\n",
+        Event::Exit,
+    );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("psub").count(), 3, "pty: {tty:?}");
+    assert!(
+        tty.contains("psubrc=0"),
+        "bash preserves the status and measures rc=1: {tty:?}"
+    );
+}
+
+/// One display for a **whole construct**, not one per line: the `if` block is one
+/// input, so the two displays measured on both sides are its read and the `exit`
+/// read — and the construct's own output follows its display with no newline
+/// between, the concatenation pinned here.
+#[test]
+fn ps0_shows_once_for_a_whole_construct() {
+    let (tty, code, _) = run_tty(
+        "v=V\nPS0='p-$v'\nif true; then\n echo INBLOCK\nfi\nexit\n",
+        Event::Exit,
+    );
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("p-V").count(), 2, "pty: {tty:?}");
+    assert!(
+        tty.contains("p-VINBLOCK"),
+        "the display precedes the construct it accompanies: {tty:?}"
+    );
+}
+
+/// The number `PS0` shows is the number of the command it accompanies, so the display
+/// runs **before** the counter moves: `p-2` for `true` and `p-3` for `exit`, because
+/// the assignment was command 1 — its own read is silent, `PS0` was empty for it —
+/// and the provider answers the number the next command gets (measured against bash,
+/// which draws the same two numbers). A display placed after the increment would draw
+/// `p-3` and `p-4`.
+#[test]
+fn ps0_shows_the_number_of_the_command_it_accompanies() {
+    let (tty, code, _) = run_tty("PS0='p-\\#'\ntrue\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("p-2").count(), 1, "pty: {tty:?}");
+    assert_eq!(tty.matches("p-3").count(), 1, "pty: {tty:?}");
+}
+
+/// A marker that does **not** toggle the region keeps readline's byte — `PS1`'s
+/// policy, byte-identical to bash's measured display (`a\]b` → `a\002b`); the
+/// in-process mirror is `src/repl/prompt/ps0/tests.rs::a_stray_marker_keeps_its_readline_byte`.
+#[test]
+fn a_stray_marker_keeps_its_readline_byte_in_ps0() {
+    let (tty, code, _) = run_tty("PS0='a\\]b'\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("a\x02b").count(), 1, "pty: {tty:?}");
+}
+
+/// The arm the policy does not reach: a marker that **does** toggle is a record split
+/// and is consumed, so fdshell draws the region's bytes (`ABC`), where bash's display
+/// — a raw write of the decoded string — prints `A\001B\002C`. fdshell's own answer,
+/// the same fact `a_non_printing_region_is_drawn_and_recorded` pins one drawer up;
+/// #623 words it.
+#[test]
+fn a_toggling_marker_contributes_no_bytes_in_ps0() {
+    let (tty, code, _) = run_tty("PS0='A\\[B\\]C'\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(
+        tty.matches("ABC").count(),
+        1,
+        "bash prints A\\001B\\002C here: {tty:?}"
+    );
+}
+
+/// `PS0` is displayed on the stream bash uses — stderr (measured). With the shell's
+/// stdout diverted to a file, the three displays are in the pty dialogue and the file
+/// holds the prompts and the command's own output but no display bytes. The `env` form
+/// is because the value has to be in place before the first prompt (the reason
+/// [`an_inherited_env_value_reaches_the_prompt`] spells itself the same way).
+#[test]
+fn ps0_is_displayed_on_the_stream_bash_uses() {
+    let path = std::env::temp_dir().join(format!("fdshell-ps0-stream-{}", std::process::id()));
+    let mut child = Command::new("script")
+        .args([
+            "-qec",
+            &format!("env PS0='p0txt' {BIN} >{}", path.display()),
+            "/dev/null",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"v=V\necho tofile\nexit\n")
+        .unwrap();
+    drop(child.stdin.take().unwrap());
+    let output = child.wait_with_output().unwrap();
+    let dialogue = str::from_utf8(&output.stdout).unwrap().to_string();
+    assert_eq!(output.status.code(), Some(0), "pty: {dialogue:?}");
+    assert_eq!(dialogue.matches("p0txt").count(), 3, "pty: {dialogue:?}");
+    let file = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !file.contains("p0txt"),
+        "the diverted stdout holds no display: {file:?}"
+    );
+    assert!(
+        file.contains("tofile"),
+        "the command's own output: {file:?}"
+    );
+    std::fs::remove_file(&path).unwrap();
+}
+
+/// The gate over a pipe (bash shows nothing off a terminal, measured): the pty rows
+/// above are the interactive half. `echo` is the only thing written, on either stream.
+#[test]
+fn no_ps0_off_a_terminal() {
+    let (out, err, code) = run_repl("v=V\nPS0='p-$v'\necho x\nexit\n");
+    assert_eq!(code, 0, "stderr={err}");
+    assert_eq!(out, "x\n", "no display bytes off a terminal: {out:?}");
+    assert!(err.is_empty(), "stderr: {err:?}");
+}
+
+/// The `set -x` ordering the task asks for, per command: the read, then the display,
+/// then the trace line — `p-V+ true`, the concatenation bash produces too (measured),
+/// because both the display and the trace happen at execution.
+#[test]
+fn ps0_shows_before_what_the_command_itself_prints() {
+    let (tty, code, _) = run_tty("v=V\nPS0='p-$v'\nset -x\ntrue\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("p-V+ true"), "bash measures the same: {tty:?}");
+}
+
+/// fdshell's own answer where it diverges from bash, pinned for #623's wording: bash
+/// reports a parse error with **no** display (measured one `p-V`, for the `exit`
+/// read), while fdshell displays the value and then reports — the display belongs to
+/// the read, the report to the parse, and the read comes first.
+#[test]
+fn ps0_shows_before_a_parse_error_is_reported() {
+    let (tty, code, _) = run_tty("v=V\nPS0='p-$v'\nfi\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(tty.matches("p-V").count(), 2, "bash shows one: {tty:?}");
+    let display = tty.find("p-V").unwrap();
+    let report = tty.find("parse error").unwrap();
+    assert!(display < report, "the display, then the report: {tty:?}");
+}
+
+/// The other divergence, the one `src/verbose.rs` already records: bash echoes at
+/// read time, so its echo precedes the display (measured `true`, then `p-V`), while
+/// fdshell echoes at execution time and the display comes first — `p-Vtrue`, no
+/// newline between.
+#[test]
+fn ps0_shows_before_the_verbose_echo() {
+    let (tty, code, _) = run_tty("v=V\nPS0='p-$v'\nset -v\ntrue\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(
+        tty.contains("p-Vtrue"),
+        "bash measures true-then-p-V here: {tty:?}"
+    );
+}
+
+/// An inherited `PS0` reaches the display through the same shared lookup as `PS1` —
+/// the `env` form of [`an_inherited_env_value_reaches_the_prompt`], for the same
+/// reason — and it is expanded on the way: the value `p-$v` draws `p-` for the read
+/// of `v=V` (the variable is still unset) and `p-V` for the read of `exit`. bash
+/// measures the same two (measured 2026-11-20).
+#[test]
+fn an_inherited_env_value_reaches_ps0() {
+    let mut child = Command::new("script")
+        .args(["-qec", &format!("env PS0='p-$v' {BIN}"), "/dev/null"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"v=V\nexit\n")
+        .unwrap();
+    drop(child.stdin.take().unwrap());
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let out = str::from_utf8(&output.stdout).unwrap();
+    assert_eq!(out.matches("p-V").count(), 1, "pty: {out:?}");
+    assert_eq!(
+        out.matches("p-").count(),
+        2,
+        "the unset read and this one: {out:?}"
+    );
+}
