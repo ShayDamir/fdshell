@@ -15,7 +15,8 @@ const BIN: &str = env!("CARGO_BIN_EXE_fdshell");
 /// 5.3.9 default `PS1` string (measured 2026-11-18) **rendered** through the
 /// shell's value provider (task #617) — the program name the REPL seeds, the
 /// crate's own version, and the uid's character for a non-root runner (bash draws
-/// its own identity there, `bash-5.3$ `; the divergence is #623's). Pinned
+/// its own identity there, `bash-5.3$ `; the README's prompt-time-expansion
+/// paragraph words that divergence). Pinned
 /// byte-for-byte as the counter the pty rows below use, so they pin one prompt per
 /// read and their counts stayed put when the escapes started answering values.
 const PROMPT: &str = concat!("fdshell-", env!("CARGO_PKG_VERSION"), "$ ");
@@ -172,6 +173,13 @@ fn run_tty(input: &str, event: Event) -> (String, Option<i32>, bool) {
 /// no kill (LESSONS). The stream is the same one `run_tty` returns: the pty's echo
 /// of the input and its `\r\n` are part of it, so assert `contains` and counts.
 fn run_tty_ps1(ps1: &str, input: &str) -> (String, Option<i32>) {
+    let (bytes, code) = run_tty_ps1_bytes(ps1, input);
+    (str::from_utf8(&bytes).unwrap().to_string(), code)
+}
+
+/// [`run_tty_ps1`]'s stream as **bytes**, for the row whose drawn prompt carries a
+/// byte that is not valid UTF-8 — `\777`'s 0xff — and would panic the decode above.
+fn run_tty_ps1_bytes(ps1: &str, input: &str) -> (Vec<u8>, Option<i32>) {
     let mut child = Command::new("script")
         .args(["-qec", &format!("env PS1='{ps1}' {BIN}"), "/dev/null"])
         .stdin(Stdio::piped())
@@ -187,10 +195,7 @@ fn run_tty_ps1(ps1: &str, input: &str) -> (String, Option<i32>) {
         .unwrap();
     drop(child.stdin.take().unwrap());
     let output = child.wait_with_output().unwrap();
-    (
-        str::from_utf8(&output.stdout).unwrap().to_string(),
-        output.status.code(),
-    )
+    (output.stdout, output.status.code())
 }
 
 /// Spawn the REPL (no `-c`), pipe `input` to stdin, close it, and capture
@@ -1109,7 +1114,8 @@ fn an_operator_opening_the_second_line_reports_and_the_session_reads_on() {
 /// The default `PS1` on a terminal: bash 5.3.9's default string, **rendered**
 /// through the shell's value provider — `fdshell-<version>$ ` for a non-root runner
 /// (task #617). bash 5.3.9 draws its own identity on the same string, `bash-5.3$ `
-/// (measured 2026-11-18); the divergence's wording is #623's. One read, one prompt
+/// (measured 2026-11-18); the README's prompt-time-expansion paragraph words that
+/// divergence. One read, one prompt
 /// — the typed line is `exit`, so the single match is the prompt itself. The `PS2`
 /// default is byte-identical to fdshell's and is pinned by every continuation count
 /// above.
@@ -1240,7 +1246,7 @@ fn an_octal_escape_in_the_prompt_is_drawn_as_its_byte() {
 }
 
 /// The `\xHH` extension (decision D1 — bash 5.3.9 measures it literal; the
-/// README deviation is flagged to #623).
+/// README's prompt-time-expansion paragraph words that deviation).
 #[test]
 fn a_hex_escape_in_the_prompt_is_drawn_as_its_byte() {
     let (tty, code, _) = run_tty(concat!(r"PS1='a\x41b'", "\nexit\n"), Event::Exit);
@@ -1259,6 +1265,122 @@ fn a_non_printing_region_is_drawn_and_recorded() {
     );
     assert_eq!(code, Some(0), "pty: {tty:?}");
     assert!(tty.contains("a\x1b[31mB\x1b[0mC"), "pty: {tty:?}");
+}
+
+// ——— the rest of the bash PROMPTING table (task #623): the table rows the
+// sections above did not have, one row per escape, every expectation re-measured
+// against bash 5.3.9 on 2026-11-20 (bash's bytes in each row's comment — tests
+// never spawn bash, LESSONS: "Verify bash's real output before pinning a test, not
+// the task text"). No row's prompt holds a tally needle, so the counts above stay
+// put; every row is parity unless its comment points at the README's
+// prompt-layer divergence paragraph. ———
+
+/// `\e`: the decoder emits ESC (bash draws the same byte, measured).
+#[test]
+fn an_escape_in_the_prompt_is_drawn_as_a_escape() {
+    let (tty, code) = run_tty_ps1(r"a\eb", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("a\x1bb"), "pty: {tty:?}");
+}
+
+/// `\n`: a real newline, which the pty renders as CR LF (bash measures the same,
+/// measured). The row's needle is the byte the decoder wrote, not the pty's CR.
+#[test]
+fn a_newline_in_the_prompt_is_drawn_as_a_line_break() {
+    let (tty, code) = run_tty_ps1(r"a\nb", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("a\r\nb"), "pty: {tty:?}");
+}
+
+/// `\r`: a real carriage return (bash draws the same byte, measured).
+#[test]
+fn a_carriage_return_in_the_prompt_is_drawn_as_a_carriage_return() {
+    let (tty, code) = run_tty_ps1(r"a\rb", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("a\rb"), "pty: {tty:?}");
+}
+
+/// The `\\` escape arm, alone: one backslash — the pair is an escape here, not the
+/// quote operator the row in the task #616 section pins (bash draws one backslash
+/// too, measured).
+#[test]
+fn the_double_backslash_escape_is_drawn_as_one_backslash() {
+    let (tty, code) = run_tty_ps1(r"a\\b", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains(r"a\b"), "pty: {tty:?}");
+}
+
+/// A decoded NUL: fdshell writes the byte into the prompt, so it reaches the pty
+/// (`a\0b`); bash's prompt writer **drops** it and draws `ab` (measured — the
+/// README's prompt-layer divergence paragraph). Not a writer bug: the record's data
+/// contract and `a_nul_splits_the_run_and_is_pasted` are deliberate (task #616).
+#[test]
+fn a_decoded_nul_is_drawn_as_a_nul() {
+    let (tty, code) = run_tty_ps1(r"a\000b", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("a\0b"), "pty: {tty:?}");
+
+    // The 400 octal is the three-digit rule's overflow: 0o400 truncated to a byte
+    // is the same NUL, and fdshell draws it (bash drops it, measured).
+    let (tty, code) = run_tty_ps1(r"a\400b", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("a\0b"), "pty: {tty:?}");
+}
+
+/// `\D{…}`: the decoder does not know the brace-argument form and draws the escape
+/// text (`a\D{%Y}b`); bash draws its strftime value (`a2026b`, measured).
+/// D-623-2: documented, not implemented — it joins the README's prompt-layer
+/// divergence paragraph; the pinned word is the decoder's own doc line.
+#[test]
+fn an_unrecognised_brace_escape_is_drawn_as_its_text() {
+    let (tty, code) = run_tty_ps1(r"a\D{%Y}b", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains(r"a\D{%Y}b"), "pty: {tty:?}");
+}
+
+/// `\N`: the bash PROMPTING table has no `\N`, and bash 5.3.9 answers it as the
+/// unknown-escape rule — the literal text (`a\Nb`, measured) — which is what
+/// fdshell draws (D-623-3: parity, nothing to implement).
+#[test]
+fn an_n_in_the_prompt_is_drawn_as_its_text() {
+    let (tty, code) = run_tty_ps1(r"a\Nb", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains(r"a\Nb"), "pty: {tty:?}");
+}
+
+/// A stray `\]` with no `\[` opening a region: its marker byte (0x02) is drawn as
+/// the decoder's byte (bash draws the same byte, measured). `PS0` has the sibling
+/// row; this is the `PS1` one.
+#[test]
+fn a_stray_closing_marker_on_ps1_is_drawn_as_its_byte() {
+    let (tty, code) = run_tty_ps1(r"a\]b", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("a\x02b"), "pty: {tty:?}");
+}
+
+/// The three-digit octal boundary: `\12` is two digits, so it is not an octal
+/// escape at all — the text stays (bash measures it literal too, measured; the
+/// rule is LESSONS's three-digit rule from task #616, whose row pins the
+/// three-digit case).
+#[test]
+fn a_two_digit_octal_escape_is_drawn_as_its_text() {
+    let (tty, code) = run_tty_ps1(r"a\12b", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains(r"a\12b"), "pty: {tty:?}");
+}
+
+/// `\777`: the widest octal, truncated to a byte — 0xff reaches the pty (bash
+/// measures the same byte, measured). The byte harness, because the captured stream
+/// is not valid UTF-8 and the string one would panic on the decode.
+#[test]
+fn the_widest_octal_escape_is_drawn_truncated_to_a_byte() {
+    let (tty, code) = run_tty_ps1_bytes(r"a\777b", "exit\n");
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(
+        tty.windows(b"a\xffb".len())
+            .any(|window| window == b"a\xffb"),
+        "the raw byte in the drawn prompt: {tty:?}"
+    );
 }
 
 // ——— the value escapes (task #617), measured against bash 5.3.9 on
@@ -1436,7 +1558,8 @@ fn the_working_directory_escape_draws_the_provenance() {
 /// An origin that names no path answers D2's no-value and draws the escape
 /// text: the startup `open(".")` fd carries `Origin::Shell`, so the one
 /// prompt of a session without a `cd` is the literal `[\w][\W]` (bash draws
-/// its logical `$PWD` there — D-619-2's divergence for #623). The echoed
+/// its logical `$PWD` there — D-619-2's divergence, worded in the README's
+/// prompt-time-expansion paragraph). The echoed
 /// `exit` carries no backslash, so the group stays unique.
 #[test]
 fn an_origin_without_a_path_draws_the_escape_text() {
@@ -1539,9 +1662,9 @@ fn promptvars_off_skips_the_expansion() {
 }
 
 /// The nounset row (D-620-8): bash reports on stderr, draws the prompt as the
-/// unexpanded text and keeps prompting. fdshell's wording is its own (#623
-/// documents it); the shell stays alive on bash's input, and the report names the
-/// variable bash names.
+/// unexpanded text and keeps prompting. fdshell's wording is its own (the README's
+/// prompt-time-expansion paragraph words it); the shell stays alive on bash's input,
+/// and the report names the variable bash names.
 #[test]
 fn nounset_in_a_prompt_reports_and_keeps_the_shell() {
     let (tty, code, _) = run_tty("set -u\nPS1='[a$nope] '\nexit\n", Event::Exit);
@@ -1824,8 +1947,8 @@ fn a_stray_marker_keeps_its_readline_byte_in_ps0() {
 /// The arm the policy does not reach: a marker that **does** toggle is a record split
 /// and is consumed, so fdshell draws the region's bytes (`ABC`), where bash's display
 /// — a raw write of the decoded string — prints `A\001B\002C`. fdshell's own answer,
-/// the same fact `a_non_printing_region_is_drawn_and_recorded` pins one drawer up;
-/// #623 words it.
+/// the same fact `a_non_printing_region_is_drawn_and_recorded` pins one drawer up, and
+/// the README's prompt-time-expansion paragraph words it.
 #[test]
 fn a_toggling_marker_contributes_no_bytes_in_ps0() {
     let (tty, code, _) = run_tty("PS0='A\\[B\\]C'\nexit\n", Event::Exit);
@@ -1899,7 +2022,8 @@ fn ps0_shows_before_what_the_command_itself_prints() {
     assert!(tty.contains("p-V+ true"), "bash measures the same: {tty:?}");
 }
 
-/// fdshell's own answer where it diverges from bash, pinned for #623's wording: bash
+/// fdshell's own answer where it diverges from bash, pinned for the wording the
+/// README's prompt-time-expansion paragraph carries: bash
 /// reports a parse error with **no** display (measured one `p-V`, for the `exit`
 /// read), while fdshell displays the value and then reports — the display belongs to
 /// the read, the report to the parse, and the read comes first.
@@ -1924,6 +2048,54 @@ fn ps0_shows_before_the_verbose_echo() {
     assert!(
         tty.contains("p-Vtrue"),
         "bash measures true-then-p-V here: {tty:?}"
+    );
+}
+
+/// The plain-prompt shape of `set -v` (bash 5.3.9 measured 2026-11-20: the
+/// `set -v` line itself gets no echo, and the echo of the `true` read lands between
+/// the prompt that read it and the next one — the same window fdshell's execution-time
+/// echo answers it in, so the plain shape agrees; the read-time/exec-time split shows
+/// through `PS0`, and `ps0_shows_before_the_verbose_echo` pins that).
+/// `{PROMPT}{PROMPT}true` is fdshell's byte shape: no line echo of its own, so the
+/// two prompts sit back to back and the echo follows its prompt.
+#[test]
+fn verbose_echoes_after_the_prompt_that_read_its_line() {
+    let (tty, code, _) = run_tty("set -v\ntrue\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(
+        tty.contains(&format!("{PROMPT}{PROMPT}true")),
+        "the echo comes after its own prompt: {tty:?}"
+    );
+}
+
+/// The `set -x` line itself: fdshell traces it (`+ set -x`, then `+ true`), while
+/// bash 5.3.9 does **not** trace the line that turns tracing on (measured: prompt,
+/// then `+ true` alone). The second trace is the parity half of the row.
+#[test]
+fn the_set_x_line_is_traced_though_bash_does_not_trace_it() {
+    let (tty, code, _) = run_tty("set -x\ntrue\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert!(tty.contains("+ set -x"), "bash measures none: {tty:?}");
+    assert!(tty.contains("+ true"), "bash measures the same: {tty:?}");
+}
+
+/// A multi-line command under `set -x` (bash 5.3.9 measured 2026-11-20: both `PS2`
+/// prompts as it reads the `if`, then the two traces at execution — `+ true`,
+/// `+ true`). fdshell keeps the agreement: both continuation prompts, then the two
+/// traces; the bytes run together only because fdshell has no line editor to echo
+/// the typed lines (the README's prompt-layer divergence paragraph owns that).
+#[test]
+fn a_multi_line_command_prompts_then_traces() {
+    let (tty, code, _) = run_tty("set -x\nif true; then\ntrue\nfi\nexit\n", Event::Exit);
+    assert_eq!(code, Some(0), "pty: {tty:?}");
+    assert_eq!(
+        tty.matches("+ true").count(),
+        2,
+        "bash traces twice too: {tty:?}"
+    );
+    assert!(
+        tty.contains(&format!("{PROMPT}{CONT}{CONT}+ true")),
+        "both prompts, then the first trace: {tty:?}"
     );
 }
 

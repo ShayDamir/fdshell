@@ -578,6 +578,176 @@ fn prompt_is_drawn_on_a_tty_when_the_u_fd_is_the_tty() {
     );
 }
 
+// ---- task #623: the `-p` operand is an ordinary word, expanded by the pipeline ----
+
+// bash decodes prompt escapes only for its four prompt drawers, so the `-p`
+// operand goes through the normal word pipeline — parameter, command
+// substitution (both spellings), arithmetic, the escape-pair fold, `IFS`
+// splitting, glob — and the operand slot takes the first field. Every row below
+// was measured against bash 5.3.9 on this machine on 2026-11-20 before pinning;
+// the pty rows feed their line through the harness's stdin.
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: `P[V] ` then `got=data`): a
+/// parameter expansion in the operand fires before the prompt is drawn.
+#[test]
+fn the_operand_word_expands_on_a_tty() {
+    let dir = Scratch::new();
+    let script = r#"v=V; read -p "P[$v] " x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "data\n");
+    assert!(
+        stream.contains("P[V] "),
+        "bash draws the expansion: {stream}"
+    );
+    assert!(
+        stream.contains("got=data"),
+        "the fed line is read: {stream}"
+    );
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: `P[hi] ` and `P[bt] `): the two
+/// command-substitution spellings, and the arithmetic arm, all fire on this word.
+#[test]
+fn the_operand_word_fires_the_substitution_arms() {
+    let dir = Scratch::new();
+    let script = r#"read -p "P[$(echo hi)] " x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "data\n");
+    assert!(stream.contains("P[hi] "), "bash draws the same: {stream}");
+    assert!(
+        stream.contains("got=data"),
+        "the fed line is read: {stream}"
+    );
+
+    let script = r#"read -p "P[`echo bt`] " x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "data\n");
+    assert!(stream.contains("P[bt] "), "bash draws the same: {stream}");
+
+    let script = r#"read -p "P[$((1+1))] " x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "data\n");
+    assert!(stream.contains("P[2] "), "bash draws the same: {stream}");
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: `*.txt ` with a match in the
+/// directory): a quoted operand is not globbed — quoting protects this word from
+/// pathname expansion, exactly as it does everywhere else.
+#[test]
+fn a_quoted_operand_keeps_its_glob_char() {
+    let dir = Scratch::new();
+    let script = r#"touch one.txt; read -p "*.txt" x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "data\n");
+    // The prompt has no newline of its own, so the drawn prompt runs straight into
+    // the row's output; the pty's echo of the typed line cannot produce that
+    // concatenation, which is what makes the needle the drawn prompt.
+    assert!(
+        stream.contains("*.txtgot=data"),
+        "bash draws the pattern itself: {stream}"
+    );
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: the matched name `one.txt ` when it
+/// is the only match): unquoted, the operand globs.
+#[test]
+fn an_unquoted_operand_is_globbed_to_its_match() {
+    let dir = Scratch::new();
+    let script = r#"touch one.txt; read -p *.txt x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "data\n");
+    assert!(
+        stream.contains("one.txtgot=data"),
+        "bash draws the match: {stream}"
+    );
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: prompt `A`, and `B` is the variable
+/// name, so its `got=` is empty): the operand slot takes the **first** field of
+/// the split — the pin. Which fields become variable names is the word-expansion
+/// policy task's question, so fdshell's target list still comes from the raw
+/// words and its `got=` carries the line; the README records the pair.
+#[test]
+fn the_operand_slot_takes_the_first_field() {
+    let dir = Scratch::new();
+    let script = r#"v="A B"; read -p $v x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "data\n");
+    assert!(
+        stream.contains("Agot="),
+        "the prompt is the first field, with no newline of its own: {stream}"
+    );
+    assert!(stream.contains("got=data"), "fdshell's target: {stream}");
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: `P\a$ `, the word text as the
+/// parser left it): the operand is not prompt-decoded — its escape pairs fold as
+/// any word's do, and no prompt escapes are read in it.
+#[test]
+fn the_operand_folds_its_escape_pairs_and_decodes_nothing() {
+    let dir = Scratch::new();
+    let script = r#"read -p "P\\a\$ " x; echo got=$x"#;
+    let stream = run_on_a_tty(&dir, script, "data\n");
+    assert!(
+        stream.contains("P\\a$ got=data"),
+        "bash draws the folded word text: {stream}"
+    );
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: the file is made and nothing is
+/// drawn): the operand's expansion runs at parse time, whether or not the prompt
+/// is — a `read -p` off a terminal still pays for the expansion (and the fork).
+#[test]
+fn the_operand_expands_even_when_nothing_is_drawn() {
+    let dir = Scratch::new();
+    let script = r#"printf "data\n" > in; exec < in; read -p "P[$(touch made)] " x; ls made"#;
+    let out = run(&dir, script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "script={script} stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(
+        stdout(&out),
+        "made\n",
+        "bash makes the file too: script={script}"
+    );
+    assert_eq!(
+        stderr(&out),
+        "",
+        "a non-tty source draws no prompt: script={script}"
+    );
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: `P[V]du=x`): the last expanded
+/// field after the read is the variable word, not the operand's expansion —
+/// expanding this one word does not hand the pipeline's field list to the frame
+/// (LESSONS: "`$_` is the last expanded field: expanding intercepts hand their
+/// list to one frame (task #376)" is that task's owner).
+#[test]
+fn the_last_expanded_field_after_the_read_stays_the_raw_word() {
+    let dir = Scratch::new();
+    let script = r#"v=V; read -p "P[$v]" x; echo du=$_"#;
+    let stream = run_on_a_tty(&dir, script, "data\n");
+    assert!(
+        stream.contains("P[V]du=x"),
+        "bash measures the same: {stream}"
+    );
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: `nope: unbound variable`, and the
+/// builtin does not run): a failing operand expansion is reported and the
+/// builtin runs nothing. The report names the variable bash names; its wording is
+/// fdshell's own (the README's failing-expansion paragraph), and the exit code is
+/// the shell-wide 1 rather than bash's 127 — the documented family.
+#[test]
+fn a_nounset_operand_is_reported_and_runs_nothing() {
+    let dir = Scratch::new();
+    let script = r#"set -u; read -p "P[$nope]" x; echo ran rc=$?"#;
+    let out = run(&dir, script);
+    assert_eq!(out.status.code(), Some(1), "script={script}");
+    assert_eq!(stdout(&out), "", "the builtin never runs: script={script}");
+    assert!(
+        stderr(&out).contains("nope: unbound variable"),
+        "the report names the variable: {}",
+        stderr(&out)
+    );
+}
+
 // ---- task #609: the tail of a chunk feeds the next read on the same source ----
 
 // bash keeps the bytes a `read(2)` chunk carried past the end of the line and
