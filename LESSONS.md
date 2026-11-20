@@ -12244,6 +12244,26 @@ harness of LESSONS: "Test tty-gated behavior from safe-crate integration tests v
 an fd var's tty is reached in-process with `sys::pty::openpty()` instead, which
 that entry allows for the fd-var case.
 
+bash also treats the `-p` string as an **ordinary word**: the prompt-escape decoder
+serves the four drawers (`PS1`, `PS2`, `PS4`, `PS0`) and nothing else, so the operand
+goes through the normal word pipeline at parse time — parameter, command substitution in
+both spellings, arithmetic, the escape-pair fold, `IFS` splitting, glob — and that
+expansion runs **whether or not the gate above lets anything be drawn**. fdshell expands
+the operand word and draws its **first field**, which is bash's answer, and stops there:
+which fields become **variable names** after a split belongs to the general
+word-expansion policy of the raw-word intercepts, so `v="A B"; read -p $v x` prompts `A`
+in both shells but stores the line in `x` here where bash takes `B` — pinned as
+fdshell's own answer, with the README's prompt-layer paragraph owning the wording.
+Pins: `safe/fdshell/src/intercept/read/tests.rs`
+(`run_read_draws_the_expanded_operand`,
+`run_read_draws_the_first_field_of_a_split_operand`,
+`run_read_expands_a_quoted_operand_and_keeps_its_glob_char`,
+`run_read_reports_an_unbound_operand_and_runs_nothing`) and
+`safe/fdshell/tests/read.rs` (`the_operand_word_expands_on_a_tty`,
+`the_operand_slot_takes_the_first_field`,
+`the_operand_expands_even_when_nothing_is_drawn`,
+`a_nounset_operand_is_reported_and_runs_nothing`).
+
 ## A chunked reader that can stop mid-chunk needs a putback buffer, keyed by source identity (task #609)
 
 `read` reads its source in `CHUNK`-sized `read(2)` calls and feeds every byte to the line

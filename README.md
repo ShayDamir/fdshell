@@ -861,6 +861,22 @@ default. Pinned in `tests/read.rs` (`no_names_assign_reply_the_raw_line`,
 `a_flags_only_read_fills_reply`, `an_explicit_reply_name_is_trimmed_like_any_target`,
 `reply_stays_out_of_the_child_environment`).
 
+For `read -p WORD`, bash applies **no prompt-escape decoding** to `WORD` — the decoder
+serves the four prompt drawers only — and treats it as an **ordinary word**: the normal
+pipeline expands it at parse time (parameter, command substitution in both spellings,
+arithmetic, the escape-pair fold, `IFS` splitting, glob), and that expansion runs
+whether or not anything is drawn, so a `read -p` off a terminal still pays for it (and
+for a `$( … )` in it, one fork). fdshell expands the `-p` **operand word** and draws its
+**first field**, which is what bash draws, and leaves the rest of the word pipeline to
+the open question of which fields become **variable names** after a split — so
+`v="A B"; read -p $v x` prompts `A` in both shells, and stores the line in `x` here
+where bash takes `B`. Pinned in `tests/read.rs`
+(`the_operand_word_expands_on_a_tty`, `the_operand_slot_takes_the_first_field`,
+`the_operand_expands_even_when_nothing_is_drawn`,
+`a_nounset_operand_is_reported_and_runs_nothing`) and in
+`src/intercept/read/tests.rs` (`run_read_draws_the_expanded_operand`,
+`run_read_draws_the_first_field_of_a_split_operand`).
+
 `unset name…` removes each named shell variable — its value, its export
 attribute and the inherited environment row it came from, all three, so the
 name leaves `$name`, `${name:-word}` and the child environment together (after
@@ -2151,6 +2167,35 @@ prompt — arithmetic and parameters stay in-process — so a prompt with a comm
 substitution forks each time it is drawn. Keeping those resident is epic #199's
 question; epic #198's width math reads the **expanded** record, since the bytes
 drawn are the expanded ones.
+
+fdshell's accepted divergences from bash for this layer, all owned by task #623,
+each pinned by the row named after it: the identity escapes `\s`, `\v`, `\V` and the
+default `PS1` draw **fdshell's own program name and version** (`fdshell-0.1.0$ `
+where bash draws `bash-5.3$ ` — `tests/repl.rs::default_prompt_is_drawn_on_a_terminal`,
+`src/repl/prompt/value/shell/tests.rs::s_follows_the_program_name_and_its_setter`,
+`src/repl/prompt/value/shell/tests.rs::v_and_full_version_draw_the_crates_own_version`);
+off a terminal `\l` draws its **escape text** where bash prints `tty`
+(`src/repl/prompt/value/shell/tests.rs::a_pipe_stdin_has_no_tty_name_so_the_escape_stays_literal`);
+`\!` counts **fdshell's own command counter** — there is no history list yet (story
+#21) — so it answers the same number as `\#`
+(`tests/repl.rs::the_command_counter_counts_commands_and_no_blank_line`); `\xHH` is
+**fdshell's extension**, bash measuring `\x41` literal (task #616's decision D1,
+`tests/repl.rs::a_hex_escape_in_the_prompt_is_drawn_as_its_byte`); `\D{…}` is
+**unrecognised** here, so its escape text is drawn where bash renders its strftime
+value (`tests/repl.rs::an_unrecognised_brace_escape_is_drawn_as_its_text`); `\w` and
+`\W` answer the **provenance `cd` recorded** and draw their escape text when it names
+no path, where bash draws its logical `$PWD`
+(`tests/repl.rs::an_origin_without_a_path_draws_the_escape_text`,
+`src/repl/prompt/value/cwd/tests.rs::the_home_prefix_becomes_a_tilde`); a **decoded NUL
+reaches the prompt**, where bash's prompt writer drops the byte
+(`tests/repl.rs::a_decoded_nul_is_drawn_as_a_nul`,
+`src/repl/prompt/render/expand/tests.rs::a_nul_splits_the_run_and_is_pasted`); and a
+failing expansion is reported in **fdshell's report style** — the shape above is
+bash's, the words are not (`tests/repl.rs::nounset_in_a_prompt_reports_and_keeps_the_shell`).
+Nothing here decodes escapes for a prompt it did not draw: the decoder serves the four
+drawers `PS1`, `PS2`, `PS4`, `PS0`, and `PS3` is read by none of them because fdshell
+has no `select` builtin (bash's `select` reads `PS3` and defaults it to its `#? ` menu
+prompt).
 
 ## Strict mode
 
