@@ -870,3 +870,84 @@ fn reply_stays_out_of_the_child_environment() {
         "the ordinary export path exports, in bash too: script={script}"
     );
 }
+
+// ---- task #630: one shared stdin buffer for the parse layer and `read` ----
+
+// bash answers the parse layer and `read` from one buffered reader for
+// stdin; fdshell joins the two sides through the task #609 buffer. Every row
+// here was measured against bash 5.3.9 on this machine before being pinned.
+
+/// Runs the script as a **stdin-fed session** — no `-c`, the script arrives
+/// on the piped stdin, so the parse layer's buffered reader is in play (the
+/// `tests/repl.rs::run_repl` shape). Off a terminal `prompt::resolve` draws
+/// nothing, so for the clean rows here stdout is exact and stderr empty.
+fn run_stdin_session(dir: &std::path::Path, script: &str) -> Output {
+    use std::io::Write as _;
+    let mut child = Command::new(BIN)
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(script.as_bytes())
+        .unwrap();
+    drop(child.stdin.take());
+    child.wait_with_output().unwrap()
+}
+
+/// Task #630 (bash 5.3.9 measured): the builtin's line sits in the parse
+/// layer's buffered chunk — with one shared buffer `read` answers `second`
+/// and nothing runs as a command after it (bash `top`, `[second]`, rc 0).
+#[test]
+fn a_stdin_fed_session_shares_the_stdin_buffer() {
+    let dir = Scratch::new();
+    let out = run_stdin_session(&dir, "echo top; read x; echo [$x]\nsecond\n");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "the session ends clean: stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "top\n[second]\n");
+    assert_eq!(stderr(&out), "");
+}
+
+/// Task #630 (bash 5.3.9 measured): the forward direction — the builtin takes
+/// the parse layer's whole buffered second line, and the parser then reads
+/// EOF and exits without executing anything else.
+#[test]
+fn a_read_consumes_the_parsers_buffered_line() {
+    let dir = Scratch::new();
+    let out = run_stdin_session(&dir, "read x; echo [$x]\necho kept\n");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "the session ends clean: stderr={}",
+        stderr(&out)
+    );
+    assert_eq!(stdout(&out), "[echo kept]\n");
+    assert_eq!(stderr(&out), "");
+}
+
+/// Task #630 (bash 5.3.9 measured): the reverse direction — `read -n 4` takes
+/// `echo` from the shared buffer and puts back ` kept\n`, so the parser's
+/// next line is `kept`: command-not-found on both shells. Both stderrs carry
+/// reports (so only stdout is pinned), and the shells' exit codes disagree
+/// here (bash 127, fdshell 0 — the REPL's EOF exit is pinned elsewhere), so
+/// the status is left out.
+#[test]
+fn a_read_putback_is_visible_to_the_parsers_next_line() {
+    let dir = Scratch::new();
+    let out = run_stdin_session(&dir, "read -n 4 x; echo [$x]\necho kept\n");
+    assert_eq!(
+        stdout(&out),
+        "[echo]\n",
+        "stderr carries the report: {}",
+        stderr(&out)
+    );
+}
