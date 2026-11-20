@@ -12404,3 +12404,43 @@ Cross-reference (do not merge): LESSONS: "The two escape decoders have different
 bytes raw) and LESSONS: "Test tty-gated behavior from safe-crate integration tests via `script`"
 (the pty rows above; their counts include the display for the row's own `exit`, and never
 a display for the read whose value was still empty).
+
+## A pty's termios baseline is host state, so pins are deltas against a snapshot
+
+`tcgetattr`/`tcsetattr` and `TIOCGWINSZ` live in `unsafe/sys` as
+`tcgetattr.rs` and `tiocgwinsz.rs`, and each wrapper's tests drive their own
+`sys::pty::openpty()` pair in their own test binary (citation line below).
+Everything the pty answers is **this host's** cooked state (measured:
+`iflag ICRNL|IXON`, `oflag OPOST|ONLCR`, `cflag 0xf00bf`,
+`lflag ISIG|ICANON|ECHO|ECHOK|ECHOE|ECHOCTL|ECHOKE|IEXTEN`, `VMIN=1 VTIME=0`),
+so an assertion on an absolute flag number is a tautology or a flake: snapshot
+first, then pin the **delta** against the snapshot.
+
+bash's readline cannot be the oracle for the editor's flag set: it saves the
+original termios, applies its raw mode, and restores the original before
+accepting each line, so `stty -g` answers the same baseline string both while
+readline owns the terminal and while a command runs — its raw mode is invisible
+to any command the shell runs, and the shell must define its own set. What the
+measurement does give is which bits are observable on a pty at all: clearing
+`ICANON` delivers one typed key with no Enter, clearing `ECHO` stops the kernel
+echo, clearing `ISIG` passes Ctrl-C through as a raw byte (cooked: the kernel
+answers `^C` and raises), clearing `IXON` passes Ctrl-S and Ctrl-Q through
+(cooked: both are consumed and output stops), and `VMIN`/`VTIME` are the
+read-amount knobs. Those four bits are the whole editor set; every other bit
+must keep the value the caller saved, and each flag is cleared on its own line
+so the mask has no `|` to move (citation below).
+
+Two more measured pins: a **fresh** pty's `TIOCGWINSZ` answers `0 x 0`, so no
+test may assume a non-zero size, and `TIOCGWINSZ` on a pipe fd answers `ENOTTY`
+— not a named `SyscallError` variant, so the wrapper reports it through `cvt`.
+
+Pins: `unsafe/sys/tests/tcgetattr.rs`
+(`save_apply_round_trip_is_observable`,
+`enter_raw_applies_exactly_the_measured_set`,
+`restore_round_trip_returns_the_saved_mode`) and `unsafe/sys/tests/tiocgwinsz.rs`
+(`a_set_size_comes_back_field_for_field`, `a_fresh_pty_reports_a_zero_size`,
+`a_pipe_fd_answers_enotty`).
+
+Cross-reference (do not merge): LESSONS: "`|` on disjoint bit flags produces equivalent mutants"
+(and LESSONS: "`cargo mutants` runs only the mutated package's own tests unless `--test-workspace true`")
+— the first is why `enter_raw` clears bit by bit, the second why each wrapper is tested in its own binary.
