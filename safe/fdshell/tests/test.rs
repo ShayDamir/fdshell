@@ -486,3 +486,60 @@ fn nested_groups_and_negation_chains_are_capped() {
         }
     }
 }
+
+/// Create `path` with its mtime pinned to `secs` + `nsec` since the epoch: what
+/// `touch -d '@100.1'` does, done in-process so the test spawns nothing but
+/// fdshell (full nanosecond precision is the point of these pins).
+fn touch_nsec(path: &std::path::Path, secs: u64, nsec: u32) {
+    let f = std::fs::File::create(path).unwrap();
+    let when = std::time::UNIX_EPOCH + std::time::Duration::new(secs, nsec);
+    f.set_times(std::fs::FileTimes::new().set_modified(when))
+        .unwrap();
+}
+
+/// `-nt`/`-ot`/`-ef` statuses. Every expected value is what `bash -c "test
+/// <expr>"` gives for the same expression on this machine (bash 5.3.9, measured
+/// 2026-11-20), so each row is a measurement, not a guess.
+#[test]
+fn test_newer_older_uses_nanoseconds_and_posix_existence() {
+    let dir = scratch("mtime_order");
+    let (a, b, c, d, missing) = (
+        dir.join("a"),
+        dir.join("b"),
+        dir.join("c"),
+        dir.join("d"),
+        dir.join("missing"),
+    );
+    touch_nsec(&a, 100, 100_000_000);
+    touch_nsec(&b, 100, 900_000_000);
+    touch_nsec(&c, 100, 0);
+    touch_nsec(&d, 100, 0);
+    let p = |path: &std::path::Path| path.to_str().unwrap().to_string();
+    for (expr, want) in [
+        // One whole second apart only at the nanosecond half.
+        (format!("{} -nt {}", p(&b), p(&a)), 0),
+        (format!("{} -ot {}", p(&a), p(&b)), 0),
+        (format!("{} -nt {}", p(&a), p(&b)), 1),
+        (format!("{} -ot {}", p(&b), p(&a)), 1),
+        (format!("{} -nt {}", p(&a), p(&c)), 0),
+        (format!("{} -ot {}", p(&c), p(&a)), 0),
+        // Identical timestamps: neither newer nor older.
+        (format!("{} -nt {}", p(&c), p(&d)), 1),
+        (format!("{} -ot {}", p(&c), p(&d)), 1),
+        // The POSIX existence rule: an existing operand beats a missing one
+        // for the operator that prefers the existing side.
+        (format!("{} -nt {}", p(&b), p(&missing)), 0),
+        (format!("{} -nt {}", p(&a), p(&missing)), 0),
+        (format!("{} -ot {}", p(&missing), p(&b)), 0),
+        (format!("{} -ot {}", p(&missing), p(&a)), 0),
+        (format!("{} -nt {}", p(&missing), p(&b)), 1),
+        (format!("{} -ot {}", p(&b), p(&missing)), 1),
+        (format!("{} -nt {}", p(&missing), p(&missing)), 1),
+        // -ef needs both operands.
+        (format!("{} -ef {}", p(&missing), p(&b)), 1),
+        (format!("{} -ef {}", p(&b), p(&missing)), 1),
+        (format!("{} -ef {}", p(&a), p(&a)), 0),
+    ] {
+        assert_eq!(run(&format!("test {expr}")).2, want, "{expr}");
+    }
+}

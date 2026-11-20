@@ -66,3 +66,26 @@ fn fchmod_bad_fd_errors() {
     let fd = unsafe { ImportedFd::from_raw(-1) };
     assert!(fd.fchmod(0o640).is_err());
 }
+
+#[test]
+fn fstat_on_imported_fd_reports_the_real_mode() {
+    let dir = scratch();
+    let file = dir.join("f");
+    std::fs::write(&file, b"x").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let cpath = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
+
+    // SAFETY: `cpath` is a valid NUL-terminated path; O_RDWR without O_CLOEXEC
+    // yields an fd with CLOEXEC clear, satisfying the ImportedFd invariant.
+    let raw = unsafe { libc::open(cpath.as_ptr(), libc::O_RDWR) };
+    assert!(raw >= 0);
+    // SAFETY: `raw` is a valid open fd with CLOEXEC clear (opened above).
+    let fd = unsafe { ImportedFd::from_raw(raw) };
+
+    // The fd-side read of the same inode. `ImportedFd::fstat` had no caller
+    // inside the `sys` package, so this is the only pin of it here; the mode is
+    // the file's own, so an all-zero answer fails.
+    assert_eq!(fd.fstat().unwrap().mode & 0o777, 0o640);
+    // SAFETY: `raw` is the valid open fd created above.
+    unsafe { libc::close(raw) };
+}

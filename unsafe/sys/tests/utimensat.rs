@@ -61,10 +61,11 @@ fn atime_secs(path: &std::path::Path) -> i64 {
     st.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
 }
 
-/// mtime in epoch seconds of the link itself (lstat).
+/// mtime in epoch seconds of the link itself, read through `sys::stat::lstat`
+/// — the crate's own lstat surface, so a stubbed `lstat` is caught here.
 fn lmtime_secs(path: &std::path::Path) -> i64 {
-    let st = std::fs::symlink_metadata(path).unwrap().modified().unwrap();
-    st.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
+    let cpath = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    sys::stat::lstat(&cpath).unwrap().mtime
 }
 
 /// Stat calls do not bump atime (relatime), so these helpers are safe to mix.
@@ -92,6 +93,27 @@ fn utimensat_sets_epoch() {
     let path = std::ffi::CString::new("f").unwrap();
     sys::fileat::utimensat(dirfd.at(), &path, &epoch(1234567890), &epoch(1234567890), 0).unwrap();
     assert_eq!(mtime_secs(&dir.join("f")), 1234567890);
+}
+
+/// Both halves of the timestamp survive the round trip through `sys::stat`:
+/// `FileStat::mtime_nsec` is populated, not just `mtime` — the shell's
+/// `-nt`/`-ot` order needs it (bash compares nanoseconds).
+#[test]
+fn stat_reports_both_halves_of_the_mtime() {
+    let dir = scratch();
+    std::fs::write(dir.join("f"), b"x").unwrap();
+    let dirfd = open_dir(&dir);
+    let path = std::ffi::CString::new("f").unwrap();
+    let when = sys::fileat::Timespec {
+        tv_sec: 100,
+        tv_nsec: 900_000_000,
+    };
+    sys::fileat::utimensat(dirfd.at(), &path, &when, &when, 0).unwrap();
+    let cpath = std::ffi::CString::new(dir.join("f").to_str().unwrap()).unwrap();
+    let st = sys::stat::stat(&cpath).unwrap();
+    assert_eq!((st.mtime, st.mtime_nsec), (100, 900_000_000));
+    let lst = sys::stat::lstat(&cpath).unwrap();
+    assert_eq!((lst.mtime, lst.mtime_nsec), (100, 900_000_000));
 }
 
 #[test]

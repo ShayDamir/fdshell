@@ -88,7 +88,13 @@ fn make_file(path: &Path, mode: u32) {
 
 /// Create (or rewrite) a file and pin its mtime to `secs` since the epoch.
 fn touch(path: &Path, secs: i64) {
-    let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs as u64);
+    touch_nsec(path, secs, 0);
+}
+
+/// As `touch`, but with a nanosecond half: `test -nt`/`-ot` compare
+/// `(sec, nsec)` and so must the pins (bash does).
+fn touch_nsec(path: &Path, secs: i64, nsec: u32) {
+    let t = std::time::UNIX_EPOCH + std::time::Duration::new(secs as u64, nsec);
     let f = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -117,6 +123,7 @@ fn fst(mode: u32, size: u64, mtime: i64, dev: u64, ino: u64) -> FileStat {
         rdev: 0,
         size,
         mtime,
+        mtime_nsec: 0,
     }
 }
 
@@ -491,6 +498,63 @@ fn binary_mtime_tests() {
     for p in [&fa, &fb, &fc] {
         let _ = std::fs::remove_file(p);
     }
+}
+
+/// The same pair inside one whole second, ordered by the nanosecond half —
+/// every status here is what bash 5.3.9 gives on this machine.
+#[test]
+fn binary_mtime_nanoseconds() {
+    let _scratch = scratch("mtns");
+    let state = ShellState::new();
+    let (fa, fb) = (_scratch.join("ns-a"), _scratch.join("ns-b"));
+    touch_nsec(&fa, 100, 100_000_000);
+    touch_nsec(&fb, 100, 900_000_000);
+    let (pa, pb) = (fa.to_str().unwrap(), fb.to_str().unwrap());
+    assert_eq!(run(&[pb, "-nt", pa], &state).unwrap(), 0, "fb is newer");
+    assert_eq!(run(&[pa, "-ot", pb], &state).unwrap(), 0, "fa is older");
+    assert_eq!(run(&[pa, "-nt", pb], &state).unwrap(), 1);
+    assert_eq!(run(&[pb, "-ot", pa], &state).unwrap(), 1);
+}
+
+/// The POSIX existence rule, measured against bash: an existing operand beats
+/// a missing one for the operator that prefers the existing side; `-ef` and the
+/// fdshell `-fdeq`/`-fdne` extensions still need both operands.
+#[test]
+fn binary_missing_operand_uses_posix_existence_rule() {
+    let _scratch = scratch("mtmiss");
+    let mut state = ShellState::new();
+    let file = _scratch.join("existing");
+    touch(&file, 100);
+    let p = file.to_str().unwrap();
+    let missing = "/nonexistent-fdshell-test";
+    assert_eq!(run(&[p, "-nt", missing], &state).unwrap(), 0);
+    assert_eq!(run(&[missing, "-ot", p], &state).unwrap(), 0);
+    assert_eq!(run(&[missing, "-nt", p], &state).unwrap(), 1);
+    assert_eq!(run(&[p, "-ot", missing], &state).unwrap(), 1);
+    assert_eq!(run(&[missing, "-ef", p], &state).unwrap(), 1);
+    assert_eq!(run(&[p, "-ef", missing], &state).unwrap(), 1);
+    assert_eq!(run(&[p, "-fdeq", missing], &state).unwrap(), 1);
+    assert_eq!(run(&[missing, "-fdne", p], &state).unwrap(), 1);
+    assert_eq!(run(&[missing, "-nt", "also-missing"], &state).unwrap(), 1);
+    // A set fd var is stat-able, so it is the existing side of the rule; an
+    // unset name is the missing one.
+    ins(
+        &mut state,
+        c"f",
+        sys::openat2::open(cstr(&file), O_RDONLY).unwrap(),
+    );
+    assert_eq!(
+        with_refs(&["%f", "-nt", "nope"], |r, o| eval(r, o, &state)).unwrap(),
+        0
+    );
+    assert_eq!(
+        with_refs(&["nope", "-ot", "%f"], |r, o| eval(r, o, &state)).unwrap(),
+        0
+    );
+    assert_eq!(
+        with_refs(&["%f", "-ef", "nope"], |r, o| eval(r, o, &state)).unwrap(),
+        1
+    );
 }
 
 #[test]
