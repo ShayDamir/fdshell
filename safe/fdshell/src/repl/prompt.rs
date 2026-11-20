@@ -122,7 +122,13 @@ pub(crate) fn resolve_ps4(
             PromptVars::Off
         }
     };
-    resolve_bytes(cell, &ShortCStr::from(c"PS4"), default, policy, Markers::Dropped)
+    resolve_bytes(
+        cell,
+        &ShortCStr::from(c"PS4"),
+        default,
+        policy,
+        Markers::Dropped,
+    )
 }
 
 #[cfg(test)]
