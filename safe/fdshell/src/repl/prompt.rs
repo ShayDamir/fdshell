@@ -12,8 +12,16 @@
 //! re-borrows"); the grammar of that stage is in `render/expand.rs`. `PS4` (task
 //! #621) shares the pipeline through `resolve_ps4`: the shopt gates it as it
 //! gates these two, while the tty gate and the marker bytes are the drawers' own.
+//!
+//! `PS0` (task #622) is the **third** drawer, and the only one of the four that is
+//! not a prompt: bash *displays* its value — it does not execute it — after reading
+//! a line and before the command runs. It shares the tty gate and the shopt with
+//! `PS1`/`PS2` and the marker policy with them; its own rules (no default string, a
+//! stderr drawer, no trailing newline, the display placed before the command
+//! counter moves) are in `ps0.rs`.
 
 mod decode;
+pub(super) mod ps0;
 mod render;
 mod segment;
 mod value;

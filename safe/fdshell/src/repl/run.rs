@@ -39,6 +39,11 @@ pub fn run(cell: &ForkCell<ShellState>) -> Result<(), Report<AppError>> {
             }
             return Ok(());
         };
+        // `PS0`'s display (task #622) goes here, **before** the counter moves:
+        // bash's own comment in `reader_loop` puts it before the increment, and the
+        // measured `\#` numbers agree — it shows the number of the command it
+        // accompanies, and the provider answers `command_number + 1`.
+        prompt::ps0::display(cell);
         // The prompt for this input has already been drawn, and it showed
         // `command_number + 1` (bash's rule, measured): the input about to run is
         // the command the counter counts. Blank inputs never get here — bash
