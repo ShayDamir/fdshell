@@ -1,3 +1,4 @@
+// mutants: -C --test -C set_cmd -C --test -C set_opts -- -E 'binary(set_cmd) | binary(set_opts)'
 use crate::error::cmd::CmdError;
 use crate::state::ShellState;
 use error_stack::{Report, ResultExt};
@@ -61,7 +62,7 @@ fn run_set_xtrace(
     cmdline: &crate::parse::CommandLine,
     cell: &ForkCell<ShellState>,
 ) -> Result<(), Report<CmdError>> {
-    crate::xtrace::trace_unconditional(b"set", &cmdline.args);
+    crate::xtrace::trace_unconditional(b"set", &cmdline.args, cell);
     let mut state = cell.borrow_mut().change_context(CmdError::Never)?;
     state.options =
         crate::options::set(state.options, crate::options::XTRACE, flag.eq_bytes(b"-x"));

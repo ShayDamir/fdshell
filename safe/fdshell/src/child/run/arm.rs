@@ -1,3 +1,4 @@
+// mutants: -C --test -C builtin_first -C --test -C function_keyword -C --test -C pipeline -- -E 'binary(builtin_first) | binary(function_keyword) | binary(pipeline)'
 //! The dispatch half of `child::run`: which arm answers the name, decided once
 //! (bash's order: the forked table, then a user function, then the intercepted
 //! table, then `PATH`) so that the trace goes to the arm that runs it.
@@ -53,12 +54,11 @@ pub(super) fn run(
     let intercepts = child::intercepted::answers(&cmd.name, builtin, stage, &fn_body);
     // The intercept arm owns its trace: `intercept::try_intercept` prints the
     // raw arguments (and `set` traces itself), which is what the plain path does
-    // for the same command — one line per command, on both paths.
+    // for the same command — one line per command, on both paths. The trace takes
+    // the cell, never a borrow held across it: its `PS4` prefix re-borrows and can
+    // fork for a `$( … )` (LESSONS).
     if !intercepts {
-        let state = cell
-            .borrow()
-            .change_context(ChildProcessError::BorrowFailed)?;
-        crate::xtrace::trace(cmd.name.as_bytes().unwrap_or(&[]), resolved, &state);
+        crate::xtrace::trace(cmd.name.as_bytes().unwrap_or(&[]), resolved, cell);
     }
 
     if builtin {

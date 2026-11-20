@@ -7,6 +7,7 @@ use sys::ImportedStr;
 use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
+use crate::repl::prompt::decode::Markers;
 use crate::repl::prompt::decode::decode;
 use crate::repl::prompt::render::PromptVars;
 use crate::repl::prompt::segment::{Segment, SegmentKind, ValueEscape};
@@ -62,7 +63,7 @@ fn drawn(
 
 /// Decode and render one prompt, the way `resolve` does.
 fn run(input: &[u8], values: &dyn Values, policy: PromptVars) -> Vec<u8> {
-    drawn(&decode(input), values, policy, &cell())
+    drawn(&decode(input, Markers::Bytes), values, policy, &cell())
 }
 
 #[test]
@@ -117,7 +118,7 @@ fn the_record_keeps_its_kinds_with_final_bytes() {
     // decoder's.
     assert_eq!(
         super::render(
-            &decode(br"a\[a$hello\]C"),
+            &decode(br"a\[a$hello\]C", Markers::Bytes),
             &NoValues,
             PromptVars::On,
             &cell()

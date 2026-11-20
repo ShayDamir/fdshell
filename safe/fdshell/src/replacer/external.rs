@@ -1,3 +1,4 @@
+// mutants: -C --test -C builtin_first -C --test -C command -C --test -C test -- -E 'binary(builtin_first) | binary(command) | binary(test)'
 //! The non-`builtin` branch of `replacer::execute`: the `builtin_first`
 //! option dispatch, then external commands (hash-table aware).
 
@@ -54,10 +55,13 @@ pub(super) fn run(
     let sealed: Vec<sys::ExportedCStr> = words.iter().map(|cs| cs.export()).collect();
     let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
     if is_builtin {
+        // The trace takes the cell — the `PS4` prefix re-borrows it and can fork
+        // for a `$( … )`, so no borrow may be held across it (LESSONS) — and the
+        // line still comes before the run it announces.
+        crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &words, cell);
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
-        crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &words, &state);
         return child::dispatch::run_builtin(binary.clone(), &refs, rest, &state);
     }
     // No caching here: `become`/`exec` exit the shell right after, so the
@@ -72,10 +76,10 @@ pub(super) fn run(
     let binary_exported = binary.export();
     let mut argv: Vec<&CStr> = alloc::vec![binary_exported.as_ref()];
     argv.extend_from_slice(&refs);
+    crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &words, cell);
     let state = cell
         .borrow()
         .change_context(ChildProcessError::ExecFailed)?;
-    crate::xtrace::trace(binary.as_bytes().unwrap_or(&[]), &words, &state);
     // `exec`/`become` replace *this* image, and this process is the shell:
     // Rust std's `SIG_IGN` for `SIGPIPE` is ours, not the program's. Clear it
     // so the program dies of the signal on a closed pipe, as in bash.

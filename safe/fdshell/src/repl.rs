@@ -3,7 +3,7 @@
 mod complete;
 mod control;
 mod line;
-mod prompt;
+pub(crate) mod prompt;
 mod run;
 mod trailing;
 

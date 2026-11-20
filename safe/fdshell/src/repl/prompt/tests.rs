@@ -12,6 +12,9 @@ use sys::{ImportedStr, ShortCStr};
 /// bash 5.3.9's default `PS1`, the `run.rs` constant the call sites pass.
 const DEFAULT: &[u8] = b"\\s-\\v\\$ ";
 
+/// bash 5.3.9's default `PS4`, the `xtrace.rs` constant its call site passes.
+const PS4_DEFAULT: &[u8] = b"+ ";
+
 /// A state with the cached `interactive` flag the tty gate reads — the data
 /// `seed_state` seeds from the `is_tty` syscall, so the gate is pinnable
 /// in-process (LESSONS: caching a syscall's answer moves the branch into data).
@@ -31,6 +34,12 @@ fn set(cell: &ForkCell<ShellState>, name: &'static CStr, value: &'static CStr) {
 
 fn resolve(cell: &ForkCell<ShellState>, name: &'static CStr, default: &[u8]) -> Vec<u8> {
     super::resolve(cell, &ShortCStr::from(name), default).unwrap()
+}
+
+/// `PS4`'s entry (task #621): the same pipeline, the two `PS4` rules and the raw
+/// drawer's marker policy.
+fn ps4(cell: &ForkCell<ShellState>) -> Vec<u8> {
+    super::resolve_ps4(cell, PS4_DEFAULT).unwrap()
 }
 
 #[test]
@@ -171,4 +180,59 @@ fn the_dollars_escape_answer_is_not_a_trigger() {
         resolve(&cell, c"PS1", DEFAULT),
         format!("[{dollars}v]").as_bytes()
     );
+}
+
+#[test]
+fn ps4_answers_off_a_terminal_and_falls_back_to_its_default() {
+    // Task #621, measured: bash expands `PS4` in `bash -c`, off a terminal, so
+    // the tty gate that answers `Vec::new()` for `PS1`/`PS2` above does not
+    // apply here — and the default is still a read-time fallback, the row that
+    // decision D-621-1 is about (bash *seeds* `PS4` as a variable; here an unset
+    // one draws `+ ` and the row below answers nothing).
+    assert_eq!(ps4(&cell(false)), b"+ ");
+}
+
+#[test]
+fn ps4_a_set_value_is_used_verbatim() {
+    let cell = cell(false);
+    set(&cell, c"PS4", c"[x] ");
+    assert_eq!(ps4(&cell), b"[x] ");
+}
+
+#[test]
+fn ps4_a_set_empty_value_draws_nothing() {
+    // Measured `PS4=; set -x; echo hi` → `echo hi`: no prefix. The distinction
+    // the read-time fallback exists for, seen from `PS4`'s side.
+    let cell = cell(false);
+    set(&cell, c"PS4", c"");
+    assert_eq!(ps4(&cell), b"");
+}
+
+#[test]
+fn ps4_follows_the_promptvars_shopt() {
+    // Measured (2026-11-20, bash 5.3.9): the shopt gates `PS4` as it gates
+    // `PS1`/`PS2` — on it expands, off it draws the stored bytes as they stand
+    // (the plan read its §2 row from a double-quoted assignment, which bash
+    // expands at assignment time; a single-quoted `PS4` stays unexpanded under
+    // `shopt -u promptvars`, and fdshell agrees). The decoding stays either way.
+    let cell = cell(false);
+    set(&cell, c"v", c"V");
+    set(&cell, c"PS4", c"a\\a[$v]");
+    assert_eq!(ps4(&cell), b"a\x07[V]");
+    cell.borrow_mut().unwrap().options &= !crate::options::PROMPTVARS;
+    assert_eq!(ps4(&cell), b"a\x07[$v]");
+}
+
+#[test]
+fn ps4_a_stray_marker_emits_nothing_while_an_octal_byte_stays() {
+    // The raw drawer (`Markers::Dropped`): bash's measured `PS4` answer for
+    // `a\]b` is `ab` — the marker escape is consumed and contributes nothing —
+    // while `PS1` draws readline's `\002` byte for the same input (the pin
+    // above). An octal `\001` is data and stays in both: the strip is
+    // marker-position-based, never byte-value-based.
+    let cell = cell(false);
+    set(&cell, c"PS4", c"a\\]b");
+    assert_eq!(ps4(&cell), b"ab");
+    set(&cell, c"PS4", c"a\\001b");
+    assert_eq!(ps4(&cell), b"a\x01b");
 }

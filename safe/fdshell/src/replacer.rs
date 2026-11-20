@@ -1,3 +1,4 @@
+// mutants: -C --test -C builtin_first -C --test -C command -- -E 'binary(builtin_first) | binary(command)'
 mod external;
 
 use crate::bytes::fold::fold_word;
@@ -51,10 +52,13 @@ pub fn execute(
         .change_context(ChildProcessError::ExecFailed)?;
         let sealed: Vec<sys::ExportedCStr> = substituted.iter().map(|cs| cs.export()).collect();
         let refs: Vec<&CStr> = sealed.iter().map(|rc| rc.as_ref()).collect();
+        // The trace takes the cell: the `PS4` prefix re-borrows it and can fork,
+        // so no borrow may be held across it (LESSONS), and the line still comes
+        // before the run it announces.
+        crate::xtrace::trace(builtin_name.as_bytes().unwrap_or(&[]), &substituted, cell);
         let state = cell
             .borrow()
             .change_context(ChildProcessError::ExecFailed)?;
-        crate::xtrace::trace(builtin_name.as_bytes().unwrap_or(&[]), &substituted, &state);
         child::dispatch::run_builtin(builtin_name.clone(), &refs, builtin_args, &state)
     } else {
         external::run(args, args_mask, args_span, args_quoted, cell)
