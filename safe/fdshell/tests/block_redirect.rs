@@ -5,8 +5,8 @@
 //! block's own word list / condition runs. That is exactly the rule
 //! `{ …; } > f` already implements, and every expectation below is bash 5.3.9's
 //! own output for the same script — except the rows that name their owner task
-//! (the rc-convention family #179, the word-behind-the-closer family #405, the
-//! close-of-an-already-closed-fd family #613). Task **#408** landed the
+//! (the rc-convention family #179 and the word-behind-the-closer family #405).
+//! Task **#408** landed the
 //! here-doc / here-string half of the same tail; its matrix is
 //! `a_here_doc_or_here_string_on_a_closer_feeds_the_block`. Task **#409** landed
 //! the `&>` family; its matrix is
@@ -778,59 +778,49 @@ fn the_pinned_divergences_behind_a_closer() {
 }
 
 /// The body's `exec 6>&-` closes a fd the script never had: with every fd the shell
-/// allocates for itself floored at `MIN_SHELL_FD`, no saved copy sits at fd 6, so the
-/// failure is the close's own. The block twin of
-/// `tests/redirect_scope.rs::body_that_closes_the_saved_copy_fails_the_call`. bash
-/// 5.3.9 is silent at rc 0 with `f` = `a\n` — the close-of-an-already-closed-fd rule
-/// **#613** owns it. The body's output is already in the file when the run ends.
+/// allocates for itself floored at `MIN_SHELL_FD`, no saved copy sits at fd 6. Bash
+/// 5.3.9 is silent at rc 0 with `f` = `a\n` — a close of a not-open fd is the state
+/// the def asked for, so it succeeds — and the block's output reaches the target
+/// normally. The block twin of
+/// `tests/redirect_scope.rs::a_body_that_closes_a_never_opened_fd_is_silent`, and the
+/// row is plain parity since task **#613**.
 #[test]
-fn a_body_that_closes_the_saved_copy_fails_the_block() {
+fn a_body_that_closes_a_never_opened_fd_is_silent() {
     let dir = Scratch::new();
     let o = run(&dir, "while :; do echo a; exec 6>&-; break; done > f");
-    assert_eq!(rc(&o), Some(1), "stdout={:?} stderr={:?}", out(&o), err(&o));
-    assert_eq!(out(&o), "");
-    assert!(
-        err(&o).contains("redirection failed"),
-        "the report is the redirect error: stderr={}",
-        err(&o)
-    );
+    assert_eq!((out(&o), rc(&o)), ("", Some(0)), "stderr={}", err(&o));
+    assert_eq!(err(&o), "", "bash says nothing");
     assert_eq!(file(&dir, "f"), Some(b"a\n".to_vec()));
 }
 
 /// The same close **in the tail** (`done > f 6>&-`), on a fd the script never had
-/// (the shell's own fds sit at or above `MIN_SHELL_FD`): the close fails at the
-/// def's own arm, so the block fails at status 1 and the shell continues now (task
-/// #179) — `tail` prints and the failed open rolls back, leaving the target created
-/// empty. bash gives rc 0 with `tail` printed and the block's output in `f`, no
-/// message — the close-of-an-already-closed-fd rule **#613** owns it.
+/// (the shell's own fds sit at or above `MIN_SHELL_FD`): bash 5.3.9 is silent at rc 0,
+/// `tail` prints and the block's output **does** reach the target — there is no failed
+/// open to roll back, so the file holds the block's line. Parity since task **#613**;
+/// the group twin below behaves identically.
 #[test]
-fn a_tail_that_closes_the_saved_copy_fails_the_block() {
+fn a_tail_that_closes_a_never_opened_fd_is_silent() {
     let dir = Scratch::new();
     let o = run(&dir, "while :; do echo a; break; done > f 6>&-; echo tail");
     assert_eq!(
         (out(&o), rc(&o)),
         ("tail\n", Some(0)),
-        "the shell continues after the failed block: stderr={}",
+        "the run continues past the block: stderr={}",
         err(&o)
     );
-    assert!(
-        err(&o).contains("failed to close redirection target fd 6"),
-        "the restore names the fd it could not close: stderr={}",
-        err(&o)
-    );
+    assert_eq!(err(&o), "", "bash says nothing");
     assert_eq!(
         file(&dir, "f"),
-        Some(b"".to_vec()),
-        "the block's output never reaches the target: the scope rolled back"
+        Some(b"a\n".to_vec()),
+        "the block's output reaches the target"
     );
 
     let dir = Scratch::new();
     let o = run(&dir, "{ echo g; } > f 6>&-; echo tail");
     assert_eq!(
-        (out(&o), rc(&o), file(&dir, "f")),
-        ("tail\n", Some(0), Some(b"".to_vec())),
-        "the group twin behaves identically: stderr={}",
-        err(&o)
+        (out(&o), rc(&o), err(&o), file(&dir, "f")),
+        ("tail\n", Some(0), "", Some(b"g\n".to_vec())),
+        "the group twin behaves identically"
     );
 }
 

@@ -296,48 +296,85 @@ fn closed_fd_redirect_is_restored_after_the_call() {
     assert_eq!(body(&a), "x\n");
 }
 
-/// The saved copy sits **above the range a script can name** (`MIN_SHELL_FD`, as
-/// bash keeps its own bookkeeping), so `f(){ echo ok; exec 6>&-; }; f >q` no longer
-/// closes the shell's copy: fd 6 is a never-opened fd, so the failure is the
-/// `exec`'s **own** close — the report gains the `failed to close redirection target
-/// fd 6` middle frame — the body's command fails, the function returns 1, the shell
-/// **continues**, the restore succeeds and the next command's stdout works. bash
-/// 5.3.9 runs both rows silently at rc 0; the report — the close of an
-/// already-closed fd — is the rule **#613** owns. fd 6 is closed in the child's start
-/// state so the fd table is deterministic (LESSONS, task #276); the unit twin that
-/// measures the copy fd is
-/// `run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command`.
+/// The rule, measured on bash 5.3.9 (2026-11-20): a body that closes a descriptor
+/// the script never had is **silent**. With every fd the shell allocates for itself
+/// floored at `MIN_SHELL_FD`, fd 6 is such a fd — the saved copy of stdout sits
+/// nowhere near it — so the close is the whole story: it succeeds at rc 0, the body's
+/// output reaches the target, and the run continues (`echo after` prints). The unit
+/// arm is `redirect/tests.rs::close_of_a_never_opened_fd_is_silent`; the floor twin
+/// is `body_that_closes_the_saved_copy_above_the_floor_fails_the_restore` (a fd the
+/// script *can* name at the floor), and the parent-level mechanism pin is
+/// `run/parent/tests.rs::body_that_closes_the_saved_copy_fails_the_command`. fd 6 is
+/// closed in the child's start state so the fd table is deterministic whatever the
+/// harness inherited (LESSONS, task #276).
 #[test]
-fn body_that_closes_the_saved_copy_fails_the_call() {
+fn a_body_that_closes_a_never_opened_fd_is_silent() {
     let (a, _sa) = temp_path("lost_save_a");
     let (out, err, code) = run_fds_closed(
         &[6],
         &format!("f(){{ echo ok; exec 6>&-; }}; f > {a}; echo after"),
     );
     assert_eq!(
-        code, 0,
-        "the shell continues after the failed command: stderr={err:?}"
+        (out.as_str(), err.as_str(), code),
+        ("after\n", "", 0),
+        "bash is silent at rc 0 and continues to the next command"
     );
-    assert_eq!(out, "after\n", "stdout is back for the next command");
     assert_eq!(body(&a), "ok\n", "the body ran under the redirection");
-    assert!(
-        err.contains("failed to close redirection target fd 6"),
-        "the report names the fd the exec could not close: stderr={err:?}"
-    );
 
     let (b, _sb) = temp_path("lost_save_b");
     let (out, err, code) = run_fds_closed(&[6], &format!("f(){{ echo ok; exec 6>&-; }}; f > {b}"));
     assert_eq!(
-        code, 1,
-        "the failed close fails the command; stderr={err:?}"
-    );
-    assert_eq!(out, "");
-    assert!(
-        err.contains("redirection failed")
-            && err.contains("failed to close redirection target fd 6"),
-        "the close arm, not the restore: stderr={err:?}"
+        (out.as_str(), err.as_str(), code),
+        ("", "", 0),
+        "the call succeeds; stderr={err:?}"
     );
     assert_eq!(body(&b), "ok\n", "the body ran under the redirection");
+}
+
+/// The `exec` arm of the same rule (the reported bug): every shape the task names —
+/// `>&-`, `<&-`, the double close, `set -e`, a special builtin, `eval` — is silent at
+/// rc 0 on bash 5.3.9 (2026-11-20). POSIX's special-builtin *abort* needs an error to
+/// abort on, and there is none, so `set -e` and the special builtin change nothing;
+/// `set -o posix` itself is task **#631**. Each script's close targets fd 4, closed in
+/// the child's start state so the fd table is deterministic (LESSONS, task #276).
+#[test]
+fn closing_a_never_opened_fd_is_silent() {
+    for script in [
+        "exec 4>&-; echo rc=$?",
+        "exec 4<&-; echo rc=$?",
+        "exec 4>&-; exec 4>&-; echo rc=$?",
+        "set -e; exec 4>&-; echo rc=$?",
+        ". /dev/null 4>&-; echo rc=$?",
+        "eval \"exec 4<&-\"; echo rc=$?",
+    ] {
+        let (out, err, code) = run_fds_closed(&[4], script);
+        assert_eq!(
+            (out.as_str(), err.as_str(), code),
+            ("rc=0\n", "", 0),
+            "{script}: bash prints its own `rc=0` and says nothing else"
+        );
+    }
+}
+
+/// The control that keeps the close arm real: closing a descriptor the script **did**
+/// open is a real close — silent on bash, which is the same silence as the rule above
+/// for the opposite reason — so it is the *next* command that fails on the fd that is
+/// really gone. bash 5.3.9 gives `rc=1` for `cat <&3` and rc 0 for the run, with its own
+/// message; fdshell's report shape for that failure is pinned by
+/// `tests/fddup.rs::close_redirect_closes_fd_in_shell`. What is pinned here is that the
+/// close itself is not the report: the run continues and the status chain is bash's.
+#[test]
+fn a_close_of_an_opened_fd_lands_and_the_next_command_reports() {
+    let (out, err, code) = run("exec 3< /dev/null; exec 3>&-; cat <&3; echo rc=$?");
+    assert_eq!(
+        (out.as_str(), code),
+        ("rc=1\n", 0),
+        "the `cat` fails on the closed fd, the run continues: stderr={err:?}"
+    );
+    assert!(
+        !err.is_empty() && !err.contains("failed to close redirection target fd 3"),
+        "the close of a live fd succeeded, so the report belongs to the `cat`: stderr={err:?}"
+    );
 }
 
 /// The floor seen from a script: with fds 3-9 closed in the child's start state,
@@ -345,7 +382,7 @@ fn body_that_closes_the_saved_copy_fails_the_call() {
 /// clone and fd **12** on the saved copy of stdout (strace: `fcntl(4,
 /// F_DUPFD_CLOEXEC, 10) = 10`, `fcntl(10, F_DUPFD_CLOEXEC, 10) = 11`, `fcntl(1,
 /// F_DUPFD_CLOEXEC, 10) = 12`). Closing fd 6 — below the floor — cannot reach any of
-/// them (`body_that_closes_the_saved_copy_fails_the_call`); closing fd 12 closes the
+/// them (`a_body_that_closes_a_never_opened_fd_is_silent`); closing fd 12 closes the
 /// copy the parent's restore needs, so the close itself succeeds, the restore fails
 /// with the two-context report (**no** `failed to close redirection target fd N`
 /// middle frame) and the run ends at rc 1. bash 5.3.9 keeps its own bookkeeping

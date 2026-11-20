@@ -123,11 +123,13 @@ fn body_that_closes_the_saved_copy_fails_the_command() {
         "redirection failed",
         "report: {report}"
     );
-    // The frame shape is the distinction a plain rc-1 sweep cannot see: closing a
-    // *closed* fd in the body fails at the `exec`'s own close and gains the middle
-    // `OpenRedirectError::CloseFd` frame ("failed to close redirection target fd N",
-    // `redirect.rs:48`). Here there is no such frame, so the EBADF comes from the
-    // restore's `dup2` and the report has exactly the two contexts.
+    // The frame shape is the distinction a plain rc-1 sweep cannot see: the body
+    // closes the saved copy, a fd that **is** open, so the close succeeds and gains
+    // no `OpenRedirectError::CloseFd` frame ("failed to close redirection target fd
+    // N", the `Close` arm of `Redirect::export`) — that frame belongs to a close of a
+    // live fd that failed another errno, never to a not-open fd, which is silent.
+    // Here the EBADF comes from the restore's `dup2` and the report has exactly the
+    // two contexts.
     assert_eq!(
         report.frames().filter(|f| f.is::<CmdError>()).count(),
         1,
