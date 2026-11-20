@@ -29,7 +29,7 @@ pub(crate) fn read_line(
     input: &mut LineReader,
 ) -> Result<bool, Report<AppError>> {
     sys::OUT.write_all(prompt).change_context(AppError::Read)?;
-    if input.read_into(buf, limit)? {
+    if input.read_into(cell, buf, limit)? {
         Ok(true)
     } else {
         eof_continues(cell)

@@ -1,15 +1,28 @@
-//! The buffered chunk reader behind `read_line`: 4 KiB reads with a
-//! persistent position, and the capped accumulation of one line's bytes.
+// mutants: -C --lib -C --test -C repl -C --test -C read -- -E 'test(/^repl::/) | binary(repl) | binary(read)'
+
+//! The buffered chunk reader behind `read_line`: 4 KiB reads and the capped
+//! accumulation of one line's bytes. On a stdin-fed session it shares the
+//! stdin buffer with the `read` builtin (task #630) through the two rules in
+//! [`shared`]: consult the buffer before any syscall, and yield what a line
+//! did not take to it.
+
+mod shared;
 
 use alloc::vec::Vec;
 use error_stack::{Report, ResultExt, bail};
 
 use crate::app::AppError;
+use crate::state::ShellState;
+use sys::fork_cell::ForkCell;
 
-/// Buffered stdin shared across `read_line` calls: a 4 KiB chunk can end
-/// mid-line, and bytes after a `\n` belong to the next line (a pipe has no
-/// pushback), so reads keep a persistent position. Byte-at-a-time reads
-/// cost one syscall per byte — ~5 s for a 64 MiB line on a fast host,
+use shared::{drain_shared, put_back_shared};
+
+/// Buffered stdin shared across `read_line` calls and, since task #630, with
+/// the `read` builtin's buffer through `shared`: a 4 KiB chunk can span two
+/// lines, and bytes after a `\n` belong to the next line — a pipe has no
+/// pushback, so the shared buffer, not this reader, is what persists across
+/// calls (the chunk is refilled from its head every time). Byte-at-a-time
+/// reads cost one syscall per byte — ~5 s for a 64 MiB line on a fast host,
 /// past the nextest slow-timeout on slow ones.
 pub(crate) struct LineReader {
     chunk: [u8; 4096],
@@ -26,11 +39,10 @@ impl LineReader {
         }
     }
 
-    /// Refill the chunk when exhausted; `false` on end of input.
+    /// Refill the chunk from stdin; `false` on end of input. The chunk is
+    /// empty on entry (task #630): a line's tail lives in the shared buffer,
+    /// never in this reader.
     fn fill(&mut self) -> Result<bool, Report<AppError>> {
-        if self.pos < self.len {
-            return Ok(true);
-        }
         self.len = sys::IN
             .read(&mut self.chunk)
             .change_context(AppError::Read)?;
@@ -46,24 +58,29 @@ impl LineReader {
             .ok_or_else(|| Report::new(AppError::Never))
     }
 
-    /// Advance the position past `n` consumed bytes.
+    /// Advance the position past `n` consumed bytes — within one `read_into`
+    /// call only (task #630): what the line does not take goes to the shared
+    /// buffer, never to a resting position in this reader.
     fn consume(&mut self, n: usize) {
         self.pos += n;
-    }
-
-    /// Consume the whole chunk.
-    fn consume_all(&mut self) {
-        self.pos = self.len;
     }
 
     /// Read from stdin into `buf` up to, not including, the terminating
     /// `\n`: `true` when a line completed, `false` on end of input. Fails
     /// with [`AppError::LineTooLarge`] once `buf` would grow past `limit`.
+    /// The shared buffer answers before any syscall; what a completed line
+    /// did not take from a syscall chunk goes back to it, so nothing stays
+    /// private here across calls and the builtin's drain-first reader sees
+    /// everything.
     pub(crate) fn read_into(
         &mut self,
+        cell: &ForkCell<ShellState>,
         buf: &mut Vec<u8>,
         limit: usize,
     ) -> Result<bool, Report<AppError>> {
+        if drain_shared(cell, buf, limit)? {
+            return Ok(true);
+        }
         loop {
             if !self.fill()? {
                 return Ok(false);
@@ -74,11 +91,12 @@ impl LineReader {
                     let head = avail.get(..i).ok_or(AppError::Never)?;
                     append_capped(buf, head, limit)?;
                     self.consume(i + 1);
+                    let tail = self.avail()?;
+                    put_back_shared(cell, tail)?;
                     return Ok(true);
                 }
                 None => {
                     append_capped(buf, avail, limit)?;
-                    self.consume_all();
                 }
             }
         }
