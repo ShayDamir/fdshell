@@ -19,7 +19,7 @@ pub use scope::*;
 pub use source::*;
 
 use error_stack::{Report, ResultExt};
-use sys::LocalFd;
+use sys::{LocalFd, SyscallError};
 
 use crate::error::redirect::OpenRedirectError;
 
@@ -54,8 +54,21 @@ impl Redirect {
                 .export_to(*export_to)
                 .change_context(OpenRedirectError::Open)
                 .map(|_| ()),
-            Self::Close { export_to } => sys::dup::close(*export_to)
-                .change_context_lazy(|| OpenRedirectError::CloseFd { n: *export_to }),
+            Self::Close { export_to } => match sys::dup::close(*export_to) {
+                // `EBADF` means the fd is not open, which is exactly the state the
+                // def asked for — bash ignores that errno and continues, so it is a
+                // silent success here too, not something the user can fix (§4.12).
+                Ok(()) => Ok(()),
+                Err(SyscallError::EBADF(_)) => Ok(()),
+                // Only a live fd answers another errno here (`EIO`/`ENOSPC`/`EINTR`
+                // on real devices); that close keeps its chain (§4.5).
+                Err(e) => {
+                    Err(Report::new(e).change_context(OpenRedirectError::CloseFd { n: *export_to }))
+                }
+            },
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
