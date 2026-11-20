@@ -20,7 +20,7 @@ pub(crate) fn parse_flags<'a>(args: &'a [ShortCStr]) -> Result<ReadFlags<'a>, Re
     let mut flags = ReadFlags {
         source: SourceFd::Stdin,
         max_bytes: None,
-        prompt: None,
+        prompt_word: None,
         raw: false,
         delim: None,
         timeout: None,
@@ -44,7 +44,12 @@ pub(crate) fn parse_flags<'a>(args: &'a [ShortCStr]) -> Result<ReadFlags<'a>, Re
                     .ok_or_else(|| reject('n', N_SUGGESTION))?;
                 flags.max_bytes = Some(n);
             }
-            b"-p" => flags.prompt = Some(bytes_arg(&mut iter, 'p')?),
+            b"-p" => {
+                next_arg(&mut iter, 'p')?;
+                // The operand's own word index: the iterator is now past it, so
+                // the words read so far are `args.len() - iter.len()`.
+                flags.prompt_word = Some(args.len() - iter.len() - 1);
+            }
             b"-r" => flags.raw = true,
             b"-d" => flags.delim = Some(bytes_arg(&mut iter, 'd')?),
             b"-t" => {

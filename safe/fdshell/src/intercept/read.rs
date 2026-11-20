@@ -12,6 +12,12 @@
 //! The `-p` prompt is drawn only when the resolved source fd is a terminal —
 //! bash tests the fd it reads from (stdin, `-u <rawfd>`, or `-u %FDVAR`), not
 //! stdin, and the fd is resolved before the prompt is written.
+//!
+//! The `-p` operand is an ordinary word, not a prompt string: bash decodes prompt
+//! escapes only for its four prompt drawers, so the operand goes through the
+//! normal word pipeline and the **first** field is what gets drawn — and the
+//! pipeline runs whether or not the prompt is. Only this word; the others stay
+//! raw (the expansion-policy task owns them).
 
 use error_stack::{Report, ResultExt};
 
@@ -20,6 +26,7 @@ use crate::error::read::ReadError;
 use crate::parse::CommandLine;
 use crate::state::ShellState;
 use sys::ScriptText;
+use sys::ShortCStr;
 use sys::fork_cell::ForkCell;
 
 use assign::assign_line;
@@ -30,6 +37,7 @@ use flags::source_is_tty;
 use io::read_line;
 use line::LineEnd;
 use putback::{put_back, take_pending};
+use words::prompt_operand;
 
 pub(crate) fn run_read(
     line: &[u8],
@@ -42,7 +50,10 @@ pub(crate) fn run_read(
     let flags = parse_flags(&cmdline.args)?;
     let targets = collect_targets(&cmdline.args)?;
 
-    let prompt_text = flags.prompt.unwrap_or(b"");
+    let prompt_text = match flags.prompt_word {
+        Some(index) => prompt_operand(index, cmdline, cell)?,
+        None => ShortCStr::default(),
+    };
     let resolved_fd: Option<sys::LocalFd> = match &flags.source {
         SourceFd::FdVar(var) => {
             let state = cell.borrow().change_context(CmdError::Read)?;
@@ -64,7 +75,7 @@ pub(crate) fn run_read(
     // terminal, so a resolved-fd failure (a missing var) precedes the write.
     if !prompt_text.is_empty() && source_is_tty(&flags.source, resolved_fd.as_ref())? {
         sys::ERR
-            .write_all(prompt_text)
+            .write_all(prompt_text.as_bytes().change_context(CmdError::Read)?)
             .change_context(CmdError::Read)?;
     }
 

@@ -4,11 +4,13 @@ use super::read_from_fd::read_line_from_fd;
 use super::words::split_fields;
 use super::*;
 use crate::capture::Capture;
+use crate::mask::MaskBit;
 use crate::parse::{BuiltinPrefix, CommandLine};
 use alloc::format;
 use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
+use sys::ImportedStr;
 use sys::ShortCStr;
 use sys::SyscallError;
 use sys::siginfo::WaitStatus;
@@ -22,7 +24,7 @@ fn make_flags(
     ReadFlags {
         source: SourceFd::Stdin,
         max_bytes: max,
-        prompt: None,
+        prompt_word: None,
         raw,
         delim,
         timeout,
@@ -123,7 +125,7 @@ fn test_parse_flags_empty() {
     let flags = parse_flags(&args).unwrap();
     assert!(matches!(flags.source, SourceFd::Stdin));
     assert!(flags.max_bytes.is_none());
-    assert!(flags.prompt.is_none());
+    assert!(flags.prompt_word.is_none());
     assert!(!flags.raw);
     assert!(flags.delim.is_none());
     assert!(flags.timeout.is_none());
@@ -203,7 +205,7 @@ fn test_parse_flags_n_invalid() {
 fn test_parse_flags_p_prompt() {
     let args = vec![c"-p".into(), c"Enter: ".into()];
     let flags = parse_flags(&args).unwrap();
-    assert_eq!(flags.prompt, Some(b"Enter: " as &[u8]));
+    assert_eq!(flags.prompt_word, Some(1));
 }
 
 #[test]
@@ -317,7 +319,7 @@ fn test_parse_flags_combined() {
     let flags = parse_flags(&args).unwrap();
     assert!(matches!(flags.source, SourceFd::RawFd(_)));
     assert_eq!(flags.max_bytes, Some(5));
-    assert_eq!(flags.prompt, Some(b"hi" as &[u8]));
+    assert_eq!(flags.prompt_word, Some(5));
     assert!(flags.raw);
     assert_eq!(flags.delim, Some(b":" as &[u8]));
     assert_eq!(flags.timeout, Some(2000));
@@ -378,7 +380,7 @@ fn test_parse_flags_unknown_arg_ignored() {
     let flags = parse_flags(&args).unwrap();
     assert!(matches!(flags.source, SourceFd::Stdin));
     assert!(flags.max_bytes.is_none());
-    assert!(flags.prompt.is_none());
+    assert!(flags.prompt_word.is_none());
     assert!(!flags.raw);
     assert!(flags.delim.is_none());
     assert!(flags.timeout.is_none());
@@ -1452,6 +1454,186 @@ fn source_is_tty_a_fd_var_clone_on_a_pty_is_a_terminal() {
     let args = vec![c"-u".into(), c"%MYFD".into()];
     let flags = parse_flags(&args).unwrap();
     assert!(source_is_tty(&flags.source, Some(&slave)).unwrap());
+}
+
+/// Task #623: the setup `run_read_prompt_is_drawn_on_a_tty_fd_var` builds by hand
+/// — an fd var on a pty slave, pre-fed from its master so the child's read answers
+/// at once — wrapped around the stderr harness. The master outlives the child, and
+/// the captured bytes are the prompt alone: the report never reaches this level.
+fn run_on_a_pty_fd_var(cell: &ForkCell<ShellState>, body: impl FnOnce() -> bool) -> Vec<u8> {
+    let (master, slave) = sys::pty::openpty().unwrap();
+    master.write(b"answer\n").unwrap();
+    {
+        let mut state = cell.borrow_mut().unwrap();
+        state.fds.insert(
+            c"MYFD".into(),
+            crate::state::FdVar {
+                fd: slave,
+                trace: sys::Trace::boundary(sys::Origin::Shell),
+            },
+        );
+    }
+    run_in_a_child_with_a_pipe_on_stderr(body)
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: `P[V] `): the `-p` operand is an
+/// ordinary word, and what is drawn is the pipeline's answer, not the word text.
+#[test]
+fn run_read_draws_the_expanded_operand() {
+    let cell = make_read_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(c"v".into(), ImportedStr::shell(ShortCStr::from(c"V")));
+    let args = vec![
+        c"-u".into(),
+        c"%MYFD".into(),
+        c"-p".into(),
+        c"P[$v]".into(),
+        c"var1".into(),
+    ];
+    let cmdline = make_read_cmdline(&args);
+    let line = make_read_line(&["read", "-u", "%MYFD", "-p", "P[$v]", "var1"]);
+
+    let captured = run_on_a_pty_fd_var(&cell, || {
+        run_read(&line, &cmdline, &text(&line), &cell).is_ok()
+    });
+    assert_eq!(captured, b"P[V]");
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: the operand `A B` draws `A`): the
+/// operand slot takes the **first** field of the expansion — the word is split by
+/// the pipeline first. Which name the second field becomes is the
+/// expansion-policy task's question, so this pin stops at the prompt.
+#[test]
+fn run_read_draws_the_first_field_of_a_split_operand() {
+    let cell = make_read_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(c"v".into(), ImportedStr::shell(ShortCStr::from(c"A B")));
+    let args = vec![
+        c"-u".into(),
+        c"%MYFD".into(),
+        c"-p".into(),
+        c"$v".into(),
+        c"var1".into(),
+    ];
+    let cmdline = make_read_cmdline(&args);
+    let line = make_read_line(&["read", "-u", "%MYFD", "-p", "$v", "var1"]);
+
+    let captured = run_on_a_pty_fd_var(&cell, || {
+        run_read(&line, &cmdline, &text(&line), &cell).is_ok()
+    });
+    assert_eq!(captured, b"A");
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20 on `P[$(touch made)]`: the file is
+/// made and nothing is drawn): an operand that expands to nothing draws nothing,
+/// and the read itself runs on. The assignment is checked by the child, which
+/// reports it as its exit status (LESSONS: the child must not panic).
+#[test]
+fn run_read_draws_nothing_for_an_operand_that_expands_empty() {
+    let cell = make_read_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(c"v".into(), ImportedStr::shell(ShortCStr::from(c"")));
+    let args = vec![
+        c"-u".into(),
+        c"%MYFD".into(),
+        c"-p".into(),
+        c"$v".into(),
+        c"var1".into(),
+    ];
+    let cmdline = make_read_cmdline(&args);
+    let line = make_read_line(&["read", "-u", "%MYFD", "-p", "$v", "var1"]);
+
+    let captured = run_on_a_pty_fd_var(&cell, || {
+        let read_ran = run_read(&line, &cmdline, &text(&line), &cell).is_ok();
+        let state = cell.borrow().unwrap();
+        read_ran
+            && state
+                .strings
+                .get::<ShortCStr>(&c"var1".into())
+                .map(|v| &v.value)
+                == Some(&c"answer".into())
+    });
+    assert!(captured.is_empty(), "nothing to draw: {captured:?}");
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: nothing): with no `-p`, a terminal
+/// source draws no prompt — the word pipeline serves the operand slot, and here
+/// there is no operand to serve.
+#[test]
+fn run_read_draws_nothing_without_a_prompt_flag() {
+    let cell = make_read_cell();
+    let args = vec![c"-u".into(), c"%MYFD".into(), c"var1".into()];
+    let cmdline = make_read_cmdline(&args);
+    let line = make_read_line(&["read", "-u", "%MYFD", "var1"]);
+
+    let captured = run_on_a_pty_fd_var(&cell, || {
+        run_read(&line, &cmdline, &text(&line), &cell).is_ok()
+    });
+    assert!(captured.is_empty(), "no `-p`, no prompt: {captured:?}");
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20: `nope: unbound variable`, and the
+/// builtin does not run): the operand's expansion failing is the answer, before
+/// any prompt byte and before any assignment. The report itself is the caller's,
+/// so an empty stderr is the pin; the child checks that nothing was assigned.
+#[test]
+fn run_read_reports_an_unbound_operand_and_runs_nothing() {
+    let cell = make_read_cell();
+    cell.borrow_mut().unwrap().options |= crate::options::NOUNSET;
+    let args = vec![
+        c"-u".into(),
+        c"%MYFD".into(),
+        c"-p".into(),
+        c"P[$nope]".into(),
+        c"var1".into(),
+    ];
+    let cmdline = make_read_cmdline(&args);
+    let line = make_read_line(&["read", "-u", "%MYFD", "-p", "P[$nope]", "var1"]);
+
+    let captured = run_on_a_pty_fd_var(&cell, || {
+        let failed = run_read(&line, &cmdline, &text(&line), &cell).is_err();
+        let state = cell.borrow().unwrap();
+        failed && state.strings.get::<ShortCStr>(&c"var1".into()).is_none()
+    });
+    assert!(
+        captured.is_empty(),
+        "the report is the caller's: {captured:?}"
+    );
+}
+
+/// Task #623 (bash 5.3.9 measured 2026-11-20 on `"P[$v]*"`: `P[V]* `): a quoted
+/// operand still expands — quoting protects the word from `IFS` splitting and
+/// pathname expansion (the no-glob half is pinned end to end in `tests/read.rs`),
+/// never from the expansion arms.
+#[test]
+fn run_read_expands_a_quoted_operand_and_keeps_its_glob_char() {
+    let cell = make_read_cell();
+    cell.borrow_mut()
+        .unwrap()
+        .strings
+        .insert(c"v".into(), ImportedStr::shell(ShortCStr::from(c"V")));
+    let args = vec![
+        c"-u".into(),
+        c"%MYFD".into(),
+        c"-p".into(),
+        c"P[$v]*".into(),
+        c"var1".into(),
+    ];
+    let mut cmdline = make_read_cmdline(&args);
+    let quoted = vec![MaskBit::from_quoted(true); 6];
+    cmdline.args_mask = vec![vec![], vec![], vec![], quoted, vec![]];
+    let line = make_read_line(&["read", "-u", "%MYFD", "-p", "P[$v]*", "var1"]);
+
+    let captured = run_on_a_pty_fd_var(&cell, || {
+        run_read(&line, &cmdline, &text(&line), &cell).is_ok()
+    });
+    assert_eq!(captured, b"P[V]*");
 }
 
 #[test]

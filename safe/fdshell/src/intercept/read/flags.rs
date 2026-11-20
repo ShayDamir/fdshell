@@ -9,7 +9,10 @@ use sys::ImportedFd;
 pub(crate) struct ReadFlags<'a> {
     pub source: SourceFd,
     pub max_bytes: Option<usize>,
-    pub prompt: Option<&'a [u8]>,
+    /// The `-p` operand's **word index** in the caller's argument list, not its
+    /// bytes: the operand is an ordinary word, so the call site expands it with
+    /// its own mask, spans and quoted bit, which are keyed by word index.
+    pub prompt_word: Option<usize>,
     pub raw: bool,
     pub delim: Option<&'a [u8]>,
     pub timeout: Option<u64>,

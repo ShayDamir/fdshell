@@ -2,6 +2,40 @@
 
 use alloc::vec::Vec;
 
+use crate::error::cmd::CmdError;
+use crate::parse::CommandLine;
+use crate::state::ShellState;
+use crate::substitute::substitute_args;
+use error_stack::{Report, ResultExt};
+use sys::ShortCStr;
+use sys::fork_cell::ForkCell;
+
+/// The `-p` operand, expanded: bash decodes prompt escapes only for its four
+/// prompt drawers, so the operand is an **ordinary word** — the normal word
+/// pipeline runs (substitution, `IFS` splitting, glob), and the operand slot
+/// takes the **first** field. The pipeline runs whether or not the prompt is
+/// drawn, exactly as bash's parse-time expansion does. Only this word: which
+/// fields the other words become is the expansion-policy task's question.
+pub(crate) fn prompt_operand(
+    index: usize,
+    cmdline: &CommandLine,
+    cell: &ForkCell<ShellState>,
+) -> Result<ShortCStr, Report<CmdError>> {
+    let word = cmdline.args.get(index).cloned().unwrap_or_default();
+    let masks = cmdline.args_mask.get(index).cloned().unwrap_or_default();
+    let spans = cmdline.args_span.get(index).cloned().unwrap_or_default();
+    let quoted = cmdline.args_quoted.get(index).copied().unwrap_or(false);
+    let fields = substitute_args(
+        core::slice::from_ref(&word),
+        core::slice::from_ref(&masks),
+        core::slice::from_ref(&spans),
+        core::slice::from_ref(&quoted),
+        cell,
+    )
+    .change_context(CmdError::Resolve)?;
+    Ok(fields.into_iter().next().unwrap_or_default())
+}
+
 /// The default IFS's whitespace, stripped at the line's edges before any field
 /// is assigned. The asymmetry with `CUT` below is deliberate: newline trims but
 /// does not cut (driving the cut set from `state.ifs` is task #158), and CR is
