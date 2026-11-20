@@ -2105,6 +2105,33 @@ traces `[] echo hi` where bash traces `[echo hi] echo hi`
 line per nested level where bash prints one
 (`tests/xtrace.rs::a_command_substitution_in_ps4_runs_per_line`).
 
+`PS0` (bash ≥ 5.1) is the third variable through the same pipeline and the only one of
+the four that is not a prompt: after reading a complete input line and before its
+command runs, its value is **expanded** — through this stage, under the same
+`promptvars` shopt — and **displayed**, not executed. bash's `NEWS` entry says
+"executed"; `man bash`, bash's `eval.c` and the measured behavior all say displayed, and
+the difference is observable: `PS0='echo FROMPS0'` prints the text `echo FROMPS0`, and
+`$?` survives the display (`tests/repl.rs::the_exit_status_survives_ps0`). It goes to
+**stderr** as bash writes it, with **no trailing newline**, and there is **no default
+string** — unset and set-empty both answer nothing, so the default `PS0` is a no-op. Its
+display runs **before** the command counter moves, so its `\#` shows the number of the
+command it accompanies
+(`tests/repl.rs::ps0_shows_the_number_of_the_command_it_accompanies`), and blank lines
+are not commands: they get neither a display nor a count. The interactive-only gate is
+`PS1`/`PS2`'s — nothing off a terminal — and so is the marker policy: a stray `\[…\]`
+keeps its readline byte exactly as bash's display does, while a **toggling** pair is
+consumed as a record split here, where bash's raw display prints its two bytes
+(`tests/repl.rs::a_toggling_marker_contributes_no_bytes_in_ps0`).
+
+Three `PS0` answers differ from bash, and the pins record fdshell's: a **parse error**
+is reported **after** the display (bash shows no display for a line it cannot parse —
+`tests/repl.rs::ps0_shows_before_a_parse_error_is_reported`), the verbose echo follows the
+display because fdshell echoes at execution time (bash echoes at read time, so its echo
+comes first — `tests/repl.rs::ps0_shows_before_the_verbose_echo`), and `$?` after a
+`$( … )` inside `PS0` is the substitution's status — the expansion stage's rule, shared
+with `PS1`/`PS2`, where bash keeps the command's own status
+(`tests/repl.rs::a_command_substitution_in_ps0_runs_per_use`).
+
 Nothing else expands here: **no tilde expansion**, **no pathname expansion**, **no
 field splitting** — `~ `, `* `, `a  b `, `a;b `, `a|b ` draw verbatim — and quote
 characters are **data**: they survive and they do not protect, so `"$v" ` draws

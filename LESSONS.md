@@ -12322,3 +12322,65 @@ Pins: `safe/fdshell/src/intercept/read/tests.rs`
 `safe/fdshell/tests/read.rs` (`no_names_assign_reply_the_raw_line`,
 `no_names_at_eof_clears_reply`, `an_explicit_reply_name_is_trimmed_like_any_target`,
 `reply_stays_out_of_the_child_environment`).
+
+## `PS0` is displayed, not executed, and its drawer answers are measured per stream (task #622)
+
+bash's `NEWS` entry for 5.1 says `PS0` is *executed*; `man bash` ("expanded … and
+displayed by interactive shells after reading a command and before the command is
+executed"), bash's own `eval.c` `reader_loop` (`decode_prompt_string` then
+`fprintf(stderr, "%s", ps0_string)`) and the measured behavior all say **displayed**:
+`PS0='echo FROMPS0'` prints the text `echo FROMPS0`, and a `PS0='echo L >> /tmp/f'`
+never creates the file. `PS0` is the only one of the four prompt variables that is not
+a prompt, and the exit-status pin is what keeps `NEWS`'s wording from being read as a
+command — a real execution would fail it, and the row is the required one.
+
+Its drawer policy is three points the pipeline already had, measured per stream against
+bash 5.3.9 on 2026-11-20, and no new mechanism: the tty gate is `PS1`/`PS2`'s — nothing
+off a terminal, and bash forced interactive over a pipe *does* show it, so the gate is
+interactivity (bash additionally wants **stderr** a tty: redirecting bash's stderr
+silences its prompts and `PS0` alike — not implemented here, fdshell's whole gate is the
+cached `interactive` flag). The `promptvars` shopt gates the expansion as it gates the
+two prompts and `PS4`. The marker policy is `PS1`/`PS2`'s `Markers::Bytes`, and it is a
+policy about the **record**, which is why it cannot cover the toggling arm: a toggling
+`\[…\]` is consumed as a split, so fdshell writes the region's bytes (`A\[B\]C` → `ABC`)
+where bash's raw display prints `A\001B\002C`, while a stray marker keeps its readline
+byte in both (`a\]b` → `a\002b`). There is **no default string** — unset and set-empty
+both answer nothing, so the default `PS0` is a no-op — and the drawer writes to stderr
+with **no trailing newline**. The display runs **before** the command counter moves:
+bash's own comment in `reader_loop` says so and the measured `\#` numbers agree — the
+display shows the number of the command it accompanies, and a blank line gets neither a
+display nor a count.
+
+Three orders are fdshell's own because its stages run at execution time, and the pins
+record fdshell's answer: the display precedes a **parse-error** report (bash shows no
+display for a line it cannot parse), and precedes the **verbose echo** (bash echoes at
+read time, so its echo comes first — the rule already in `safe/fdshell/src/verbose.rs`).
+And a `$( … )` inside `PS0` leaves the *substitution's* status in `$?`: that is the
+expansion stage's rule, shared with `PS1`/`PS2` — one fork per use — where bash keeps
+the command's own status.
+
+Pins: `safe/fdshell/src/repl/prompt/ps0/tests.rs`
+(`a_set_value_is_used_verbatim`, `unset_and_set_empty_answer_nothing`,
+`the_shopt_gates_the_expansion`, `a_stray_marker_keeps_its_readline_byte`,
+`a_toggling_marker_contributes_no_bytes`, `off_a_terminal_answers_nothing`), and the pty
+rows `safe/fdshell/tests/repl.rs::ps0_shows_between_the_read_line_and_the_command`,
+`safe/fdshell/tests/repl.rs::promptvars_off_shows_ps0_unexpanded`,
+`safe/fdshell/tests/repl.rs::ps0_unset_and_set_empty_show_nothing`,
+`safe/fdshell/tests/repl.rs::the_exit_status_survives_ps0`,
+`safe/fdshell/tests/repl.rs::a_command_substitution_in_ps0_runs_per_use`,
+`safe/fdshell/tests/repl.rs::ps0_shows_once_for_a_whole_construct`,
+`safe/fdshell/tests/repl.rs::ps0_shows_the_number_of_the_command_it_accompanies`,
+`safe/fdshell/tests/repl.rs::a_stray_marker_keeps_its_readline_byte_in_ps0`,
+`safe/fdshell/tests/repl.rs::a_toggling_marker_contributes_no_bytes_in_ps0`,
+`safe/fdshell/tests/repl.rs::ps0_is_displayed_on_the_stream_bash_uses`,
+`safe/fdshell/tests/repl.rs::no_ps0_off_a_terminal`,
+`safe/fdshell/tests/repl.rs::ps0_shows_before_what_the_command_itself_prints`,
+`safe/fdshell/tests/repl.rs::ps0_shows_before_a_parse_error_is_reported`,
+`safe/fdshell/tests/repl.rs::ps0_shows_before_the_verbose_echo`, and
+`safe/fdshell/tests/repl.rs::an_inherited_env_value_reaches_ps0`.
+
+Cross-reference (do not merge): LESSONS: "The two escape decoders have different grammars, and the record keeps the boundary (task #616)"
+(the marker byte is the drawer's answer — `PS0` is the drawer that shows the record's
+bytes raw) and LESSONS: "Test tty-gated behavior from safe-crate integration tests via `script`"
+(the pty rows above; their counts include the display for the row's own `exit`, and never
+a display for the read whose value was still empty).
